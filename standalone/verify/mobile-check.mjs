@@ -224,6 +224,20 @@ function measureScreen(opts) {
         tinyText, minText: Math.round(minText * 10) / 10, tinySample, zoomInputs: zoomInputs.sort()
     };
 
+    // ---- the touch text floor: a size it lifted renders at the floor. One
+    //      standing well above it was measured under a zoom that has since
+    //      changed (the empty-chart card at double size, Nov 2026).
+    let liftedOver = 0; const liftedSample = [];
+    for (const n of document.querySelectorAll('[data-ps-tf]')) {
+        const b = n.getBoundingClientRect(); if (b.width < 1 || b.height < 1) continue;
+        const px = parseFloat(getComputedStyle(n).fontSize) * (n.currentCSSZoom || 1);
+        if (px > 14.5) { liftedOver++; if (liftedSample.length < 4) liftedSample.push((n.textContent || '').trim().slice(0, 24) + ' [' + px.toFixed(1) + ']'); }
+    }
+    out.liftedOver = liftedOver; out.liftedSample = liftedSample;
+    // ---- a tooltip belongs to a hovering pointer or to keyboard focus. One
+    //      standing after a tap stays until the next tap somewhere else.
+    const tip = document.getElementById('ps-tip');
+    out.tipOpen = !!(tip && tip.hasAttribute('data-open') && tip.getBoundingClientRect().height > 2) ? (tip.textContent || '').trim().slice(0, 40) : '';
     // ---- the start dialog, while it is up: a card that runs past the
     //      dialog's edge is cut off there (the dialog scrolls, the page does
     //      not, so the page-width check cannot see it)
@@ -376,6 +390,12 @@ async function runDevice(browser, dev) {
         if (OUT) await page.screenshot({ path: path.join(OUT, dev.id + '-' + name + '.png'), timeout: 8000 }).catch(() => {});
         check(dev.id + '/' + name + '/overflowX', !m.overflowX,
             tag + name + ': nothing is wider than the screen (' + m.scrollW + ' in ' + profile.viewport.width + ')');
+        if (!CONTROL) check(dev.id + '/' + name + '/floorHolds', m.liftedOver === 0,
+            tag + name + ': no text the touch floor lifted stands above the floor (' + m.liftedOver + (m.liftedSample.length ? ': ' + m.liftedSample.join(', ') : '') + ')');
+        delete m.liftedSample;
+        if (!CONTROL) check(dev.id + '/' + name + '/noTip', !m.tipOpen,
+            tag + name + ': no tooltip is left standing after the taps that led here' + (m.tipOpen ? ' ("' + m.tipOpen + '")' : ''));
+        delete m.tipOpen;
         return m;
     }
     // Reach a workspace the way a finger does: through the navigator, which
@@ -444,6 +464,30 @@ async function runDevice(browser, dev) {
     // The control's three injected regressions are all judged by here, and
     // the squeezed buttons and hidden panel make the later steps untappable.
     if (CONTROL) { await ctx.close(); return result; }
+
+    // 3b. the text floor follows the zoom. A piece of interface text added
+    //     inside the chart host while the view is at 50% is lifted to twice
+    //     its size to read as 13px; back at 100% it must read as 13px still,
+    //     not 26.
+    const tf = await page.evaluate(async () => {
+        const sel = document.getElementById('ps-chart-zoom'), host = document.getElementById('psroot');
+        if (!sel || !host) return null;
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        const set = v => { sel.value = v; sel.dispatchEvent(new Event('change', { bubbles: true })); };
+        const before = sel.value;
+        set('0.5'); await wait(300);
+        const probe = document.createElement('p'); probe.style.cssText = 'font-size:11px;margin:0;position:absolute;left:0;top:0';
+        probe.textContent = 'text floor probe'; host.appendChild(probe); await wait(150);
+        const eff = () => Math.round(parseFloat(getComputedStyle(probe).fontSize) * (probe.currentCSSZoom || 1) * 10) / 10;
+        const small = eff(), smallZoom = probe.currentCSSZoom;
+        set('1'); await wait(350);
+        const back = eff(), backZoom = probe.currentCSSZoom;
+        probe.remove(); set(before); await wait(300);
+        return { small, smallZoom, back, backZoom };
+    });
+    if (tf) check(dev.id + '/floor/zoom', tf.smallZoom < 0.6 && Math.abs(tf.small - 13) < 0.8 && Math.abs(tf.back - 13) < 0.8,
+        tag + 'text lifted to the floor at 50% zoom still reads at the floor back at 100% (' + tf.small + ' px at zoom ' + tf.smallZoom + ', then ' + tf.back + ' px at zoom ' + tf.backZoom + ')');
+    else note(tag + 'no chart zoom control on this screen, so the floor-follows-zoom case did not run');
 
     // 4. the touch rules on the chart surface (mobile step 1). Each case
     //    starts from a closed editor, so what it reports is its own doing.
@@ -668,6 +712,51 @@ async function runDevice(browser, dev) {
             Math.hypot(b1.x - b0.x, (b1.y - b0.y) + pan) >= 0.6 * Math.hypot(30, 24);
     }
 
+    // 10. back on Charts: the "+" menu while the chart is zoomed out, which
+    //     is where a phone usually is (Fit was 53% for a grouped chart in the
+    //     simulator). Its tiles took their width from the zoomed chart and
+    //     their text from the floor, and every label ran over its tile.
+    await goWorkspace('chart');
+    const am = await page.evaluate(async () => {
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+        const sel = document.getElementById('ps-chart-zoom'); const btn = document.querySelector('.graphbuilder2-host button[aria-label="Add to chart"]');
+        if (!sel || !btn) return null;
+        const set = v => { sel.value = v; sel.dispatchEvent(new Event('change', { bubbles: true })); };
+        const before = sel.value; set('0.5'); await wait(350);
+        btn.click(); await wait(350);
+        const m = document.querySelector('[data-role="add-ann-menu"]');
+        const out = { open: !!m && getComputedStyle(m).display !== 'none', tiles: 0, over: 0, small: 0, outside: 0, vw: window.innerWidth };
+        if (out.open) {
+            const mr = m.getBoundingClientRect();
+            if (mr.left < -1 || mr.right > window.innerWidth + 1) out.outside++;
+            for (const b of m.querySelectorAll('button')) {
+                const r = b.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+                out.tiles++;
+                if (b.scrollWidth > b.clientWidth + 1 || r.right > mr.right + 1) out.over++;
+                if (r.width < 40 || r.height < 36) out.small++;
+            }
+        }
+        btn.click(); await wait(200); set(before); await wait(350);
+        return out;
+    });
+    if (am) check(dev.id + '/addmenu', am.open && am.tiles >= 4 && am.over === 0 && am.small === 0 && am.outside === 0,
+        tag + 'the "+" menu at 50% zoom: every tile holds its label, is finger-sized and sits on the screen (' + am.tiles + ' tiles, ' + am.over + ' overflowing, ' + am.small + ' small, ' + am.outside + ' off screen)');
+    // 11. a second chart, then back to the first by ONE tap on its tab, and no
+    //     tooltip left over the toolbar afterwards.
+    const tabsBefore = await page.locator('#ps-tabs [role="tab"]').count();
+    await page.locator('.ps-tab-add').tap(); await page.waitForTimeout(500);
+    const card = page.locator('#ps-analysis-grid .ps-analysis-card').first();
+    if (await card.isVisible().catch(() => false)) {
+        await card.tap(); await page.waitForTimeout(1500);
+        const tabs = page.locator('#ps-tabs [role="tab"]');
+        const made = (await tabs.count()) === tabsBefore + 1;
+        await tabs.first().tap(); await page.waitForTimeout(1100);
+        const st = await page.evaluate(() => { const t = document.querySelector('#ps-tabs [role="tab"]'); const tip = document.getElementById('ps-tip');
+            return { first: !!t && t.getAttribute('aria-selected') === 'true', tip: !!(tip && tip.hasAttribute('data-open') && tip.getBoundingClientRect().height > 2) }; });
+        result.touch.tabTapSwitches = made && st.first;
+        check(dev.id + '/tabs/tip', !st.tip, tag + 'a tap on a chart tab leaves no tooltip standing over the toolbar');
+    }
+
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
     return result;
@@ -775,6 +864,31 @@ if (!CONTROL && !CONTROL_TH) {
     const src = readFileSync(pageUrl.replace(/^file:\/\//, ''), 'utf8');
     const css = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
     const bare = (css.match(/[^-\w](\d+(?:\.\d+)?)vh\b/g) || []).length;
+    // iPhone Safari plays a hover before a tap's click and, when that hover
+    // makes something appear, stops there: the tap is spent and no click is
+    // sent. No emulated browser does this, so it is read from the stylesheet:
+    // a :hover rule that shows or hides something must sit inside
+    // @media (hover: hover).
+    const reveal = [];
+    (function walk(text, guarded) {
+        let i = 0;
+        while (i < text.length) {
+            const open = text.indexOf('{', i); if (open === -1) break;
+            const prelude = text.slice(i, open).trim();
+            let depth = 1, j = open + 1;
+            while (j < text.length && depth > 0) { const c = text[j]; if (c === '{') depth++; else if (c === '}') depth--; j++; }
+            const body = text.slice(open + 1, j - 1);
+            if (prelude.startsWith('@')) {
+                if (/^@(media|supports|layer|container)/.test(prelude)) walk(body, guarded || /hover:\s*hover/.test(prelude));
+            } else if (!guarded && /:hover/.test(prelude) &&
+                       (/(^|[;\s])(visibility|display)\s*:/.test(body) || (/(^|[;\s])opacity\s*:/.test(body) && /:hover\s*[ >+~]\s*\S/.test(prelude)))) {
+                reveal.push(prelude.replace(/\s+/g, ' ').slice(0, 60));
+            }
+            i = j;
+        }
+    })(css, false);
+    check('source/hover-reveal', reveal.length === 0,
+        'source: no hover rule shows or hides content outside @media (hover: hover), where an iPhone tap would be spent on it (' + (reveal.length ? reveal.join(' | ') : 'none') + ')');
     check('source/visible-height', /--ps-vh:\s*100dvh/.test(css) && /\.ps-page\s*\{[^}]*height:\s*var\(--ps-vh\)/.test(css) && bare === 1,
         'source: the page and its dialogs are sized by the visible height (--ps-vh), with one vh fallback and no other bare vh (' + bare + ' found)');
 }

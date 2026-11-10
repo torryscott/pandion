@@ -905,8 +905,15 @@
     visibility: hidden; min-width: 20px; min-height: 20px;
     margin-left: 2px; margin-right: -4px;
   }
-  .ps-tab:hover .ps-tab-x, .ps-tab:focus-within .ps-tab-x,
+  .ps-tab:focus-within .ps-tab-x,
   .ps-tab.ps-tab-active .ps-tab-x { visibility: visible; }
+  /* Only where a pointer can hover. On an iPhone a tap first plays the
+     hover, and when that hover makes something appear Safari stops there
+     and sends no click: every tab but the open one took two taps to open
+     (measured in the iPhone simulator, Nov 2026). */
+  @media (hover: hover) {
+    .ps-tab:hover .ps-tab-x { visibility: visible; }
+  }
   /* The keyboard/screen-reader close lives OUTSIDE the tablist (a real
      button among tablist children is an axe aria-required-children
      violation) and appears only when keyboard focus reaches it - the
@@ -4895,6 +4902,24 @@
   body.ps-touch [data-role="color-picker"] [data-role="lightness"] { margin-top: 14px !important; }
   body.ps-touch [data-role="color-picker"] [data-role="hue-marker"],
   body.ps-touch [data-role="color-picker"] [data-role="lightness-marker"] { width: 8px !important; }
+  /* The "+" menu is positioned inside the zoomed chart wrap and is the one
+     toolbar menu the chrome counter-zoom leaves out. On a phone Fit is
+     about half size, so its 90px tiles drew 47px wide while the text floor
+     held their labels at 13px: every label ran over its tile. Here it is
+     drawn at true size like the other two menus, against the wrap's left
+     edge (its own right offset is worked out for the zoomed wrap and would
+     land it off the screen). */
+  body.ps-touch #psroot [data-role="add-ann-menu"] {
+    zoom: var(--ps-chrome-zoom, 1);
+    left: 0 !important; right: auto !important;
+    max-width: calc(100vw - 28px) !important;
+  }
+  /* Its tile area carries a width worked out for the zoomed wrap as well
+     (559px of wrap is 294px of screen at Fit 53%); at true size that is
+     wider than the menu, and the last tiles of each row were cut off. */
+  body.ps-touch #psroot [data-role="add-ann-menu"] > div > div {
+    width: auto !important; min-width: 0 !important;
+  }
   /* The start dialog on a phone: 28px of margin outside the card and 28px
      inside it left the cards 288px of a 402px screen. */
   @media (max-width: 560px) {

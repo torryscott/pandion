@@ -15,6 +15,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "welcome": {
       "cards": 7,
       "past": 0,
@@ -34,6 +35,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 369,
       "h": 251,
@@ -58,6 +60,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 369,
       "h": 251,
@@ -98,6 +101,7 @@
      "tinyText": 0,
      "minText": 12,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": []
     },
     "notebook": {
@@ -112,6 +116,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": []
     },
     "layout": {
@@ -126,6 +131,7 @@
      "tinyText": 1,
      "minText": 10,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": []
     }
    },
@@ -144,7 +150,8 @@
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
     "layoutSwipeLeavesItem": true,
-    "layoutItemDragMoves": true
+    "layoutItemDragMoves": true,
+    "tabTapSwitches": true
    }
   },
   "phone-landscape": {
@@ -161,6 +168,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "welcome": {
       "cards": 7,
       "past": 0,
@@ -179,6 +187,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 720,
       "h": 490,
@@ -202,6 +211,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 720,
       "h": 490,
@@ -240,7 +250,8 @@
      "under44": 4,
      "tinyText": 0,
      "minText": 12,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "notebook": {
      "vw": 750,
@@ -253,7 +264,8 @@
      "under44": 1,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "layout": {
      "vw": 750,
@@ -266,7 +278,8 @@
      "under44": 10,
      "tinyText": 1,
      "minText": 10,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     }
    },
    "touch": {
@@ -284,7 +297,8 @@
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
     "layoutSwipeLeavesItem": true,
-    "layoutItemDragMoves": true
+    "layoutItemDragMoves": true,
+    "tabTapSwitches": true
    }
   },
   "android": {
@@ -301,6 +315,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "welcome": {
       "cards": 7,
       "past": 0,
@@ -319,6 +334,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 390,
       "h": 265,
@@ -342,6 +358,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 390,
       "h": 265,
@@ -380,7 +397,8 @@
      "under44": 3,
      "tinyText": 0,
      "minText": 12,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "notebook": {
      "vw": 412,
@@ -393,7 +411,8 @@
      "under44": 5,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "layout": {
      "vw": 412,
@@ -406,7 +425,8 @@
      "under44": 10,
      "tinyText": 1,
      "minText": 10,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     }
    },
    "touch": {
@@ -424,7 +444,8 @@
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
     "layoutSwipeLeavesItem": true,
-    "layoutItemDragMoves": true
+    "layoutItemDragMoves": true,
+    "tabTapSwitches": true
    }
   },
   "tablet": {
@@ -441,6 +462,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "welcome": {
       "cards": 7,
       "past": 0,
@@ -460,6 +482,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 344,
       "h": 234,
@@ -484,6 +507,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 344,
       "h": 234,
@@ -527,6 +551,7 @@
      "tinyText": 0,
      "minText": 12,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": [
       "label-content-name-mismatch (1)"
      ]
@@ -543,6 +568,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": [
       "label-content-name-mismatch (1)"
      ]
@@ -559,6 +585,7 @@
      "tinyText": 1,
      "minText": 10,
      "zoomInputs": [],
+     "liftedOver": 0,
      "axe": [
       "label-content-name-mismatch (1)"
      ]
@@ -579,7 +606,8 @@
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
     "layoutSwipeLeavesItem": true,
-    "layoutItemDragMoves": true
+    "layoutItemDragMoves": true,
+    "tabTapSwitches": true
    }
   },
   "tablet-landscape": {
@@ -596,6 +624,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "welcome": {
       "cards": 7,
       "past": 0,
@@ -616,6 +645,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 456,
       "h": 310,
@@ -641,6 +671,7 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "liftedOver": 0,
      "chart": {
       "w": 456,
       "h": 310,
@@ -682,7 +713,8 @@
      "under44": 8,
      "tinyText": 0,
      "minText": 12,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "notebook": {
      "vw": 1024,
@@ -697,7 +729,8 @@
      "under44": 9,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     },
     "layout": {
      "vw": 1024,
@@ -712,7 +745,8 @@
      "under44": 24,
      "tinyText": 1,
      "minText": 10,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "liftedOver": 0
     }
    },
    "touch": {
@@ -730,7 +764,8 @@
     "notebookTapSelects": true,
     "notebookNoteEdits": true,
     "layoutSwipeLeavesItem": true,
-    "layoutItemDragMoves": true
+    "layoutItemDragMoves": true,
+    "tabTapSwitches": true
    }
   }
  }
