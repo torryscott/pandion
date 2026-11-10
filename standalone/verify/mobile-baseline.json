@@ -15,6 +15,11 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "welcome": {
+      "cards": 7,
+      "past": 0,
+      "overflow": 0
+     },
      "axe": []
     },
     "chart": {
@@ -68,6 +73,14 @@
       "visible": 1,
       "h": 279,
       "w": 372,
+      "visiblePx": 279,
+      "headerInView": true,
+      "strips": {
+       "hue": 28,
+       "lightness": 28,
+       "gap": 14,
+       "lightnessTouchAction": "none"
+      },
       "tabs": 5,
       "clippedTabs": 0
      },
@@ -147,7 +160,12 @@
      "under44": 2,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "welcome": {
+      "cards": 7,
+      "past": 0,
+      "overflow": 0
+     }
     },
     "chart": {
      "vw": 750,
@@ -177,10 +195,10 @@
      "vh": 342,
      "scrollW": 750,
      "overflowX": false,
-     "targets": 8,
+     "targets": 21,
      "under24": [],
      "under24Spaced": 0,
-     "under44": 1,
+     "under44": 8,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -188,7 +206,7 @@
       "w": 720,
       "h": 490,
       "scale": 1,
-      "visible": 0.42,
+      "visible": 0.17,
       "texts": 11,
       "textMin": 15,
       "textUnder9": 0,
@@ -196,9 +214,17 @@
      },
      "editor": {
       "open": true,
-      "visible": 0,
+      "visible": 0.5,
       "h": 240,
       "w": 720,
+      "visiblePx": 121,
+      "headerInView": true,
+      "strips": {
+       "hue": 28,
+       "lightness": 28,
+       "gap": 14,
+       "lightnessTouchAction": "none"
+      },
       "tabs": 5,
       "clippedTabs": 0
      }
@@ -274,7 +300,12 @@
      "under44": 2,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "welcome": {
+      "cards": 7,
+      "past": 0,
+      "overflow": 0
+     }
     },
     "chart": {
      "vw": 412,
@@ -326,6 +357,14 @@
       "visible": 1,
       "h": 352,
       "w": 394,
+      "visiblePx": 352,
+      "headerInView": true,
+      "strips": {
+       "hue": 28,
+       "lightness": 28,
+       "gap": 14,
+       "lightnessTouchAction": "none"
+      },
       "tabs": 5,
       "clippedTabs": 0
      }
@@ -402,6 +441,11 @@
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
+     "welcome": {
+      "cards": 7,
+      "past": 0,
+      "overflow": 0
+     },
      "axe": []
     },
     "chart": {
@@ -455,6 +499,14 @@
       "visible": 1,
       "h": 430,
       "w": 347,
+      "visiblePx": 430,
+      "headerInView": true,
+      "strips": {
+       "hue": 28,
+       "lightness": 28,
+       "gap": 14,
+       "lightnessTouchAction": "none"
+      },
       "tabs": 5,
       "clippedTabs": 0
      },
@@ -543,7 +595,12 @@
      "under44": 2,
      "tinyText": 0,
      "minText": 13,
-     "zoomInputs": []
+     "zoomInputs": [],
+     "welcome": {
+      "cards": 7,
+      "past": 0,
+      "overflow": 0
+     }
     },
     "chart": {
      "vw": 1024,
@@ -599,6 +656,14 @@
       "visible": 1,
       "h": 323,
       "w": 461,
+      "visiblePx": 323,
+      "headerInView": true,
+      "strips": {
+       "hue": 28,
+       "lightness": 28,
+       "gap": 14,
+       "lightnessTouchAction": "none"
+      },
       "tabs": 5,
       "clippedTabs": 0
      }

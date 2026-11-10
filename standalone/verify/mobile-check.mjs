@@ -224,6 +224,18 @@ function measureScreen(opts) {
         tinyText, minText: Math.round(minText * 10) / 10, tinySample, zoomInputs: zoomInputs.sort()
     };
 
+    // ---- the start dialog, while it is up: a card that runs past the
+    //      dialog's edge is cut off there (the dialog scrolls, the page does
+    //      not, so the page-width check cannot see it)
+    const wc = document.querySelector('.ps-welcome-card');
+    if (wc && wc.getBoundingClientRect().height > 20 && getComputedStyle(wc).visibility !== 'hidden') {
+        const cr = wc.getBoundingClientRect(); let past = 0, cards = 0;
+        for (const c of wc.querySelectorAll('.ps-launch-action, .ps-template-card, .ps-recent-item')) {
+            const b = c.getBoundingClientRect(); if (b.width < 1 || b.height < 1) continue;
+            cards++; if (b.right > cr.right + 1 || b.left < cr.left - 1) past++;
+        }
+        out.welcome = { cards, past, overflow: Math.max(0, wc.scrollWidth - wc.clientWidth) };
+    }
     // ---- the chart, when this screen shows one
     if (opts && opts.chart && chartSvg) {
         const r = chartSvg.getBoundingClientRect();
@@ -269,6 +281,19 @@ function measureScreen(opts) {
             const clipped = tabs.filter(t => { const b = t.getBoundingClientRect(); return b.width > 0 && (b.right > Math.min(pb.right, vw) + 1 || b.left < pb.left - 1); }).length;
             out.editor.visible = Math.round(vis / all * 100) / 100;
             out.editor.h = Math.round(pb.height); out.editor.w = Math.round(pb.width);
+            // The height of the editor inside the pane it scrolls in: what a
+            // person sees of it without scrolling, from its header down.
+            const pane = document.getElementById('ps-main-workspace');
+            const pr2 = pane ? pane.getBoundingClientRect() : { top: 0, bottom: vh };
+            out.editor.visiblePx = Math.round(Math.max(0, Math.min(pb.bottom, pr2.bottom, vh) - Math.max(pb.top, pr2.top, 0)));
+            out.editor.headerInView = pb.top >= Math.max(pr2.top, 0) - 1 && pb.top < Math.min(pr2.bottom, vh) - 40;
+            const hue = document.querySelector('[data-role="color-picker"] [data-role="hue"]');
+            const lig = document.querySelector('[data-role="color-picker"] [data-role="lightness"]');
+            if (hue && lig) {
+                const hb = hue.getBoundingClientRect(), lb = lig.getBoundingClientRect();
+                out.editor.strips = { hue: Math.round(hb.height), lightness: Math.round(lb.height), gap: Math.round(lb.top - hb.bottom),
+                    lightnessTouchAction: getComputedStyle(lig).touchAction };
+            }
             out.editor.tabs = tabs.length; out.editor.clippedTabs = clipped;
         }
     }
@@ -376,8 +401,12 @@ async function runDevice(browser, dev) {
     check(dev.id + '/touchmode', await page.evaluate(() => document.body.classList.contains('ps-touch')),
         tag + 'the touch density is on (the primary pointer is a finger)');
     if (CONTROL) await page.evaluate(() => { const d = document.createElement('div'); d.id = 'ps-mobile-control-wide'; d.style.cssText = 'position:absolute;left:0;top:0;width:900px;height:1px'; document.body.appendChild(d); });
-    await screen('start');
+    const m1 = await screen('start');
     if (CONTROL) { await unctl(); await page.waitForTimeout(200); }
+    // Found in real Safari, Nov 2026: the dialog's one column took its width
+    // from the longest one-line description and the cards ran off its edge.
+    if (!CONTROL) check(dev.id + '/start/cards', !!m1.welcome && m1.welcome.cards >= 4 && m1.welcome.past === 0 && m1.welcome.overflow <= 1,
+        tag + 'start: every start card stays inside the dialog (' + (m1.welcome ? m1.welcome.past + ' of ' + m1.welcome.cards + ' past its edge, ' + m1.welcome.overflow + ' px of sideways scroll' : 'no dialog') + ')');
 
     // 2. the chart workspace with the example loaded, by tap
     await page.locator('#ps-welcome-sample').tap(); await page.waitForTimeout(2400);
@@ -400,6 +429,18 @@ async function runDevice(browser, dev) {
     const m3 = await screen('editor', { chart: true, editor: true });
     result.touch.barTapOpensEditor = !!(m3.editor && m3.editor.open);
     check(dev.id + '/editor/open', result.touch.barTapOpensEditor, tag + 'a tap on a bar opens its editor');
+    if (!CONTROL) {
+        // Open is not the same as seen. On a short window (a phone held
+        // sideways) the editor used to open entirely below the fold.
+        const e3 = m3.editor || {};
+        check(dev.id + '/editor/seen', e3.visiblePx >= 90,
+            tag + 'the editor that a tap opens is in view, header and first row at least (' + e3.visiblePx + ' px of ' + e3.h + ')');
+        // A finger cannot tell an 11 px hue strip from the lightness strip
+        // 5 px under it.
+        if (e3.strips) check(dev.id + '/editor/strips', e3.strips.hue >= 24 && e3.strips.lightness >= 24 && e3.strips.gap >= 8 && e3.strips.lightnessTouchAction === 'none',
+            tag + 'the hue and lightness strips are finger-sized and each is its own drag surface (' + e3.strips.hue + ' and ' + e3.strips.lightness + ' px tall, ' + e3.strips.gap + ' px apart)');
+        else note(tag + 'no colour picker was docked on this screen, so its strips went unmeasured');
+    }
     // The control's three injected regressions are all judged by here, and
     // the squeezed buttons and hidden panel make the later steps untappable.
     if (CONTROL) { await ctx.close(); return result; }
@@ -723,6 +764,20 @@ function compare(devId, got, base) {
 }
 
 // ------------------------------------------------------------------- run
+// The page is sized by the height a person can see. An emulated phone has no
+// browser toolbar, so vh and dvh agree here and no measurement can tell them
+// apart; real Safari counts the space under its toolbar in vh, and the whole
+// status row sat under it (measured in the iPhone simulator, Nov 2026: 754
+// against 714 upright, 402 against 292 sideways). So this one is read from
+// the stylesheet: one definition of the visible height, and nothing sized by
+// a bare vh beside it.
+if (!CONTROL && !CONTROL_TH) {
+    const src = readFileSync(pageUrl.replace(/^file:\/\//, ''), 'utf8');
+    const css = (src.match(/<style[^>]*>[\s\S]*?<\/style>/g) || []).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+    const bare = (css.match(/[^-\w](\d+(?:\.\d+)?)vh\b/g) || []).length;
+    check('source/visible-height', /--ps-vh:\s*100dvh/.test(css) && /\.ps-page\s*\{[^}]*height:\s*var\(--ps-vh\)/.test(css) && bare === 1,
+        'source: the page and its dialogs are sized by the visible height (--ps-vh), with one vh fallback and no other bare vh (' + bare + ' found)');
+}
 const browser = await chromium.launch();
 const measured = {};
 for (const dev of DEVICES) {
