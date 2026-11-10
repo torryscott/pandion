@@ -51,7 +51,34 @@
     for (var i = 0; i < list.length; i++) if (visible(list[i])) return list[i];
     return null;
   }
+  // A phone lays the same app out differently (workspace tabs along the
+  // bottom, Setup and More by name, Open and Save under Menu), so a step
+  // may carry a `phone` object that replaces its target, title or body
+  // there. Without one the step is shown as written.
+  function onPhone() {
+    try { return document.body.classList.contains("ps-phone"); } catch (e) { return false; }
+  }
+  function onTouch() {
+    try { return document.body.classList.contains("ps-touch"); } catch (e) { return false; }
+  }
+  function stepOf(step) {
+    if (!step || !step.phone || !onPhone()) return step;
+    var out = {}, k;
+    for (k in step) if (k !== "phone") out[k] = step[k];
+    for (k in step.phone) out[k] = step.phone[k];
+    return out;
+  }
+  // A finger taps, and touches and holds. It does not click or right-click.
+  function touchWords(text) {
+    if (!text || !onTouch()) return text;
+    return String(text)
+      .replace(/\bRight-click\b/g, "Touch and hold").replace(/\bright-click\b/g, "touch and hold")
+      .replace(/\bDouble-click\b/g, "Double-tap").replace(/\bdouble-click\b/g, "double-tap")
+      .replace(/\bClicking\b/g, "Tapping").replace(/\bclicking\b/g, "tapping")
+      .replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
+  }
   function resolveTargets(step) {
+    step = stepOf(step);
     var specs = step && step.target ? [].concat(step.target) : [];
     var out = [];
     for (var i = 0; i < specs.length; i++) {
@@ -213,7 +240,8 @@
     if (i < 0) i = 0;
     if (i >= n) i = n - 1;
     live.i = i; live.rect = null; live.posKey = "";
-    var step = steps[i];
+    var step = stepOf(steps[i]);
+    step = { title: touchWords(step.title), body: touchWords(step.body) };
     ui.eyebrow.textContent = live.tour.title + " \u00b7 " + (i + 1) + " of " + n;
     ui.title.textContent = step.title || "";
     ui.body.textContent = step.body || "";
@@ -332,15 +360,22 @@
     title: "App tour",
     steps: [
       { target: ".ps-workspace-switcher", optional: true,
+        phone: { target: "#ps-phone-nav" },
         title: "Four rooms, one project",
         body: "Data is the sheet. Charts is where figures are built. Notebook keeps the moments you decide to keep. Layouts arranges figures for print." },
       { target: ["#ps-project-nav", "#ps-project-add"], optional: true,
+        phone: { target: "#ps-tabs",
+                 body: "Every chart, section and layout you make is listed along the top of its room. Tap one to switch to it; the plus makes a new one." },
         title: "Your documents",
         body: "Every chart, section and layout you make is listed here. Click one to switch to it; the plus makes a new chart or layout." },
       { target: ["#ps-load", "#ps-save"], optional: true,
+        phone: { target: "#ps-narrow-menu",
+                 body: "A .pand project file holds the data, every chart, the notebook and your saved palettes. Save project writes one; Open reads it back. Both are under Menu. Browser storage is only the autosave." },
         title: "Open and Save project",
         body: "A .pand project file holds the data, every chart, the notebook and your saved palettes. Save project writes one; Open reads it back. Browser storage is only the autosave." },
       { target: '[data-ps-menu="help"]', optional: true,
+        phone: { target: "#ps-narrow-menu",
+                 body: "Help holds Chart basics, Which graph should I use, Check my chart, the glossary, and a tour of each room. It is under Menu." },
         title: "Help",
         body: "Help holds Chart basics, Which graph should I use, Check my chart, the glossary, and a tour of each room." },
       { title: "The whole trick",
@@ -352,6 +387,7 @@
     prepare: inWorkspace("data"),
     steps: [
       { target: function () { var h = document.getElementById("ps-grid-col-0"); return h && h.parentElement; },
+        phone: { body: "The icon in each header is the measure type: nominal, ordinal, continuous or ID. Tap a header, then Properties, to see the variable's properties and summary." },
         title: "Columns are variables",
         body: "The icon in each header is the measure type: nominal, ordinal, continuous or ID. Click a header to see the variable's properties and summary on the right." },
       { target: ".ps-grid-role", optional: true,
@@ -361,15 +397,19 @@
         title: "Editing",
         body: "Type straight into cells; Add row appends one. Every edit autosaves, and these arrows undo and redo." },
       { target: "#ps-data-find-btn",
+        phone: { body: "Find searches the whole sheet and steps through the matches." },
         title: "Find",
         body: "Find searches the whole sheet and steps through the matches. Cmd or Ctrl+F opens it from anywhere in the grid." },
       { target: ["#ps-data-filter-btn", "#ps-data-hidden-columns"],
         title: "Filter and Columns",
         body: "Filter keeps rows out of every chart without deleting them; the button shows the row count while a filter is on. Columns hides and shows columns." },
       { target: "#ps-settings-panel", optional: true,
+        phone: { target: "#ps-phone-setup-data",
+                 body: "Select a column and Properties shows its type, levels, missing values, and a summary with the mean, median and mode." },
         title: "Variable properties",
         body: "Select a column and this rail fills with its properties: type, levels, missing values, and a summary with the mean, median and mode." },
       { target: "#ps-export", optional: true,
+        phone: { target: "#ps-phone-export" },
         title: "Export data",
         body: "Export writes the sheet out as a CSV or Excel file." },
       { title: "The source of truth",
@@ -381,6 +421,7 @@
     prepare: inWorkspace("pinboard"),
     steps: [
       { target: "#ps-pinscroll",
+        phone: { body: "In Charts, tap Keep, or press Keep on a comparison in the Statistics panel. Each becomes a page here, with its numbers and where it came from." },
         title: "How a page arrives",
         body: "Right-click a chart and choose Keep, or press Keep on a comparison in the Statistics panel. Each becomes a page here, with its numbers and where it came from." },
       { target: "#ps-tabs", optional: true,
@@ -390,9 +431,12 @@
         title: "A page's verbs",
         body: "Under each page: Send to layout, Copy image, Export, Delete." },
       { target: "#ps-inspector-pinboard", optional: true,
+        phone: { target: "#ps-phone-setup", title: "Details",
+                 body: "Tap a page, then Details: it says when the page was kept and what it came from, and holds your notes about it." },
         title: "The page rail",
         body: "Click a page and this rail says when it was kept and what it came from, and holds your notes about it." },
       { target: "#ps-export", optional: true,
+        phone: { target: "#ps-phone-export" },
         title: "Export Notebook",
         body: "Export writes the notebook out as a document, pages in order." },
       { title: "Pages stay honest",
@@ -410,12 +454,16 @@
         title: "Add chart, Add text",
         body: "Add chart puts a live chart on the page and From Notebook drops in a kept one. Add text and Panel label give titles and letters." },
       { target: "#ps-lcanvas", optional: true,
+        phone: { body: "Touch and hold an item, then drag to place it. Snap and Smart guides line things up." },
         title: "The page",
         body: "Drag an item to place it, its corners to resize it. Snap and Smart guides in the rail line things up." },
       { target: "#ps-inspector-layout", optional: true,
+        phone: { target: "#ps-phone-setup",
+                 body: "Page size, orientation, margins, the grid and snapping live under Properties." },
         title: "Layout properties",
         body: "Page size, orientation, margins, the grid and snapping live here." },
       { target: "#ps-export", optional: true,
+        phone: { target: "#ps-phone-export" },
         title: "Export layout",
         body: "Export writes a PDF or image at the exact page size." },
       { title: "Keep first, arrange later",
@@ -456,6 +504,8 @@
     // checks in the status line, Export, and the Help menu to close.
     steps: [
       { target: "#ps-slots", optional: true,
+        phone: { target: "#ps-phone-setup",
+                 body: "Pick an Analysis, then choose a variable for each role. The roles are named by what they do: Category axis, Value axis. The chart redraws as you fill them." },
         title: "Chart setup",
         body: "Pick an Analysis, then drop a variable on each role. The roles are named by what they do: Category axis, Value axis. The chart redraws as you fill them." },
       { target: ['#psroot svg[data-role="gb2-chart-svg"]', "#psroot svg"],
@@ -468,18 +518,28 @@
         title: "The numbers",
         body: "Stats opens the statistics panel: the numbers behind the chart, comparisons between groups with brackets you can place, and Keep, which sends a result to the Notebook." },
       { target: ['button[aria-label$="hide elements"]', 'button[aria-label="Chart settings"]', '[data-role="setting-search-trigger"]'],
+        phone: { target: "#ps-phone-more",
+                 body: "Show or hide parts hides parts of the chart and brings them back. Chart settings holds the whole-chart options. Find searches every setting by name when you cannot remember where one lives. All three are under More." },
         title: "Hide, settings, find",
         body: "The eye hides parts of the chart and brings them back. Settings holds the whole-chart options. Find searches every setting by name when you cannot remember where one lives." },
       { target: 'button[aria-label="Add to chart"]',
+        phone: { target: "#ps-phone-more",
+                 body: "Add puts things on the chart: error bars, data points, reference lines, brackets. Each opens its own panel once it is there. It is under More." },
         title: "Add to the chart",
         body: "Add puts things on the chart: error bars, data points, reference lines, brackets. Each opens its own panel once it is there." },
       { target: "#ps-status-check", optional: true,
+        phone: { target: "#ps-phone-status",
+                 body: "The line under the project name: every chart is checked for things that mislead, like a cut axis or colors that merge. Tap it to read the list." },
         title: "Check my chart",
         body: "The status line at the bottom: every chart is checked for things that mislead, like a cut axis or colors that merge. Click it to read the list." },
       { target: "#ps-export", optional: true,
+        phone: { target: "#ps-phone-export",
+                 body: "Export gives PDF, PNG and SVG at the chart's real size. Zoom, under More, only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
         title: "Export",
         body: "Export gives PDF, PNG and SVG at the chart's real size. Fit window on the toolbar only changes how big it looks here; the grip at the chart's corner sets the size that exports." },
       { target: '[data-ps-menu="help"]', optional: true,
+        phone: { target: "#ps-narrow-menu",
+                 body: "Not sure which chart fits your data? Which graph should I use? lives in Help, under Menu, with Check my chart, the glossary, and these tours." },
         title: "Which graph?",
         body: "Not sure which chart fits your data? Which graph should I use? lives in the Help menu, with Check my chart, the glossary, and these tours." }
     ]

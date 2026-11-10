@@ -401,8 +401,14 @@ async function runDevice(browser, dev) {
     // Reach a workspace the way a finger does: through the navigator, which
     // is a drawer behind a button on a narrow screen and a rail otherwise.
     async function goWorkspace(ws) {
-        if (narrow) { await page.locator('#ps-narrow-nav').tap(); await page.waitForTimeout(350); }
-        await page.locator('.ps-workspace-switcher [data-ps-workspace="' + ws + '"]').tap();
+        // A phone has the four workspaces as tabs along the bottom; a
+        // narrow window that is not a phone still opens the drawer.
+        const phone = await page.evaluate(() => document.body.classList.contains('ps-phone'));
+        if (phone) await page.locator('#ps-phone-nav [data-ps-phone-ws="' + ws + '"]').tap();
+        else {
+            if (narrow) { await page.locator('#ps-narrow-nav').tap(); await page.waitForTimeout(350); }
+            await page.locator('.ps-workspace-switcher [data-ps-workspace="' + ws + '"]').tap();
+        }
         await page.waitForTimeout(900);
         return page.evaluate(() => ({ ws: window.PS_SHELL.workspace(),
             drawerOpen: !!document.querySelector('.ps-app-body.ps-narrow-nav-open') }));
@@ -430,8 +436,8 @@ async function runDevice(browser, dev) {
 
     // 2. the chart workspace with the example loaded, by tap
     await page.locator('#ps-welcome-sample').tap(); await page.waitForTimeout(2400);
-    if (CONTROL) { await ctl('.ps-commandbar{gap:2px !important;justify-content:flex-start !important}' +
-        '.ps-commandbar button{width:14px !important;height:14px !important;min-width:0 !important;min-height:0 !important;padding:0 !important;margin:0 !important;overflow:hidden !important;flex:0 0 14px !important}'); await page.waitForTimeout(200); }
+    if (CONTROL) { await ctl('.ps-commandbar,.ps-phone-nav{gap:2px !important;justify-content:flex-start !important;justify-items:start !important;grid-template-columns:repeat(4,16px) !important}' +
+        '.ps-commandbar button,.ps-phone-nav button{width:14px !important;height:14px !important;min-width:0 !important;min-height:0 !important;padding:0 !important;margin:0 !important;overflow:hidden !important;flex:0 0 14px !important}'); await page.waitForTimeout(200); }
     const m2 = await screen('chart', { chart: true });
     if (CONTROL) { await unctl(); await page.waitForTimeout(200); }
     check(dev.id + '/chart/drawn', !!m2.chart && m2.chart.w > 100 && m2.chart.w <= m2.vw,
@@ -632,6 +638,15 @@ async function runDevice(browser, dev) {
         await closeEditor();
     }
 
+    // 5b. the Notebook before anything is kept: its one sentence is the only
+    //     thing that says how a page gets there, and it said "Right-click".
+    await goWorkspace('pinboard');
+    const emptyText = await page.evaluate(() => ((document.querySelector('.ps-pinboard-empty') || {}).textContent || '').replace(/\s+/g, ' '));
+    const phoneNow = await page.evaluate(() => document.body.classList.contains('ps-phone'));
+    check(dev.id + '/notebook/empty', !/right-click/i.test(emptyText) && (phoneNow ? /tap Keep/.test(emptyText) : /Touch and hold/.test(emptyText)),
+        tag + 'the empty Notebook says how a finger keeps a chart ("' + emptyText.slice(0, 64) + '...")');
+    await goWorkspace('chart');
+
     // 6. keep the chart to the Notebook (the app's own keep, as the menu calls it)
     await page.evaluate(() => { window.PS_SHELL.setWorkspace('chart'); }); await page.waitForTimeout(500);
     await page.evaluate(() => window.PS_SHELL.pinChartForTest()); await page.waitForTimeout(1000);
@@ -662,7 +677,8 @@ async function runDevice(browser, dev) {
     // the note field lives in the inspector, a drawer on a narrow screen
     result.touch.notebookNoteEdits = false;
     try {
-        if (narrow && await page.locator('#ps-narrow-inspector').isVisible()) { await page.locator('#ps-narrow-inspector').tap(); await page.waitForTimeout(450); }
+        if (await page.locator('#ps-phone-setup').isVisible()) { await page.locator('#ps-phone-setup').tap(); await page.waitForTimeout(450); }
+        else if (narrow && await page.locator('#ps-narrow-inspector').isVisible()) { await page.locator('#ps-narrow-inspector').tap(); await page.waitForTimeout(450); }
         const noteBox = page.locator('#ps-pininsp-note');
         if (await noteBox.isVisible()) {
             await noteBox.tap({ timeout: 2500 }); await page.keyboard.type('seen on a phone', { delay: 2 });
@@ -757,6 +773,131 @@ async function runDevice(browser, dev) {
         check(dev.id + '/tabs/tip', !st.tip, tag + 'a tap on a chart tab leaves no tooltip standing over the toolbar');
     }
 
+    // 12. the phone frame (the find-your-way pass). Under 760px with a finger:
+    //     named workspace tabs along the bottom, one top row, Setup and More
+    //     by name, a Keep button, and tours with something to point at on
+    //     every step. Anything wider keeps the frame it had.
+    const isPhone = await page.evaluate(() => document.body.classList.contains('ps-phone'));
+    check(dev.id + '/frame/kind', isPhone === narrow,
+        tag + (narrow ? 'the phone frame is on (a finger, under 760px)' : 'a tablet keeps the frame it had, with no phone frame'));
+    if (isPhone) {
+        await goWorkspace('chart');
+        await closeEditor();
+        await page.evaluate(() => { const p = document.getElementById('ps-main-workspace'); if (p) p.scrollTop = 0; });
+        await page.waitForTimeout(300);
+        const fr = await page.evaluate(() => {
+            const vis = e => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 1;
+            const nav = document.getElementById('ps-phone-nav');
+            const bar = document.querySelector('#psroot [data-role="chart-toolbar"]');
+            const menu = document.getElementById('ps-narrow-menu');
+            const svg = document.querySelector('svg[data-role="gb2-chart-svg"]');
+            const pane = document.getElementById('ps-main-workspace');
+            return {
+                nav: vis(nav),
+                tabs: [...nav.querySelectorAll('button')].map(b => ({ name: b.textContent.trim(), h: Math.round(b.getBoundingClientRect().height), cur: b.getAttribute('aria-current') === 'page' })),
+                menuWord: vis(menu.querySelector('.ps-phone-label')) ? menu.querySelector('.ps-phone-label').textContent : '',
+                keep: vis(document.getElementById('ps-phone-keep')), exp: vis(document.getElementById('ps-phone-export')),
+                setup: vis(document.getElementById('ps-phone-setup')), more: vis(document.getElementById('ps-phone-more')),
+                oldIcons: vis(document.getElementById('ps-narrow-nav')) || vis(document.getElementById('ps-narrow-inspector')),
+                commandbar: vis(document.querySelector('.ps-commandbar')),
+                barOver: bar ? bar.scrollWidth - bar.clientWidth : 99,
+                status: (document.getElementById('ps-phone-status') || {}).textContent || '',
+                room: svg && pane ? Math.round(pane.getBoundingClientRect().bottom - svg.getBoundingClientRect().top) : 0,
+                vh: window.innerHeight, wide: Math.max(document.documentElement.scrollWidth, window.innerWidth)
+            };
+        });
+        check(dev.id + '/frame/tabs', fr.nav && fr.tabs.map(t => t.name).join('|') === 'Data|Charts|Notebook|Layouts' &&
+                fr.tabs.every(t => t.h >= 44) && fr.tabs.filter(t => t.cur).map(t => t.name).join() === 'Charts',
+            tag + 'the four workspaces are named tabs along the bottom, finger-sized, with Charts marked as the one in view (' + fr.tabs.map(t => t.name + ' ' + t.h).join(', ') + ')');
+        check(dev.id + '/frame/top', fr.menuWord === 'Menu' && fr.keep && fr.exp && !fr.oldIcons && !fr.commandbar,
+            tag + 'one top row: Menu by name, Keep and Export, and no unnamed icons or second row');
+        check(dev.id + '/frame/toolbar', fr.setup && fr.more && fr.barOver <= 2,
+            tag + 'Setup and More are on screen by name and nothing in the chart toolbar is off its edge (' + fr.barOver + ' px over)');
+        check(dev.id + '/frame/status', /saved|Autosave/i.test(fr.status),
+            tag + 'the save state reads under the project name ("' + fr.status + '")');
+        if (fr.vh > 480) check(dev.id + '/frame/room', fr.room / fr.vh >= 0.62,
+            tag + 'the chart has most of the screen: ' + fr.room + ' of ' + fr.vh + ' px from its top edge to the tabs (' + Math.round(fr.room / fr.vh * 100) + '%)');
+
+        // Setup: a sheet from below with the whole chart above it (upright),
+        // or a panel beside the chart (sideways).
+        await page.locator('#ps-phone-setup').tap(); await page.waitForTimeout(800);
+        const sh = await page.evaluate(() => {
+            const c = document.querySelector('.ps-controls').getBoundingClientRect();
+            const svg = document.querySelector('svg[data-role="gb2-chart-svg"]').getBoundingClientRect();
+            return { open: !!document.querySelector('.ps-app-body.ps-narrow-inspector-open'), top: Math.round(c.top), left: Math.round(c.left), w: Math.round(c.width),
+                chartB: Math.round(svg.bottom), chartR: Math.round(svg.right), chartH: Math.round(svg.height), chartW: Math.round(svg.width),
+                slots: !!document.getElementById('ps-slots') && document.getElementById('ps-slots').getBoundingClientRect().height > 20,
+                vw: window.innerWidth, vh: window.innerHeight };
+        });
+        if (sh.vh > 480) check(dev.id + '/frame/setup', sh.open && sh.slots && sh.w >= sh.vw - 2 && sh.top >= sh.vh * 0.4 && sh.chartB <= sh.top + 2 && sh.chartH >= 80,
+            tag + 'Setup opens as a sheet from below and the whole chart is refitted above it (chart ' + sh.chartW + ' by ' + sh.chartH + ' ends at ' + sh.chartB + ', sheet starts at ' + sh.top + ')');
+        else check(dev.id + '/frame/setup', sh.open && sh.slots && sh.left >= sh.vw * 0.45 && sh.chartR <= sh.left + 2,
+            tag + 'sideways, Setup stands beside the chart (chart ends at ' + sh.chartR + ', panel starts at ' + sh.left + ')');
+        await page.locator('#ps-phone-setup-done').tap(); await page.waitForTimeout(600);
+        check(dev.id + '/frame/setup-done', await page.evaluate(() => !document.querySelector('.ps-app-body.ps-narrow-inspector-open')),
+            tag + 'Done closes Setup');
+
+        // More: the rest of the toolbar by name, and a row does what its
+        // button does.
+        await page.locator('#ps-phone-more').tap(); await page.waitForTimeout(450);
+        const ms = await page.evaluate(() => {
+            const s = document.getElementById('ps-phone-sheet');
+            const rows = [...s.querySelectorAll('.ps-phone-row')].filter(r => r.getBoundingClientRect().height > 1);
+            const real = document.querySelector('#ps-charttools select'), mine = document.getElementById('ps-phone-zoom');
+            return { open: s.classList.contains('ps-open'), rows: rows.length, small: rows.filter(r => r.getBoundingClientRect().height < 44).length,
+                zoomSame: !!real && !!mine && real.options.length === mine.options.length && real.value === mine.value };
+        });
+        check(dev.id + '/frame/more', ms.open && ms.rows === 5 && ms.small === 0 && ms.zoomSame,
+            tag + 'More lists what the toolbar no longer shows (' + ms.rows + ' rows, ' + ms.small + ' small, zoom choices ' + (ms.zoomSame ? 'match' : 'differ') + ')');
+        await page.locator('[data-phone-more="add"]').tap(); await page.waitForTimeout(600);
+        const addOpen = await page.evaluate(() => { const m = document.querySelector('[data-role="add-ann-menu"]'); const s = document.getElementById('ps-phone-sheet');
+            return !!m && getComputedStyle(m).display !== 'none' && m.getBoundingClientRect().left >= -1 && m.getBoundingClientRect().right <= window.innerWidth + 1 && !s.classList.contains('ps-open'); });
+        check(dev.id + '/frame/more-add', addOpen, tag + 'Add to chart, chosen from More, opens the add menu on screen');
+        await page.locator('#ps-phone-nav [data-ps-phone-ws="chart"]').tap(); await page.waitForTimeout(400);
+
+        // Keep, by its button.
+        const pinCount = () => page.evaluate(() => (window.PS_SHELL.project.pinboards || []).reduce((n, b) => n + ((b.pins || []).length), 0));
+        const p0 = await pinCount();
+        await page.locator('#ps-phone-keep').tap(); await page.waitForTimeout(1000);
+        result.touch.keepButtonKeeps = (await pinCount()) === p0 + 1;
+        await settleToasts();
+
+        // The tours: every step has something on screen to point at, and
+        // none of them tells a finger to click.
+        const tours = await page.evaluate(async () => {
+            const wait = ms => new Promise(r => setTimeout(r, ms));
+            const out = {};
+            for (const id of ['app', 'charts']) {
+                window.PS_TOURS.start(id); await wait(1000);
+                let shown = 0, guard = 0; const mouse = [];
+                while (guard++ < 14) {
+                    const t = document.getElementById('ps-tour-title');
+                    if (!t || t.getBoundingClientRect().height < 1) break;
+                    shown++;
+                    const b = document.querySelector('#ps-tour-body, .ps-tour-body');
+                    const text = t.textContent + ' ' + (b ? b.textContent : '');
+                    if (/\b(right-|double-)?click/i.test(text)) mouse.push(t.textContent);
+                    const nb = [...document.querySelectorAll('[id^="ps-tour"] button')].find(x => /^(Next|Done)$/.test(x.textContent.trim()) && x.getBoundingClientRect().height > 1);
+                    if (!nb) break;
+                    const last = nb.textContent.trim() === 'Done';
+                    nb.click(); await wait(380);
+                    if (last) break;
+                }
+                try { window.PS_TOURS.exit(); } catch (e) {}
+                await wait(300);
+                out[id] = { shown, mouse };
+            }
+            return out;
+        });
+        check(dev.id + '/frame/tours', tours.app.shown === 5 && tours.charts.shown === 9,
+            tag + 'the tours show every step on a phone (app ' + tours.app.shown + ' of 5, Charts ' + tours.charts.shown + ' of 9)');
+        check(dev.id + '/frame/tour-words', tours.app.mouse.length + tours.charts.mouse.length === 0,
+            tag + 'no tour step tells a finger to click (' + tours.app.mouse.concat(tours.charts.mouse).join(', ') + ')');
+    } else {
+        check(dev.id + '/frame/off', await page.evaluate(() => { const n = document.getElementById('ps-phone-nav'); return getComputedStyle(n).display === 'none' && getComputedStyle(document.querySelector('.ps-commandbar')).display !== 'none'; }),
+            tag + 'no workspace tabs along the bottom, and the command row is where it was');
+    }
+
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
     return result;
@@ -775,6 +916,12 @@ async function runDesktop(browser) {
     const st = await page.evaluate(() => ({ touch: document.body.classList.contains('ps-touch'), lifted: document.querySelectorAll('[data-ps-tf]').length,
         key: (window.PS_SHELL.buildPayload() || {}).touchHost === true }));
     check('desktop/touchmode', !st.touch, 'desktop: the touch density is off for a mouse');
+    check('desktop/frame', await page.evaluate(() => !document.body.classList.contains('ps-phone') &&
+            getComputedStyle(document.getElementById('ps-phone-nav')).display === 'none' &&
+            getComputedStyle(document.getElementById('ps-phone-keep')).display === 'none' &&
+            getComputedStyle(document.querySelector('.ps-commandbar')).display !== 'none' &&
+            !document.getElementById('ps-phone-more')),
+        'desktop: no phone frame for a mouse (no bottom tabs, no Keep in the top row, the command row in place)');
     check('desktop/lifted', st.lifted === 0, 'desktop: no text size was lifted (' + st.lifted + ')');
     check('desktop/key', st.key, 'desktop: the host key rides the payload all the same (gestures are judged per touch, not per device)');
     const geo = () => page.evaluate(() => {
