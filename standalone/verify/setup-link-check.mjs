@@ -17,7 +17,9 @@
 //      as from, the data address) and it round-trips through ?config=;
 //   6. Share a link offers the setup-only link for a project from a data
 //      link; it is far shorter than the full link and reopens the same
-//      charts; the source line copies the setup + data link;
+//      charts; the source line copies the setup + data link; both links
+//      open the hosted app, since this file:// page is not it (the base
+//      address rule of Nov 4 2026, whose own cases are share-link-check 9);
 //   7. Copy as a hyperlink writes rich text with the link behind the words
 //      and the bare link as plain text;
 //   8. errors: a setup that answers 404, one that is not JSON, one of the
@@ -49,6 +51,9 @@
 // line, the matching dialog's wording, the open table's kept types and codes,
 // the missing-sheet note, and additive missing codes (1: without it NA became
 // a third condition; 14: no notMissing).
+// CONTROL 3 (PS_PAGE at a tree from before the base address rule, ed9f7cb):
+// 2 failures, the two link assertions in 6 (both links start with the page's
+// own file:// address there); the setup-only link still reopens its charts.
 //
 // Usage: node standalone/verify/setup-link-check.mjs
 
@@ -70,6 +75,14 @@ function loadPlaywright() {
 const { chromium } = loadPlaywright();
 const HERE = new URL('.', import.meta.url).pathname;
 const PAGE = 'file://' + (process.env.PS_PAGE ? path.resolve(process.env.PS_PAGE) : path.resolve(HERE, '..', 'index.html'));
+// What a link made on this file:// page starts with: not the page's own
+// address, which nobody else could open, but the hosted app's.
+const LINKBASE = 'https://pandionplots.com/app/';
+// The part of a link after the app's address. The link itself opens the
+// hosted app; the probe opens the same query and # on its own page, whatever
+// the link starts with, so a wrong base fails its own assertion and nothing
+// after it.
+const linkTail = link => { const i = link.search(/[?#]/); return i < 0 ? '' : link.slice(i); };
 let failures = 0;
 function ok(cond, label) { if (cond) console.log('  ok  ' + label); else { console.log('  FAIL ' + label); failures++; } }
 
@@ -208,7 +221,7 @@ await run('1. ?config=&data=', async () => {
     ok(/chart setup from example\.test and data from example\.test/.test(s.srcLine), '6: the source line names the setup and the data (' + s.srcLine.slice(0, 70) + ')');
     await page.click('#ps-share-source-copy'); await page.waitForTimeout(200);
     s = await st(page);
-    ok(s.copied === PAGE + '?config=' + T + 'setups/stroop.setup.json&data=' + T + 'lab/stroop.csv', '6: and it copies the link that opens both (' + s.copied.slice(PAGE.length) + ')');
+    ok(s.copied === LINKBASE + '?config=' + T + 'setups/stroop.setup.json&data=' + T + 'lab/stroop.csv', '6: and it copies the link that opens both in the hosted app (' + s.copied.slice(0, 160) + ')');
     // ---- 6: the setup-only carried link
     ok(s.setupOnlyShown && s.foot === 'Anyone who has the link has the data.', '6: the setup-only choice is offered for a project whose data came from a link');
     const full = link;
@@ -217,7 +230,7 @@ await run('1. ?config=&data=', async () => {
     const sizeLine = await page.evaluate(() => document.getElementById('ps-share-carry-size').textContent);
     const footOn = (await st(page)).foot;
     ok(/^The link carries no rows\. Whoever opens it fetches the data from example\.test\.$/.test(footOn), '6: with it ticked, the privacy line says the link carries no rows (' + footOn + ')');
-    ok(setupLink.indexOf(PAGE + '?data=' + T + 'lab/stroop.csv#setup=') === 0 && setupLink.length < full.length && /data stays at example\.test/.test(sizeLine), '6: it is a ?data= link with the setup after the #, shorter than the full link (' + setupLink.length + ' vs ' + full.length + ')');
+    ok(setupLink.indexOf(LINKBASE + '?data=' + T + 'lab/stroop.csv#setup=') === 0 && setupLink.length < full.length && /data stays at example\.test/.test(sizeLine), '6: it is a ?data= link to the hosted app with the setup after the #, shorter than the full link (' + setupLink.length + ' vs ' + full.length + ', ' + setupLink.slice(0, 60) + '...)');
     // ---- 5: Save chart setup
     await page.keyboard.press('Escape'); await page.waitForTimeout(300);
     await page.click('[data-ps-menu="file"]'); await page.waitForTimeout(300);
@@ -239,7 +252,7 @@ await run('1. ?config=&data=', async () => {
     ok(r.name === 'Stroop effect' && r.roles.yvar === 'Reaction time' && r.graphType === 'box' && r.title === 'Stroop interference' && r.boxes > 0 && r.masked === 3, '5: the saved setup reopens the same chart through ?config= (' + r.boxes + ' boxes)');
     await b.ctx.close();
     // the setup-only link reopens the charts
-    const c2 = await boot(setupLink.slice(PAGE.length));
+    const c2 = await boot(linkTail(setupLink));
     r = await st(c2.page);
     ok(r.card && /carried in this link/.test(r.cardUrl) && /fetches the data file/.test(r.privacy), '6: the setup-only link shows the card with the setup carried in the link');
     await c2.page.click('#ps-openlink-open'); await c2.page.waitForTimeout(2500);
