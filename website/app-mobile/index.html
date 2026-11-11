@@ -7,14 +7,17 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-10T21:20Z ed17064">
+<meta name="pandion-build" content="2026-11-11T05:45Z 6bab100">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at ed17064: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 6bab100: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a tap edits, a drag moves a part at once, a swipe
      on empty space scrolls, touch and hold still opens the part's menu; a
      touch density with larger controls and text; the phone frame and
-     sharing), so it can be tried on a real phone before it ships. It does not carry the next-release queue that
+     sharing; a tapped part keeps its values on screen, touch and hold on a
+     button shows its tip, the title strip says Tap to add title, a data
+     cell's menu starts with Edit value and a shape's with Duplicate), so it
+     can be tried on a real phone before it ships. It does not carry the next-release queue that
      /app-next/ shows. Not linked from the site, not indexed, refreshed or
      removed as the work moves. The app at /app/ is the released one. -->
 <meta name="robots" content="noindex, nofollow">
@@ -3547,6 +3550,9 @@
     padding: 5px; color: var(--ps-ink-2); background: var(--ps-s0);
     border: 1px solid var(--ps-l4); border-radius: var(--ps-r-md);
     box-shadow: var(--ps-e-2);
+    /* A menu longer than the window scrolls inside itself (a phone held
+       sideways is 340 pixels tall, and the chart's menu is longer). */
+    max-height: calc(var(--ps-vh) - 28px); overflow-y: auto;
   }
   #ps-contextmenu button {
     display: block; width: 100%; min-height: 29px; padding: 5px 9px;
@@ -4959,6 +4965,10 @@
   /* iOS answers a held finger on text or an image with its own callout,
      and the hold is this app's drag and menu gesture. */
   .graphbuilder2-host svg[data-role="gb2-chart-svg"] { -webkit-touch-callout: none; }
+  /* The value readout is never a target: a tap aimed at the mark under it
+     must reach the mark. The engine's own rule says the same, but one of
+     its sweeps can clear it. */
+  #psroot [data-role="xy-tooltip"] { pointer-events: none !important; }
   /* Drawing a shape is a drag from the first pixel, and so is dragging in
      the colour square or along the hue strip: without this the browser
      took those touches for a page scroll and the colour never moved. */
@@ -5281,6 +5291,15 @@
     min-height: 44px; font-size: 15px;
   }
   body.ps-touch .ps-statusbar { font-size: 13px; padding-top: 4px; padding-bottom: 4px; }
+  /* The grid's one line for a finger (the footer writes it in touch mode). */
+  .ps-grid-touchhint { margin-left: 10px; color: var(--ps-muted); }
+  /* The empty title strip says what it is for. Its hint waited for a
+     hovering mouse, so on a touch screen nothing marked the one place a
+     title is added. A strip that has stepped aside for something drawn
+     under it (pointer-events none) stays quiet. */
+  body.ps-touch #psroot div[aria-hidden="true"]:is([style*="cursor: text"], [style*="cursor:text"]):not([style*="pointer-events: none"]):not([style*="pointer-events:none"]) > div {
+    opacity: 0.62 !important;
+  }
   body.ps-touch .ps-statusbar button { min-height: 32px; font-size: 13px; }
   body.ps-touch .ps-pinpage-bar button { min-height: 36px; font-size: 14px; padding: 4px 13px; }
   body.ps-touch .ps-ltools button, body.ps-touch #ps-ltoolbar button,
@@ -7702,8 +7721,8 @@
 <script src="lib/ps-data.c926facca8.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.143e64cad0.js"></script>
+<script src="lib/graphbuilder2.min.061ded7503.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.b0cf6cca22.js"></script>
+<script src="lib/ps-shell.939c149c05.js"></script>
 </body>
 </html>
