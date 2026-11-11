@@ -59277,8 +59277,12 @@
             // Axis titles only when a REAL title is drawn - skip empty or
             // single-character default titles (the raw variable name "y"/"x"),
             // which otherwise point a "title" chip at the bare axis line.
+            // An axis title of a single letter ("N", "x") is a title like
+            // any other: asking for two characters left it out of this
+            // list, and so out of the keyboard's stops. Only a title with
+            // nothing in it is skipped.
             function addTitle(name, explain, el, selKey) {
-                if (el && visible(el) && (el.textContent || "").trim().length >= 2) add(name, explain, el, selKey);
+                if (el && visible(el) && (el.textContent || "").trim().length >= 1) add(name, explain, el, selKey);
             }
             function biggest(sel) {
                 var nl = qAll(sel), best = null, bestA = -1;
