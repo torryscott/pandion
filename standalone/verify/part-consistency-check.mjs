@@ -31,6 +31,13 @@
 //            label or a correlation variable label. Both now open the same
 //            editor.
 //
+//   readout  Pie slices, histogram bars, Likert segments, scatter points
+//            and correlation cells say what they show when the pointer
+//            rests on them. Bars, line and dot markers, boxes, violins,
+//            rainclouds, Pareto bars and heatmap tiles said nothing. Each
+//            now has a readout, checked here against arithmetic done in
+//            this file from the table.
+//
 // Every case starts from real mouse and keyboard input on the standalone
 // page. CONTROL: PS_EXPECT_BROKEN=1 with PS_PAGE aimed at a page built
 // before the fixes must find every case red, or the probe proves nothing.
@@ -234,6 +241,27 @@ async function openChart(mod, roles, real) {
             },
             texts(sel) {
                 return Array.from(svgOf().querySelectorAll(sel)).map(t => t.textContent.trim());
+            },
+            // The readout that follows the pointer, as one line of text
+            // ('' when it is not showing).
+            tip() {
+                const t = document.querySelector('[data-role="xy-tooltip"]');
+                if (!t || getComputedStyle(t).display === 'none') return '';
+                return Array.from(t.children).map(c => c.textContent.replace(/\s+/g, ' ').trim()).join(' | ');
+            },
+            // Which cell the nth visible element of this kind belongs to.
+            cellOf(sel, n) {
+                let seen = 0;
+                for (const el of svgOf().querySelectorAll(sel)) {
+                    const r = el.getBoundingClientRect();
+                    if (!(r.width > 0 && r.height > 0)) continue;
+                    if (seen++ < (n || 0)) continue;
+                    const c = el.closest('[data-bar-cat]');
+                    const g = el.closest('[data-bar-group]');
+                    return { cat: c ? c.getAttribute('data-bar-cat') : '', group: g ? g.getAttribute('data-bar-group') : '',
+                             count: el.getAttribute('data-count') };
+                }
+                return null;
             },
             // The one selected part, as the engine stores it.
             key() {
@@ -492,6 +520,128 @@ if (wanted('rename')) {
         key(e1.open && e1.value === 't1' && Math.hypot(e1.x - rc.x, e1.y - rc.y) < 40,
             `correlation variable: and a row label does the same (${e1.open ? '"' + e1.value + '"' : 'no editor'})`);
         await page.keyboard.press('Escape'); await w(page, 300);
+        await page.close();
+    }
+}
+
+// ---------------------------------------------------------------- readout
+if (wanted('readout')) {
+    startCase('readout', 'Bars, markers, boxes and heatmap tiles say what they show under the pointer');
+    // the readout's own number rule, written again here: four significant
+    // figures, whole numbers from 1000 up
+    const f4 = (v) => Math.abs(v) >= 1000 ? String(Math.round(v)) : String(Number(v.toPrecision(4)));
+    const col = (name) => HEADER.indexOf(name);
+    const vals = (name, keep) => ROWS.filter(keep).map(r => parseFloat(r[col(name)]));
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const sd = (a) => { const m = mean(a); return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (a.length - 1)); };
+    const q7 = (a, p) => { const b = a.slice().sort((x, y) => x - y), h = p * (b.length - 1), lo = Math.floor(h), hi = Math.ceil(h);
+                           return lo === hi ? b[lo] : b[lo] + (h - lo) * (b[hi] - b[lo]); };
+    const T975_DF9 = 2.2621571628;          // ten values in every grp x sex cell
+    async function hover(page, sel, n) {
+        const pt = await page.evaluate(([q, i]) => window.__pc.point(q, i), [sel, n || 0]);
+        if (!pt) return null;
+        await page.mouse.move(4, 4);
+        await page.mouse.move(pt.x - 2, pt.y - 2);
+        await page.mouse.move(pt.x, pt.y);
+        await w(page, 250);
+        const text = await page.evaluate(() => window.__pc.tip());
+        const cell = await page.evaluate(([q, i]) => window.__pc.cellOf(q, i), [sel, n || 0]);
+        return { text, cell, pt };
+    }
+    const BAR = '[data-bar-cat]:not([data-role])';
+    const cg = { xvar: 'grp', yvar: 'y', groupVar: 'sex' };
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'bar', errorBarType: 'se' });
+        const h = await hover(page, BAR, 1);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        const want = a.length ? [`${h.cell.cat} \u00b7 ${h.cell.group}`, `Mean = ${f4(mean(a))}`, `SE = ${f4(sd(a) / Math.sqrt(a.length))}`, `n = ${a.length}`].join(' | ') : '(no bar)';
+        key(!!h && h.text === want, `a bar: name, mean, SE and n ("${h ? h.text : ''}")`);
+        // a press and a drag is not a question: the readout steps aside
+        if (h) {
+            await page.mouse.down(); await page.mouse.move(h.pt.x + 3, h.pt.y + 1); await w(page, 120);
+            const during = await page.evaluate(() => window.__pc.tip());
+            await page.mouse.up(); await w(page, 300);
+            ok(during === '', 'the readout hides while the mouse button is down');
+        }
+        await page.close();
+    }
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'bar', errorBarType: 'ci95' });
+        const h = await hover(page, BAR, 2);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        const half = a.length ? T975_DF9 * sd(a) / Math.sqrt(a.length) : 0;
+        key(!!h && a.length === 10 && h.text.includes(`95% CI: ${f4(mean(a) - half)} to ${f4(mean(a) + half)}`),
+            `a bar under 95% intervals: the interval as drawn ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'bar', summaryFunc: 'median', errorBarType: 'se' });
+        const h = await hover(page, BAR, 0);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        key(!!h && a.length > 0 && h.text.includes(`Median = ${f4(q7(a, 0.5))}`) && !/SE =|CI/.test(h.text),
+            `a median chart: the median and no error bar ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'line', errorBarType: 'se' });
+        const h = await hover(page, '[data-role="line-marker"]', 0);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        key(!!h && a.length > 0 && h.text.includes(`Mean = ${f4(mean(a))}`) && h.text.includes(`n = ${a.length}`),
+            `a line marker: mean and n ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('rmplotbuilder', { measures: ['t1', 't2', 't3'], betweenVar: 'sex' }, { graphType: 'bar', errorBarType: 'se' });
+        const h = await hover(page, BAR, 0);
+        const a = h && h.cell ? vals(h.cell.cat, r => r[col('sex')] === h.cell.group) : [];
+        key(!!h && a.length === 30 && h.text.includes(`Mean = ${f4(mean(a))}`) && /SE = [\d.]+ \(within-subject\)/.test(h.text) && h.text.includes('n = 30'),
+            `a Repeated Measures bar: mean, the within-subject SE and n ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'box' });
+        const h = await hover(page, '[data-role="box-fill"]', 0);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        key(!!h && a.length > 0 && h.text.includes(`Median = ${f4(q7(a, 0.5))}`) &&
+            h.text.includes(`Quartiles: ${f4(q7(a, 0.25))} to ${f4(q7(a, 0.75))}`) && /Whiskers: /.test(h.text) && h.text.includes(`n = ${a.length}`),
+            `a box: median, quartiles, whisker ends and n ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('plotbuilder', cg, { graphType: 'violin' });
+        const h = await hover(page, '[data-role="violin-fill"]', 0);
+        const a = h && h.cell ? vals('y', r => r[col('grp')] === h.cell.cat && r[col('sex')] === h.cell.group) : [];
+        key(!!h && a.length > 0 && h.text.includes(`Median = ${f4(q7(a, 0.5))}`) &&
+            h.text.includes(`Range: ${f4(Math.min(...a))} to ${f4(Math.max(...a))}`) && !/Whiskers/.test(h.text),
+            `a violin: median, quartiles and the range ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('freqplotbuilder', { var: 'grp' }, { graphType: 'bar', freqStat: 'percent' });
+        const h = await hover(page, BAR, 0);
+        key(!!h && /Count = 20 \| Percent = 33\.33%$/.test(h.text), `a Frequencies bar in percent: the count and the percent ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('freqplotbuilder', { var: 'grp' }, { graphType: 'pareto' });
+        const h = await hover(page, BAR, 0);
+        key(!!h && /Count = 20 \| Share: 33\.33% of 60$/.test(h.text), `a Pareto bar: the count and its share ("${h ? h.text : ''}")`);
+        await page.close();
+    }
+    {
+        const page = await openChart('xyplotbuilder', { xvar: 'x', yvar: 'y' }, { xyBin: 'square' });
+        const h = await hover(page, '[data-role="xy-bin"]', 3);
+        const m = h ? /^Count = (\d+) \| x: (-?[\d.]+) to (-?[\d.]+) \| y: (-?[\d.]+) to (-?[\d.]+)$/.exec(h.text) : null;
+        let inside = -1;
+        if (m) {
+            const [x0, x1, y0, y1] = m.slice(2).map(Number);
+            // the edges are printed to four figures, so allow that much
+            const ex = 6e-4 * Math.max(Math.abs(x0), Math.abs(x1)), ey = 6e-4 * Math.max(Math.abs(y0), Math.abs(y1));
+            inside = ROWS.filter(r => { const x = parseFloat(r[col('x')]), y = parseFloat(r[col('y')]);
+                                        return x >= x0 - ex && x <= x1 + ex && y >= y0 - ey && y <= y1 + ey; }).length;
+        }
+        key(!!m && String(h.cell.count) === m[1] && inside >= Number(m[1]) && Number(m[1]) > 0,
+            `a heatmap tile: its count and the ranges it covers ("${h ? h.text : ''}"; ${inside} rows inside)`);
         await page.close();
     }
 }

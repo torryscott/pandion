@@ -9985,6 +9985,116 @@
         function _xyTooltipHide() {
             _xyTooltip.style.display = "none";
         }
+        // ---- Readouts for bars, markers, boxes and heatmap tiles ---------
+        // Pie slices, histogram bars, Likert segments, scatter points and
+        // correlation cells say what they show when the pointer rests on
+        // them; these marks did not. The numbers come from the same values
+        // the marks are drawn from, so a readout can never disagree with
+        // its mark.
+        // Four significant figures, whole numbers from 1000 up: one figure
+        // more than the value labels on bars print.
+        function _tipNum(v) {
+            v = +v;
+            if (!isFinite(v)) return "";
+            if (Math.abs(v) >= 1000) return String(Math.round(v));
+            return (+v.toPrecision(4)).toString();
+        }
+        function _tipLine(label, value) {
+            return "<div>" + label + " " + value + "</div>";
+        }
+        // A bar, a line or dot marker, a box, a violin or a raincloud:
+        // its name, the value it is drawn at, its error bar as drawn
+        // (named by the current type), and how many values are in it.
+        // `siblings` are the bars drawn with it: a Pareto bar's share is
+        // of its own panel's total.
+        function _cellTipHtml(bar, siblings) {
+            if (!bar) return "";
+            var gt = String(data.graphType || "");
+            var parts = [];
+            var fac = "";
+            try { fac = _facetOf(String(bar.x)); } catch (_eCtF) {}
+            if (fac) parts.push(_facetDisplayLabel(fac));
+            var catN = "";
+            try { catN = displayCategory(String(bar.x)); } catch (_eCtC) {}
+            if (catN != null && String(catN) !== "") parts.push(catN);
+            // Frequencies pie data aside, a bar's group is its series.
+            if (hasGroups && bar.group != null && String(bar.group) !== "") parts.push(displayGroup(String(bar.group)));
+            var html = "";
+            if (parts.length) {
+                var esc = [];
+                for (var np = 0; np < parts.length; np++) esc.push(_nmEsc(parts[np]));
+                html += "<div style='font-weight:600;margin-bottom:2px;'>" + esc.join(" &middot; ") + "</div>";
+            }
+            if (gt === "box" || gt === "violin" || gt === "raincloud") {
+                var st = null;
+                try { st = _computeBoxStats(bar.values || []); } catch (_eCtS) {}
+                if (!st) return "";
+                html += _tipLine("Median =", _tipNum(st.median));
+                html += _tipLine("Quartiles:", _tipNum(st.q1) + " to " + _tipNum(st.q3));
+                if (gt === "box") {
+                    html += _tipLine("Whiskers:", _tipNum(st.whiskerLow) + " to " + _tipNum(st.whiskerHigh));
+                    if (st.min < st.whiskerLow || st.max > st.whiskerHigh) {
+                        html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                    }
+                } else {
+                    html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                }
+                html += _tipLine("n =", String(st.n));
+                return html;
+            }
+            if (_gbFreqMode) {
+                var raw = (typeof bar._freqRawCount === "number") ? bar._freqRawCount : bar.mean;
+                if (typeof raw !== "number" || !isFinite(raw)) return "";
+                html += _tipLine("Count =", String(Math.round(raw)));
+                if (gt === "pareto") {
+                    var tot = 0;
+                    var myFac = fac;
+                    for (var sb = 0; siblings && sb < siblings.length; sb++) {
+                        var sbBar = siblings[sb];
+                        if (!sbBar) continue;
+                        var sbFac = "";
+                        try { sbFac = _facetOf(String(sbBar.x)); } catch (_eCtP) {}
+                        if (sbFac !== myFac) continue;
+                        var sbRaw = (typeof sbBar._freqRawCount === "number") ? sbBar._freqRawCount : sbBar.mean;
+                        if (typeof sbRaw === "number" && isFinite(sbRaw)) tot += sbRaw;
+                    }
+                    if (tot > 0) html += _tipLine("Share:", _tipNum(100 * raw / tot) + "% of " + String(Math.round(tot)));
+                } else if (typeof bar.mean === "number" && isFinite(bar.mean)) {
+                    var isFill = (gt === "bar" && hasGroups && data.freqPosition === "fill");
+                    if (isFill || data.freqStat === "percent") html += _tipLine("Percent =", _tipNum(bar.mean) + "%");
+                    else if (data.freqStat === "proportion") html += _tipLine("Proportion =", _tipNum(bar.mean));
+                }
+                return html;
+            }
+            if (typeof bar.mean !== "number" || !isFinite(bar.mean)) return "";
+            var isMed = (data.summaryFunc === "median");
+            html += _tipLine(isMed ? "Median =" : "Mean =", _tipNum(bar.mean));
+            var half = (typeof bar.se === "number" && isFinite(bar.se)) ? bar.se : 0;
+            var et = (typeof data.errorBarType === "string") ? data.errorBarType : "";
+            if (!isMed && half > 0 && et !== "none" && !_isElementHidden("errorBars")) {
+                var within = (data.isRepeatedMeasures === true && data.errorBarMethod === "within")
+                    ? " (within-subject)" : "";
+                var lo = _tipNum(bar.mean - half), hi = _tipNum(bar.mean + half);
+                if (et === "se") html += _tipLine("SE =", _tipNum(half) + within);
+                else if (et === "sd") html += _tipLine("SD =", _tipNum(half) + within);
+                else if (et === "ci95") html += _tipLine("95% CI:", lo + " to " + hi + within);
+                else if (et === "ci99") html += _tipLine("99% CI:", lo + " to " + hi + within);
+                else if (et === "ci95c") html += _tipLine("Difference-adjusted 95% interval:", lo + " to " + hi);
+                else html += _tipLine("Error bar:", lo + " to " + hi);
+            }
+            if (typeof bar.n === "number" && isFinite(bar.n)) html += _tipLine("n =", String(bar.n));
+            return html;
+        }
+        // A heatmap tile: how many observations it holds and the X and Y
+        // ranges it covers, named by the axis titles.
+        function _binTipHtml(bin) {
+            if (!bin || typeof bin.count !== "number") return "";
+            var xn = (typeof data.xLabel === "string" && data.xLabel.trim().length) ? data.xLabel : "X";
+            var yn = (typeof data.yLabel === "string" && data.yLabel.trim().length) ? data.yLabel : "Y";
+            return "<div style='font-weight:600;margin-bottom:2px;'>Count = " + String(Math.round(bin.count)) + "</div>" +
+                _tipLine(_nmEsc(xn) + ":", _tipNum(bin.x_lo) + " to " + _tipNum(bin.x_hi)) +
+                _tipLine(_nmEsc(yn) + ":", _tipNum(bin.y_lo) + " to " + _tipNum(bin.y_hi));
+        }
 
         // A flex-column "card" holds the toolbar (top), chart wrap
         // (middle), and inspector panel (bottom) as siblings. Flex
@@ -37522,6 +37632,26 @@
                             this.removeAttribute("stroke-width");
                             this.removeAttribute("stroke-opacity");
                         });
+                        // Readout: the tile's count and the ranges it covers.
+                        (function (tileEl, tileBin) {
+                            var _tlHtml = null, _tlShown = false;
+                            function _tlMove(ev) {
+                                if (ev.buttons) {
+                                    if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                                    return;
+                                }
+                                if (_tlShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                                if (_tlHtml === null) {
+                                    try { _tlHtml = _binTipHtml(tileBin); } catch (_eTl) { _tlHtml = ""; }
+                                }
+                                if (_tlHtml) { _xyTooltipShow(_tlHtml, ev.clientX, ev.clientY); _tlShown = true; }
+                            }
+                            tileEl.addEventListener("mouseenter", _tlMove);
+                            tileEl.addEventListener("mousemove", _tlMove);
+                            tileEl.addEventListener("mouseleave", function () {
+                                if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                            });
+                        })(_binEl, _bin);
                         _binEl.addEventListener("click", function (e) {
                             e.stopPropagation();
                             e.preventDefault();
@@ -41740,13 +41870,22 @@
                 // the destroy/recreate cycle of redraw().
                 barRect.setAttribute("data-bar-cat", catName);
                 barRect.setAttribute("data-bar-group", hasGroups ? (bar.group || "") : "");
-                (function (visuals, grp, catName) {
+                (function (visuals, grp, catName, tipBar) {
+                    // The readout's text, built when the pointer arrives.
+                    var _ctHtml = null, _ctShown = false;
                     // Hover affordance: bump opacity to 1 (so the pop is
                     // dramatic at low base opacity) AND lift brightness
                     // a touch (so there's still visible feedback when
                     // base opacity is already 1 - opacity-only would be
                     // a no-op there).
-                    barRect.addEventListener("mouseenter", function () {
+                    barRect.addEventListener("mouseenter", function (ev) {
+                        // Readout (see _cellTipHtml). Not while a button is
+                        // down: a drag across the bars is not a question.
+                        _ctHtml = null; _ctShown = false;
+                        if (ev && !ev.buttons) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt) { _ctHtml = ""; }
+                            if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                        }
                         for (var i = 0; i < visuals.length; i++) {
                             // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
                             if (visuals[i].getAttribute("data-base-fill-opacity") == null) visuals[i].setAttribute("data-base-fill-opacity", visuals[i].getAttribute("fill-opacity") || "");
@@ -41778,7 +41917,19 @@
                             }
                         }
                     });
+                    barRect.addEventListener("mousemove", function (ev) {
+                        if (ev.buttons) {
+                            if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
+                            return;
+                        }
+                        if (_ctShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                        if (_ctHtml === null) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt2) { _ctHtml = ""; }
+                        }
+                        if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                    });
                     barRect.addEventListener("mouseleave", function () {
+                        if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
                         // Read opacity at handler-call time, not at
                         // bar-creation time: the user can drag the
                         // opacity slider after this bar was created
@@ -41810,7 +41961,7 @@
                     // mode and reorders the bar's group (or category
                     // when Shift is held).
                     _attachBarDragReorder(barRect, catName, hasGroups ? grp : "");
-                })(built.visuals, bar.group, bar.x);
+                })(built.visuals, bar.group, bar.x, bar);
                 dataGroup.appendChild(barRect);
 
                 // Individual data points (overlay) - skipped when the
