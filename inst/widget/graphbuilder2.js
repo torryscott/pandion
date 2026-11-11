@@ -107467,6 +107467,8 @@
 
             var hideElements = [];
             var hideBars = [];
+            // Scatter groups to hide: their Hide button keeps its own list.
+            var hideXyGroups = [];
             // Drawn-shape annotation ids to DELETE outright (not hide).
             var deleteShapeIds = [];
             // Title-style text clearings: each entry is { id: "chartTitle"|"groupTitle" }.
@@ -107520,6 +107522,22 @@
                     hideElements.push("xCatLabel:" + s.substring("text:xCat:".length));
                 } else if (s.indexOf("text:groupItem:") === 0) {
                     hideElements.push("groupItemLabel:" + s.substring("text:groupItem:".length));
+                } else if (s.indexOf("distHist:") === 0 || s.indexOf("distDensity:") === 0 ||
+                           s.indexOf("distQQ:") === 0 || s.indexOf("distEcdf:") === 0) {
+                    // Wherever a panel's title bar has a Hide button, Delete
+                    // does the same thing through the same store, so Undo
+                    // and Show or hide parts bring the part back. These
+                    // parts had the button and no rule here, so the key did
+                    // nothing on them. A Distribution series (histogram,
+                    // density, Q-Q, ECDF) hides as "distGroup:<group>".
+                    hideElements.push("distGroup:" + s.substring(s.indexOf(":") + 1));
+                } else if (s.indexOf("freqSlice:") === 0 || s.indexOf("corrVar:") === 0 ||
+                           s.indexOf("likertItem:") === 0 || s === "paretoLine") {
+                    // A pie slice, a correlation variable, a Likert item and
+                    // the Pareto line hide under their own selection key.
+                    hideElements.push(s);
+                } else if (s.indexOf("xyPoint:") === 0) {
+                    hideXyGroups.push(s.substring("xyPoint:".length));
                 } else if (s === "legend") {
                     hideElements.push("legend");
                 } else if (s === "yAxis") {
@@ -107550,6 +107568,7 @@
 
             if (hideElements.length === 0 &&
                 hideBars.length === 0 &&
+                hideXyGroups.length === 0 &&
                 clearTitles.length === 0 &&
                 deleteShapeIds.length === 0) return;
 
@@ -107568,6 +107587,16 @@
             }
             for (var bi = 0; bi < hideBars.length; bi++) {
                 _addHiddenBar(hideBars[bi].cat, hideBars[bi].group);
+            }
+            if (hideXyGroups.length > 0) {
+                var _xyHidNow = Array.isArray(data.xyHiddenGroups) ? data.xyHiddenGroups.slice() : [];
+                for (var xgi = 0; xgi < hideXyGroups.length; xgi++) {
+                    if (_xyHidNow.indexOf(hideXyGroups[xgi]) < 0) _xyHidNow.push(hideXyGroups[xgi]);
+                }
+                data.xyHiddenGroups = _xyHidNow;
+                if (hasSetOption) {
+                    try { _setOption("xyHiddenGroups", _xyHidNow); } catch (_eXg) {}
+                }
             }
             // Title clears: empty string -> render path skips, click-
             // to-add ghost re-appears so the user can type again.
@@ -107594,7 +107623,7 @@
                 try { _setOption("hiddenBars", data.hiddenBars); } catch (_e) {}
             }
             if (hideElements.length > 0 || hideBars.length > 0 ||
-                clearTitles.length > 0) {
+                hideXyGroups.length > 0 || clearTitles.length > 0) {
                 if (typeof window.__gb2_updateVisBtnIcon === "function") {
                     try { window.__gb2_updateVisBtnIcon(); } catch (_e) {}
                 }

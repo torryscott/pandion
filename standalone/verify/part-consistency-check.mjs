@@ -9,6 +9,12 @@
 //            settings, so the value was dropped on the echo and the slider
 //            snapped back the moment it was let go.
 //
+//   delete   Delete did nothing on eight kinds of part whose panel has a
+//            Hide button (a scatter group, a histogram, density, Q-Q or
+//            ECDF series, a pie slice, the Pareto line, a correlation
+//            variable, a Likert item). It now hides them through the store
+//            the button writes, so Cmd/Ctrl+Z brings them back.
+//
 // Every case starts from real mouse and keyboard input on the standalone
 // page. CONTROL: PS_EXPECT_BROKEN=1 with PS_PAGE aimed at a page built
 // before the fixes must find every case red, or the probe proves nothing.
@@ -139,6 +145,23 @@ async function openChart(mod, roles, real) {
                 }
                 return null;
             },
+            // A point ON the stroke of the nth path or line of this kind:
+            // the middle of a line's box is rarely on the line.
+            onStroke(sel, n) {
+                const svg = svgOf();
+                const el = Array.from(svg.querySelectorAll(sel)).filter(e => {
+                    const r = e.getBoundingClientRect(); return r.width > 0 || r.height > 0;
+                })[n || 0];
+                if (!el || !el.getTotalLength) return null;
+                const len = el.getTotalLength(), m = el.getScreenCTM();
+                for (const f of [.5, .35, .65, .2, .8, .1, .9]) {
+                    const q = el.getPointAtLength(len * f);
+                    const x = q.x * m.a + q.y * m.c + m.e, y = q.x * m.b + q.y * m.d + m.f;
+                    const top = document.elementFromPoint(x, y);
+                    if (top && svg.contains(top)) return { x, y };
+                }
+                return null;
+            },
             count(sel) {
                 let n = 0;
                 for (const el of svgOf().querySelectorAll(sel)) {
@@ -215,6 +238,67 @@ if (wanted('gap')) {
         key(shown !== null && Math.abs(shown - 0.7) < 0.001, 'the slider still reads 70% (' + shown + ')');
     }
     await page.close();
+}
+
+// ---------------------------------------------------------------- delete
+if (wanted('delete')) {
+    startCase('delete', 'Delete hides a part wherever its panel has a Hide button; Undo brings it back');
+    const dist = (gt) => ['distplotbuilder', { var: 'y', groupVar: 'sex' }, { graphType: gt }];
+    // what to click, the selection it makes, where the hide is stored, and
+    // which marks must be fewer afterwards
+    const PARTS = [
+        { name: 'scatter group', chart: ['xyplotbuilder', { xvar: 'x', yvar: 'y', groupVar: 'sex' }, { xyBin: 'none' }],
+          click: '[data-role="xy-point"]', sel: /^xyPoint:(.+)$/, store: 'xyHiddenGroups', id: g => g, marks: '[data-role="xy-point"]' },
+        { name: 'histogram series', chart: dist('histogram'),
+          click: '[data-role="dist-hist-bar"]', sel: /^distHist:(.+)$/, store: 'hiddenElements', id: g => 'distGroup:' + g, marks: '[data-role="dist-hist-bar"]' },
+        { name: 'density series', chart: dist('density'),
+          click: '[data-role="dist-density-fill"]', sel: /^distDensity:(.+)$/, store: 'hiddenElements', id: g => 'distGroup:' + g, marks: '[data-role="dist-density-fill"]' },
+        { name: 'Q-Q series', chart: dist('qq'),
+          click: '[data-role="dist-qq-line"]', sel: /^distQQ:(.+)$/, store: 'hiddenElements', id: g => 'distGroup:' + g, marks: '[data-role="dist-qq-point"]' },
+        { name: 'ECDF line', chart: dist('ecdf'), stroke: true,
+          click: '[data-role="dist-ecdf-line"]', sel: /^distEcdf:(.+)$/, store: 'hiddenElements', id: g => 'distGroup:' + g, marks: '[data-role="dist-ecdf-line"]' },
+        { name: 'pie slice', chart: ['freqplotbuilder', { var: 'grp' }, { graphType: 'pie' }],
+          click: '[data-role="freq-slice"]', sel: /^freqSlice:(.+)$/, store: 'hiddenElements', id: g => 'freqSlice:' + g, marks: '[data-role="freq-slice"]' },
+        { name: 'Pareto line', chart: ['freqplotbuilder', { var: 'grp' }, { graphType: 'pareto' }], stroke: true,
+          click: '[data-role="pareto-line"]', sel: /^(paretoLine)$/, store: 'hiddenElements', id: () => 'paretoLine', marks: '[data-role="pareto-line"]' },
+        { name: 'correlation variable', chart: ['corrplotbuilder', { vars: ['x', 'y', 't1', 't2'] }, { graphType: 'corrheatmap' }],
+          click: '[data-role="corr-var-label-g"] text', sel: /^corrVar:(.+)$/, store: 'hiddenElements', id: g => 'corrVar:' + g, marks: '[data-role="corr-var-label-g"]' },
+        { name: 'Likert item', chart: ['likertplotbuilder', { items: ['q1', 'q2', 'q3', 'q4'] }, { graphType: 'likertdiverging' }],
+          click: '[data-role="likert-item-label"]', sel: /^likertItem:(.+)$/, store: 'hiddenElements', id: g => 'likertItem:' + g, marks: '[data-role="likert-item-label"]' }
+    ];
+    for (const part of PARTS) {
+        const page = await openChart(...part.chart);
+        const mod = part.chart[0];
+        const count = () => page.evaluate((q) => window.__pc.count(q), part.marks);
+        const n0 = await count();
+        let clicked;
+        if (part.stroke) {
+            const q = await page.evaluate((c) => window.__pc.onStroke(c, 0), part.click);
+            clicked = !!q;
+            if (q) { await page.mouse.click(q.x, q.y); await w(page, 450); }
+        } else {
+            clicked = await clickAt(page, part.click);
+        }
+        const k = await selKey(page);
+        const m = part.sel.exec(k);
+        ok(clicked && !!m && n0 > 0, `${part.name}: a click selects it (${k || 'nothing selected'})`);
+        if (!m) { await page.close(); continue; }
+        const id = part.id(m[1]);
+        await page.keyboard.press('Delete');
+        await w(page, ECHO);
+        const stored = await page.evaluate(([mo, st]) => window.__pc.setting(mo, st), [mod, part.store]);
+        const n1 = await count();
+        key(Array.isArray(stored) && stored.includes(id) && n1 < n0,
+            `${part.name}: Delete hides it (${n0} marks, then ${n1}; stored as ${id})`);
+        key((await selKey(page)) === '', `${part.name}: and its panel closes`);
+        await page.keyboard.press('ControlOrMeta+z');
+        await w(page, ECHO);
+        const n2 = await count();
+        const back = await page.evaluate(([mo, st]) => window.__pc.setting(mo, st), [mod, part.store]);
+        ok(n2 === n0 && !(Array.isArray(back) && back.includes(id)),
+           `${part.name}: Undo brings it back (${n2} marks)`);
+        await page.close();
+    }
 }
 
 await browser.close();
