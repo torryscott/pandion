@@ -1328,7 +1328,10 @@ async function runDevice(browser, dev) {
                     const first = await page.evaluate(() => { const m = document.getElementById('ps-contextmenu');
                         const b = (m && getComputedStyle(m).display !== 'none') ? m.querySelector('button') : null; if (!b) return null;
                         const r = b.getBoundingClientRect(), mr = m.getBoundingClientRect();
-                        return { text: (b.textContent || '').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2,
+                        // The row's own words: by this point in the run a key has been
+                        // pressed, so a key hint may sit beside them.
+                        const own = (b.firstChild && b.firstChild.nodeType === 3) ? b.firstChild.textContent : b.textContent;
+                        return { text: (own || '').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2,
                             onScreen: mr.top >= 0 && mr.bottom <= innerHeight && r.top >= 0 && r.bottom <= innerHeight }; });
                     if (first && !first.onScreen) why.push('the note menu ran off the screen');
                     if (first && first.text === 'Duplicate' && first.onScreen) {
@@ -1375,6 +1378,130 @@ async function runDevice(browser, dev) {
         check(dev.id + '/hover/title', H.titleHintShown, tag + 'the empty title strip says Tap to add at rest, and one tap opens the title for typing');
         check(dev.id + '/hover/cell', H.cellMenuEdits, tag + 'a held data cell offers Edit value first, and it opens the cell for typing');
         check(dev.id + '/hover/duplicate', H.noteMenuDuplicates, tag + 'a held note offers Duplicate first, and it makes the copy');
+    }
+
+    // 14. three phone leftovers, on a visit of their own, so that nothing the
+    //     steps above did (a key pressed, a chart changed) decides the answer:
+    //     a panel title that the Applies to switch squeezed to "BAR C..." or
+    //     to one letter, a value readout wider than the screen when a
+    //     category has a long name, and key hints ("Cmd/Ctrl+S") beside the
+    //     rows of a menu on a device with no keys.
+    {
+        const L = result.touch;
+        L.panelTitleWhole = false; L.longReadoutInsideScreen = false; L.menuRowsHideKeys = false; L.menuRowsShowKeysOnceSeen = false;
+        const why = []; let dbgTitle = '', dbgReadout = '', dbgKeys = '';
+        const ctx2 = await browser.newContext({ ...profile });
+        const p2 = await ctx2.newPage();
+        p2.on('pageerror', e => errors.push('second visit: ' + String(e).slice(0, 140)));
+        try {
+            await p2.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+            await p2.goto(pageUrl); await p2.waitForTimeout(900);
+            await p2.locator('#ps-welcome-sample').tap(); await p2.waitForTimeout(2400);
+
+            // a. the panel title, with the Applies to switch in the bar. A
+            //    grouped bar chart, a tap on a bar, the Border tab.
+            await p2.evaluate(() => { const S = window.PS_SHELL, t = S.project.table;
+                const nums = t.order.filter(c => t.types[c] === 'continuous'), cats = t.order.filter(c => t.types[c] !== 'continuous');
+                S.addChart('plotbuilder'); S.setRoles('plotbuilder', { xvar: cats[0], yvar: nums[0], groupVar: cats[1] }); });
+            await p2.waitForTimeout(2800);
+            const at = (fn, arg) => p2.evaluate(fn, arg);
+            const tallBar = () => at(() => { const bs = [...document.querySelectorAll('.graphbuilder2-host svg [data-bar-cat]')].filter(n => n.tagName !== 'text' && n.getBoundingClientRect().height > 20);
+                const n = bs[0]; if (!n) return null; n.scrollIntoView({ block: 'center' }); const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.6 }; });
+            await tallBar(); await p2.waitForTimeout(260);
+            const tb = await tallBar();
+            if (!tb) why.push('no bar on the grouped chart');
+            else {
+                await p2.touchscreen.tap(tb.x, tb.y); await p2.waitForTimeout(1300);
+                const tabAt = () => at(() => { const bt = [...document.querySelectorAll('.gb2-panel button')].find(n => (n.textContent || '').trim() === 'Border' && n.getBoundingClientRect().width > 4);
+                    if (!bt) return null; bt.scrollIntoView({ block: 'center' }); const r = bt.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+                await tabAt(); await p2.waitForTimeout(260);
+                const tab = await tabAt();
+                if (!tab) why.push('no Border tab in the bar panel');
+                else {
+                    await p2.touchscreen.tap(tab.x, tab.y); await p2.waitForTimeout(700);
+                    const ti = await at(() => { const t = document.querySelector('.gb2-panel [data-role="inspector-title"]'); if (!t) return null;
+                        const spans = [...t.querySelectorAll('[data-role="gb2-crumb"] > span')];
+                        const sc = t.querySelector('[data-role="bs-title-scope"], [data-role="scope-title-host"]');
+                        const tr = t.getBoundingClientRect(), sr = sc ? sc.getBoundingClientRect() : null;
+                        const bottom = spans.length ? Math.max(...spans.map(x => x.getBoundingClientRect().bottom)) : 0;
+                        const pn = t.closest('.gb2-panel');
+                        return { panelW: pn ? Math.round(pn.getBoundingClientRect().width) : 0,
+                            texts: spans.map(x => x.textContent), cut: spans.filter(x => x.scrollWidth > x.clientWidth + 1).length,
+                            scopeW: sr ? Math.round(sr.width) : 0, inside: !!sr && sr.left >= tr.left - 1 && sr.right <= tr.right + 1,
+                            ownLine: !!sr && sr.top >= bottom - 1, rows: Math.round(tr.height) }; });
+                    if (!ti) why.push('no title bar on the bar panel');
+                    else {
+                        dbgTitle = '"' + ti.texts.join(' / ') + '", ' + ti.cut + ' cut short, the switch ' + ti.scopeW + ' px wide' + (ti.ownLine ? ' on a line of its own' : ' beside it') + ' in a panel ' + ti.panelW + ' px wide';
+                        // In a panel under 560px the switch has to take its
+                        // own line; a wider panel has room for one row, and
+                        // either way nothing may be cut and the switch stays
+                        // in the bar.
+                        L.panelTitleWhole = ti.texts.length >= 2 && ti.cut === 0 && ti.scopeW > 60 && ti.inside &&
+                            (ti.panelW >= 560 || ti.ownLine);
+                    }
+                }
+            }
+
+            // b. a readout with a long name. A pie of a category whose
+            //    names are sentences, a tap on a slice.
+            const LONG = 'Participants who received the high dose in the second phase of the trial';
+            await at((LONG) => { const S = window.PS_SHELL;
+                const B = 'Participants who received the placebo throughout';
+                const rows = []; for (let i = 0; i < 12; i++) { rows.push([LONG, String(60 + (i * 7) % 23)]); rows.push([B, String(48 + (i * 5) % 19)]); }
+                S.loadTable('Long names', ['Treatment arm of the trial', 'Score on the final recall test'], rows);
+                S.addChart('freqplotbuilder'); S.setRoles('freqplotbuilder', { var: S.project.table.order[0] }); }, LONG);
+            await p2.waitForTimeout(2200);
+            await at(() => { window.setOption('graphType', 'pie'); });
+            await p2.waitForTimeout(2600);
+            const sliceAt = () => at(() => { const n = document.querySelector('.graphbuilder2-host svg [data-role="freq-slice"]'); if (!n) return null;
+                n.scrollIntoView({ block: 'center' }); const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+            await sliceAt(); await p2.waitForTimeout(260);
+            const sl = await sliceAt();
+            if (!sl) why.push('no pie slice for the long names');
+            else {
+                await p2.touchscreen.tap(sl.x, sl.y); await p2.waitForTimeout(1500);
+                const tp = await at(() => { const t = document.querySelector('.graphbuilder2-host [data-role="xy-tooltip"]'); if (!t) return null;
+                    const r = t.getBoundingClientRect(); return { shown: getComputedStyle(t).display !== 'none' && r.width > 0, left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, text: t.innerText || '' }; });
+                if (!tp) why.push('no readout element');
+                else {
+                    dbgReadout = (tp.shown ? 'from ' + tp.left + ' to ' + tp.right : 'not shown') + ' on a screen ' + profile.viewport.width + ' wide';
+                    L.longReadoutInsideScreen = tp.shown && tp.left >= -0.5 && tp.right <= profile.viewport.width + 0.5 &&
+                        tp.text.replace(/\s+/g, ' ').indexOf(LONG) >= 0;
+                }
+            }
+
+            // c. key hints in menu rows. No key has been pressed on this
+            //    visit, so the File menu names its commands and nothing else.
+            //    Escape closes it, and Escape is a key no on-screen keyboard
+            //    sends: from then on a keyboard is known and the hints are back.
+            const fileRows = async () => {
+                const file = p2.locator('#ps-menubar [data-ps-menu="file"]');
+                if (!(await file.isVisible().catch(() => false))) { await p2.locator('#ps-narrow-menu').tap(); await p2.waitForTimeout(400); }
+                await file.tap(); await p2.waitForTimeout(400);
+                return at(() => { const m = document.getElementById('ps-appmenu'); if (!m || getComputedStyle(m).display === 'none') return null;
+                    return [...m.querySelectorAll('button')].map(b => ({ label: ((b.firstElementChild || b).textContent || '').trim(), key: ((b.querySelector('.ps-menu-shortcut') || {}).textContent || '').trim() })); });
+            };
+            const isKey = k => /Cmd|Ctrl|Shift|Alt|^F\d/.test(k);
+            const r0 = await fileRows();
+            if (!r0) why.push('the File menu did not open');
+            else {
+                const hinted = r0.filter(r => isKey(r.key));
+                L.menuRowsHideKeys = r0.length > 5 && hinted.length === 0 && r0.some(r => /^Save project$/.test(r.label));
+                dbgKeys = r0.length + ' rows, ' + hinted.length + ' with a key' + (hinted.length ? ' (' + hinted[0].label + ' ' + hinted[0].key + ')' : '');
+                await p2.keyboard.press('Escape'); await p2.waitForTimeout(400);
+                const r1 = await fileRows();
+                const save = r1 && r1.find(r => /^Save project$/.test(r.label));
+                L.menuRowsShowKeysOnceSeen = !!save && /Cmd\/Ctrl\+S$/.test(save.key);
+                dbgKeys += '; after a key, Save project reads ' + (save ? '"' + save.key + '"' : 'nothing');
+                await p2.keyboard.press('Escape'); await p2.waitForTimeout(200);
+            }
+        } catch (e) { why.push(String(e && e.message || e).slice(0, 120)); }
+        await ctx2.close().catch(() => {});
+        const note14 = why.length ? ' [' + why.join('; ') + ']' : '';
+        check(dev.id + '/left/title', L.panelTitleWhole, tag + 'the panel title is whole with the Applies to switch in the bar (' + dbgTitle + ')' + note14);
+        check(dev.id + '/left/readout', L.longReadoutInsideScreen, tag + 'a readout with a sentence for a name wraps inside the screen (' + dbgReadout + ')' + note14);
+        check(dev.id + '/left/keys', L.menuRowsHideKeys && L.menuRowsShowKeysOnceSeen,
+            tag + 'menu rows carry no key hints until a keyboard shows itself (' + dbgKeys + ')' + note14);
     }
 
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
@@ -1435,6 +1562,18 @@ async function runDesktop(browser) {
     });
     check('desktop/hover', /^Click to add /.test(dh.hint) && dh.op === '0' && dh.edit === 'absent' && dh.foot === 0 && !/Double tap/.test(dh.words),
         'desktop: the title hint still waits for a hovering mouse and says Click, the cell menu has no Edit value row, and the grid\'s instructions name keys (' + dh.hint + ', opacity ' + dh.op + ', ' + dh.edit + ')');
+    // The three phone leftovers stay off a mouse: its menus keep their key
+    // hints from the first open, a readout is one line as the engine drew
+    // it, and no readout width is handed to the chart.
+    await page.click('#ps-menubar [data-ps-menu="file"]'); await page.waitForTimeout(400);
+    const dl = await page.evaluate(() => { const m = document.getElementById('ps-appmenu');
+        const save = [...m.querySelectorAll('button')].find(b => ((b.firstElementChild || b).textContent || '').trim() === 'Save project');
+        const tip = document.querySelector('.graphbuilder2-host [data-role="xy-tooltip"]');
+        return { key: save ? ((save.querySelector('.ps-menu-shortcut') || {}).textContent || '') : 'no row',
+            ws: tip ? getComputedStyle(tip).whiteSpace : 'no readout', room: document.body.style.getPropertyValue('--ps-tip-max') }; });
+    await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+    check('desktop/leftovers', /Cmd\/Ctrl\+S$/.test(dl.key) && dl.ws === 'nowrap' && dl.room === '',
+        'desktop: Save project keeps its key hint, a readout is still one line, and no readout width is set (' + dl.key + ', ' + dl.ws + ', "' + dl.room + '")');
     check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
 }

@@ -53,10 +53,10 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 35,
+     "targets": 28,
      "under24": [],
      "under24Spaced": 0,
-     "under44": 21,
+     "under44": 14,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -166,7 +166,11 @@
     "holdTipIsNotAPress": true,
     "titleHintShown": true,
     "cellMenuEdits": true,
-    "noteMenuDuplicates": true
+    "noteMenuDuplicates": true,
+    "panelTitleWhole": true,
+    "longReadoutInsideScreen": true,
+    "menuRowsHideKeys": true,
+    "menuRowsShowKeysOnceSeen": true
    }
   },
   "phone-landscape": {
@@ -328,7 +332,11 @@
     "holdTipIsNotAPress": true,
     "titleHintShown": true,
     "cellMenuEdits": true,
-    "noteMenuDuplicates": true
+    "noteMenuDuplicates": true,
+    "panelTitleWhole": true,
+    "longReadoutInsideScreen": true,
+    "menuRowsHideKeys": true,
+    "menuRowsShowKeysOnceSeen": true
    }
   },
   "android": {
@@ -490,7 +498,11 @@
     "holdTipIsNotAPress": true,
     "titleHintShown": true,
     "cellMenuEdits": true,
-    "noteMenuDuplicates": true
+    "noteMenuDuplicates": true,
+    "panelTitleWhole": true,
+    "longReadoutInsideScreen": true,
+    "menuRowsHideKeys": true,
+    "menuRowsShowKeysOnceSeen": true
    }
   },
   "tablet": {
@@ -545,10 +557,10 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 66,
+     "targets": 64,
      "under24": [],
      "under24Spaced": 5,
-     "under44": 43,
+     "under44": 41,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -666,7 +678,11 @@
     "holdTipIsNotAPress": true,
     "titleHintShown": true,
     "cellMenuEdits": true,
-    "noteMenuDuplicates": true
+    "noteMenuDuplicates": true,
+    "panelTitleWhole": true,
+    "longReadoutInsideScreen": true,
+    "menuRowsHideKeys": true,
+    "menuRowsShowKeysOnceSeen": true
    }
   },
   "tablet-landscape": {
@@ -721,12 +737,12 @@
      "vh": 768,
      "scrollW": 1024,
      "overflowX": false,
-     "targets": 61,
+     "targets": 56,
      "under24": [
       "button: Resize the project rail [5x627]"
      ],
      "under24Spaced": 4,
-     "under44": 40,
+     "under44": 35,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -838,7 +854,11 @@
     "holdTipIsNotAPress": true,
     "titleHintShown": true,
     "cellMenuEdits": true,
-    "noteMenuDuplicates": true
+    "noteMenuDuplicates": true,
+    "panelTitleWhole": true,
+    "longReadoutInsideScreen": true,
+    "menuRowsHideKeys": true,
+    "menuRowsShowKeysOnceSeen": true
    }
   }
  }

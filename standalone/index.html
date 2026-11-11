@@ -4947,6 +4947,21 @@
      must reach the mark. The engine's own rule says the same, but one of
      its sweeps can clear it. */
   #psroot [data-role="xy-tooltip"] { pointer-events: none !important; }
+  /* A readout is one unbroken line per fact, drawn for a mouse on a wide
+     chart. On a phone a long category or item name ran it past the right
+     edge of the screen (a pie slice named by a sentence: 12 px off a 390 px
+     screen, more with every word). In touch mode it wraps: never wider than
+     the chart it sits in, and never wider than the screen when the chart
+     has been zoomed past it (--ps-tip-max, the screen's width in the
+     chart's own units, written by touchTipRoom). width: max-content keeps
+     the size the same wherever the readout is placed, so the engine can
+     measure it once and then move it. border-box, or the limit would be
+     on the text alone and the padding would still cross the edge. */
+  body.ps-touch #psroot [data-role="xy-tooltip"] {
+    white-space: normal !important; width: max-content; box-sizing: border-box;
+    max-width: min(calc(100% - 8px), var(--ps-tip-max, 100000px));
+    overflow-wrap: anywhere;
+  }
   /* Drawing a shape is a drag from the first pixel, and so is dragging in
      the colour square or along the hue strip: without this the browser
      took those touches for a page scroll and the colour never moved. */
@@ -5329,6 +5344,29 @@
   /* Every tab stays reachable: the row wraps instead of clipping its end. */
   body.ps-touch #psroot .gb2-panel [data-gb2-promoted-tabbar="1"] {
     flex-wrap: wrap !important; height: auto !important;
+  }
+  /* The panel's title bar is one row drawn for a 700px panel: what is
+     being edited on the left, the Applies to switch and the eye on the
+     right. In a narrow panel the switch took the room and the title was
+     cut to "BAR C..." or to one letter. Same answer as the 380px dock
+     beside the chart: the title keeps the first line with the eye, and the
+     switch takes a line of its own under it. A panel is narrow by its OWN
+     width (data-ps-narrow, set by touchPanelWatch under 560px), since a
+     tablet held upright has a chart column as narrow as a phone and a
+     query asked of the zoomed chart answers differently in Chrome and
+     Safari. A wide panel keeps the single row. */
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] { flex-wrap: wrap; }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] > span:first-child:not([data-role]) {
+    flex: 1 1 0 !important; min-width: 0;
+  }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="gb2-crumb"] { max-width: 100%; overflow: hidden; }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="gb2-crumb"] > span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] [data-role="scope-title-host"],
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] [data-role="bs-title-scope"] {
+    flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;
+    margin-top: 6px; order: 3; flex-wrap: wrap;
   }
 
   @media print {

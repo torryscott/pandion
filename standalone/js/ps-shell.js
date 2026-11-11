@@ -13080,6 +13080,7 @@
     try {
       if (zHost && zHost.style.zoom !== zWas) touchFloorRecheck(zHost);
     } catch (eTf) {}
+    try { touchTipRoom(); } catch (eTr) {}
   }
   function applyViewZoomCore() {
     var host = hostEl();
@@ -34600,6 +34601,8 @@
     if (item.command === "duplicate-document" &&
         appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
         laySelectedIds().length) return "";
+    // A touch screen has no keys to press (keyHintsOn).
+    if (!keyHintsOn()) return "";
     return item.shortcut || "";
   }
   // ---- punch list t3-55: the shortcuts sheet ----
@@ -36612,7 +36615,7 @@
         // rather than to the document-level one of the same name. Without
         // rendering it the property was dead data and the key was advertised
         // in no menu at all at the moment the Edit menu withdrew it.
-        if (item.shortcut)
+        if (item.shortcut && keyHintsOn())
           b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut));
         b.type = "button";
         // item.action: a direct callback for dynamic targets (the group
@@ -37078,6 +37081,92 @@
     } catch (e) { return false; }
   }
   function touchModeOn() { return TOUCH_MODE; }
+  // Key hints beside menu rows ("Cmd/Ctrl+S"). A phone has no keys to press,
+  // so in touch mode a row says only what it does. A tablet may have a
+  // keyboard, and nothing reports one, so a keyboard is believed when it
+  // shows itself: a modifier, Escape, Tab, an arrow or a function key, none
+  // of which an on-screen keyboard sends. From then on the hints are back
+  // for the rest of the visit. The Keyboard shortcuts sheet lists every key
+  // either way.
+  var KEYS_SEEN = false;
+  function keyHintsOn() { return !TOUCH_MODE || KEYS_SEEN; }
+  function wireKeysSeen() {
+    window.addEventListener("keydown", function (e) {
+      if (KEYS_SEEN || !e || e.isTrusted === false) return;
+      var k = String(e.key || "");
+      if (e.metaKey || e.ctrlKey || e.altKey || k === "Escape" ||
+          k === "Tab" || k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
+        KEYS_SEEN = true;
+    }, true);
+  }
+  // How wide a value readout may be. The engine draws a readout as one
+  // unbroken line per fact, sized for a mouse on a wide chart, and on a
+  // phone a long category or item name ran it past the right edge of the
+  // screen. The stylesheet lets it wrap in touch mode; this hands it the
+  // screen's width in the chart's OWN units, because the readout lives
+  // inside the zoomed chart and a length written there paints at the zoom
+  // times its value. Kept on the body, not the host: the host's style is
+  // watched for zoom changes and a write there would call this again.
+  function touchTipRoom() {
+    var host = hostEl();
+    var want = "";
+    if (TOUCH_MODE && host) {
+      var z = parseFloat(host.style.zoom) || 1;
+      var pane = document.querySelector(".ps-main-workspace");
+      var vis = Math.min(window.innerWidth || 0,
+        pane && pane.clientWidth > 0 ? pane.clientWidth : Infinity);
+      if (vis > 60 && isFinite(vis)) want = Math.floor((vis - 16) / z) + "px";
+    }
+    var bs = document.body.style;
+    if (bs.getPropertyValue("--ps-tip-max") === want) return;
+    if (want) bs.setProperty("--ps-tip-max", want);
+    else bs.removeProperty("--ps-tip-max");
+  }
+  // The editing panel's title bar is one row drawn for a 700px panel: what
+  // is being edited, the Applies to switch, the eye. In a narrow panel the
+  // switch took the room and the title was cut to "BAR C..." or to one
+  // letter. The stylesheet wraps the bar for a panel marked data-ps-narrow,
+  // and this marks it by the PANEL's own width, not the screen's: a tablet
+  // held upright has a chart column as narrow as a phone's, and the panel
+  // is as wide as the chart above it. The engine builds a new panel with
+  // every render, so each one found is watched for its own size.
+  var PANEL_RO = null, PANEL_RAF = 0, PANEL_WATCHED = [];
+  var PANEL_NARROW_PX = 560;
+  function touchPanelMark(p) {
+    var w = 0;
+    try { w = p.getBoundingClientRect().width; } catch (eW) {}
+    var narrow = TOUCH_MODE && w > 0 && w < PANEL_NARROW_PX;
+    if (narrow === p.hasAttribute("data-ps-narrow")) return;
+    if (narrow) p.setAttribute("data-ps-narrow", "");
+    else p.removeAttribute("data-ps-narrow");
+  }
+  function touchPanelWatch() {
+    PANEL_RAF = 0;
+    if (!window.ResizeObserver) return;
+    if (!PANEL_RO) PANEL_RO = new window.ResizeObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) touchPanelMark(entries[i].target);
+    });
+    // A panel the engine has since replaced is let go, or every redraw
+    // would leave one more held here for the rest of the visit.
+    var kept = [];
+    for (var k = 0; k < PANEL_WATCHED.length; k++) {
+      if (PANEL_WATCHED[k].isConnected) kept.push(PANEL_WATCHED[k]);
+      else { try { PANEL_RO.unobserve(PANEL_WATCHED[k]); } catch (eU) {} }
+    }
+    PANEL_WATCHED = kept;
+    var ps = document.querySelectorAll(".gb2-panel");
+    for (var j = 0; j < ps.length; j++) {
+      if (PANEL_WATCHED.indexOf(ps[j]) < 0) {
+        PANEL_WATCHED.push(ps[j]);
+        PANEL_RO.observe(ps[j]);
+      }
+      touchPanelMark(ps[j]);
+    }
+  }
+  function touchPanelSoon() {
+    if (PANEL_RAF) return;
+    PANEL_RAF = window.requestAnimationFrame(touchPanelWatch);
+  }
   function touchModeSync() {
     var on = touchPrimary();
     var had = document.body.classList.contains("ps-touch");
@@ -37085,6 +37174,8 @@
     if (had === on) return false;
     document.body.classList.toggle("ps-touch", on);
     try { touchGridWords(); } catch (eW) {}
+    try { touchTipRoom(); } catch (eTr) {}
+    try { touchPanelSoon(); } catch (eTp) {}
     return true;
   }
   // The chart SURFACE: the drawing and the engine's handles laid over it.
@@ -37450,6 +37541,7 @@
           if (nd.nodeType === 1 || nd.nodeType === 3) touchFloorSweep(nd);
         }
       }
+      touchPanelSoon();
     });
     obs.observe(document.body, { childList: true, subtree: true });
     // The chart host's zoom is also written directly: every engine render
@@ -37466,6 +37558,7 @@
           window.setTimeout(function () {
             zPending = false;
             try { touchFloorRecheck(hostEl()); } catch (eR) {}
+            try { touchTipRoom(); } catch (eTr) {}
           }, 0);
         }).observe(zHostEl, { attributes: true, attributeFilter: ["style"] });
       }
@@ -37475,6 +37568,9 @@
   function wireTouch() {
     touchModeSync();
     wireTouchFloor();
+    wireKeysSeen();
+    try { touchTipRoom(); } catch (eTr0) {}
+    try { touchPanelSoon(); } catch (eTp0) {}
     try {
       var mq = window.matchMedia("(pointer: coarse)");
       var onMq = function () {
@@ -38762,7 +38858,7 @@
         if (annId && typeof window.__gb2_duplicateAnnotation === "function") {
           items = [
             { label: "Duplicate", key: "ann-duplicate",
-              shortcut: touchModeOn() ? "" : "Cmd/Ctrl+D",
+              shortcut: "Cmd/Ctrl+D",
               action: function () {
                 window.__gb2_duplicateAnnotation(annId);
               } },
