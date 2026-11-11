@@ -1155,6 +1155,228 @@ async function runDevice(browser, dev) {
             tag + 'no workspace tabs along the bottom, and the command row is where it was');
     }
 
+    // 13. the hover pass. What a mouse learns by hovering, a finger gets by a
+    //     tap or a hold: a mark's values stay up while it is selected (a
+    //     scatter point's used to vanish a quarter second after the tap, a
+    //     pie slice's sat on the slice's own label until the next tap
+    //     anywhere), a held control says what it does (no tip of any kind
+    //     showed on a touch screen), the empty title strip says it is there,
+    //     a data cell opens from its menu, and a note duplicates from its.
+    {
+        const H = result.touch;
+        H.readoutStaysOnPie = false; H.readoutClearOfLabel = false; H.readoutSurvivesRebuild = false;
+        H.readoutLeavesOnTapElsewhere = false; H.readoutStaysOnScatter = false; H.readoutOnSecondTap = false;
+        H.holdShowsTip = false; H.holdTipIsNotAPress = false; H.titleHintShown = false;
+        H.cellMenuEdits = false; H.noteMenuDuplicates = false;
+        let why = [], dbgPlace = '', dbgTip = '';
+        try {
+            await goWorkspace('chart'); await closeEditor();
+            const tipNow = () => page.evaluate(() => {
+                const t = document.querySelector('.graphbuilder2-host [data-role="xy-tooltip"]');
+                if (!t || getComputedStyle(t).display === 'none') return null;
+                const r = t.getBoundingClientRect();
+                return { text: (t.innerText || '').replace(/\s+/g, ' ').trim(), l: r.left, t: r.top, r: r.right, b: r.bottom };
+            });
+            const vars = await page.evaluate(() => {
+                const S = window.PS_SHELL, t = S.project.table;
+                const nom = t.order.find(c => t.types[c] === 'nominal');
+                const nums = t.order.filter(c => t.types[c] === 'continuous');
+                return (nom && nums.length >= 2) ? { nom, x: nums[1], y: nums[0] } : null;
+            });
+            if (!vars) why.push('the example has no nominal and two continuous columns');
+            if (vars) {
+                // ---- a pie slice, tapped off its own label
+                await page.evaluate(v => { const S = window.PS_SHELL; S.addChart('freqplotbuilder');
+                    S.setRoles('freqplotbuilder', { var: v.nom }); window.setOption('graphType', 'pie'); }, vars);
+                await page.waitForTimeout(2800);
+                const slice = () => page.evaluate(() => {
+                    const host = document.querySelector('.graphbuilder2-host');
+                    const s = host && host.querySelectorAll('[data-role="freq-slice"]')[0]; if (!s) return null;
+                    s.scrollIntoView({ block: 'center' });
+                    const r = s.getBoundingClientRect();
+                    const labs = [...host.querySelectorAll('[data-role="freq-slice-label"]')].map(n => n.getBoundingClientRect());
+                    for (let fy = 0.12; fy < 0.9; fy += 0.06) for (let fx = 0.12; fx < 0.9; fx += 0.06) {
+                        const x = r.left + r.width * fx, y = r.top + r.height * fy;
+                        if (y < 60 || y > innerHeight - 60 || document.elementFromPoint(x, y) !== s) continue;
+                        if (labs.some(L => x > L.left - 24 && x < L.right + 24 && y > L.top - 24 && y < L.bottom + 24)) continue;
+                        return { x, y };
+                    }
+                    return null;
+                });
+                await slice(); await page.waitForTimeout(260);
+                const sp = await slice();
+                if (!sp) why.push('no bare spot on a pie slice');
+                if (sp) {
+                    await page.touchscreen.tap(sp.x, sp.y); await page.waitForTimeout(800);
+                    const t1 = await tipNow(); await page.waitForTimeout(1300);
+                    const t2 = await tipNow();
+                    H.readoutStaysOnPie = !!t1 && !!t2 && t1.text.length > 3 && t2.text === t1.text && await editorOpen();
+                    // clear of the slice's own label (the label whose centre is inside the slice)
+                    const place = !t2 ? null : await page.evaluate(tb => {
+                        const host = document.querySelector('.graphbuilder2-host');
+                        const s = host.querySelectorAll('[data-role="freq-slice"]')[0];
+                        const own = [...host.querySelectorAll('[data-role="freq-slice-label"]')].map(n => n.getBoundingClientRect())
+                            .find(L => document.elementsFromPoint(L.left + L.width / 2, L.top + L.height / 2).includes(s));
+                        const wrap = host.querySelector('svg[data-role="gb2-chart-svg"]').getBoundingClientRect();
+                        const inside = tb.l >= wrap.left - 2 && tb.r <= wrap.right + 2 && tb.t >= wrap.top - 2 && tb.b <= wrap.bottom + 2;
+                        const hit = !!own && !(tb.r < own.left || tb.l > own.right || tb.b < own.top || tb.t > own.bottom);
+                        const R = v => Math.round(v);
+                        return { ok: inside && !hit, say: 'readout ' + [R(tb.l), R(tb.t), R(tb.r), R(tb.b)].join(',') + ' chart ' + [R(wrap.left), R(wrap.top), R(wrap.right), R(wrap.bottom)].join(',') +
+                            ' label ' + (own ? [R(own.left), R(own.top), R(own.right), R(own.bottom)].join(',') : 'none') };
+                    }, t2);
+                    H.readoutClearOfLabel = !!place && place.ok; dbgPlace = place ? place.say : 'no readout';
+                    // an edit rebuilds the chart: the same slice is asked again
+                    await page.evaluate(() => window.setOption('pieStartAngle', 24));
+                    await page.waitForTimeout(1400);
+                    const t3 = await tipNow();
+                    H.readoutSurvivesRebuild = !!t2 && !!t3 && t3.text === t2.text;
+                    const es = await emptySpot();
+                    if (es) { await page.touchscreen.tap(es.x, es.y); await page.waitForTimeout(700); H.readoutLeavesOnTapElsewhere = !!t2 && !(await tipNow()); }
+                    else why.push('no empty spot on the pie chart');
+                    await closeEditor();
+                }
+                // ---- a scatter point, tapped twice
+                await page.evaluate(v => { const S = window.PS_SHELL; S.addChart('xyplotbuilder');
+                    S.setRoles('xyplotbuilder', { xvar: v.x, yvar: v.y }); }, vars);
+                await page.waitForTimeout(2800);
+                const point = () => page.evaluate(() => {
+                    const p = document.querySelector('.graphbuilder2-host [data-role="xy-point"]'); if (!p) return null;
+                    p.scrollIntoView({ block: 'center' });
+                    const r = p.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+                });
+                await point(); await page.waitForTimeout(260);
+                let p0 = await point();
+                if (!p0) why.push('no scatter point');
+                if (p0) {
+                    await page.touchscreen.tap(p0.x, p0.y); await page.waitForTimeout(1100);
+                    const s1 = await tipNow();
+                    H.readoutStaysOnScatter = !!s1 && s1.text.length > 3 && await editorOpen();
+                    await point(); await page.waitForTimeout(260); p0 = await point();
+                    await page.touchscreen.tap(p0.x, p0.y); await page.waitForTimeout(1100);
+                    const s2 = await tipNow();
+                    H.readoutOnSecondTap = !!s1 && !!s2 && s2.text === s1.text;
+                    // ---- touch and hold on a colour chip in the panel: its tip
+                    //      (the chip's only words are in its title), and no press
+                    const chipAt = () => page.evaluate(() => {
+                        const pt = document.querySelector('.graphbuilder2-host [data-role="xy-point"]');
+                        const cur = String(pt && pt.getAttribute('fill') || '').toLowerCase();
+                        const b = [...document.querySelectorAll('.gb2-panel button[title]')].find(n => /^#[0-9a-f]{6}$/i.test(n.getAttribute('title') || '') &&
+                            n.getAttribute('title').toLowerCase() !== cur && n.getBoundingClientRect().width > 8);
+                        if (!b) return null; b.scrollIntoView({ block: 'center' });
+                        const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, title: b.getAttribute('title'), cur };
+                    });
+                    await chipAt(); await page.waitForTimeout(260);
+                    const chip = await chipAt();
+                    if (!chip) why.push('no colour chip with a title in the point editor');
+                    if (chip) {
+                        const fillNow = () => page.evaluate(() => String((document.querySelector('.graphbuilder2-host [data-role="xy-point"]') || { getAttribute() { return ''; } }).getAttribute('fill') || '').toLowerCase());
+                        await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: chip.x, y: chip.y }] });
+                        await page.waitForTimeout(950);
+                        const held = await page.evaluate(() => { const t = document.getElementById('ps-tip'); return (t && t.getAttribute('data-open') === '1') ? t.textContent : ''; });
+                        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+                        await page.waitForTimeout(900);
+                        const f1 = await fillNow();
+                        const lingers = await page.evaluate(() => { const t = document.getElementById('ps-tip'); return !!t && t.getAttribute('data-open') === '1'; });
+                        await page.waitForTimeout(2300);
+                        const gone = await page.evaluate(() => { const t = document.getElementById('ps-tip'); return !t || t.getAttribute('data-open') !== '1'; });
+                        // (the tip may leave early: lifting focuses the chip, and on a short
+                        // screen that scrolls the panel, which rightly takes any tip down)
+                        H.holdShowsTip = held === chip.title && gone;
+                        H.holdTipIsNotAPress = held === chip.title && f1 === chip.cur && !!chip.cur && await editorOpen();
+                        dbgTip = 'held "' + held + '" for "' + chip.title + '", lingers ' + lingers + ', gone ' + gone + ', fill ' + chip.cur + ' then ' + f1;
+                    }
+                    await closeEditor();
+                }
+                // ---- the empty title strip: marked at rest, and one tap opens it
+                const zone = await page.evaluate(() => {
+                    const z = [...document.querySelectorAll('.graphbuilder2-host div[aria-hidden="true"]')].find(n => n.style.cursor === 'text' && getComputedStyle(n).display !== 'none');
+                    const h = z && z.firstElementChild; if (!h) return null;
+                    z.scrollIntoView({ block: 'center' });
+                    const r = z.getBoundingClientRect();
+                    return { text: h.textContent, op: parseFloat(getComputedStyle(h).opacity), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+                });
+                if (!zone) why.push('no empty title strip');
+                if (zone) {
+                    await page.waitForTimeout(260);
+                    const z2 = await page.evaluate(() => { const z = [...document.querySelectorAll('.graphbuilder2-host div[aria-hidden="true"]')].find(n => n.style.cursor === 'text' && getComputedStyle(n).display !== 'none');
+                        const r = z.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+                    await page.touchscreen.tap(z2.x, z2.y); await page.waitForTimeout(800);
+                    const editing = await page.evaluate(() => { const a = document.activeElement; return !!a && a.getAttribute('data-role') === 'inline-text-editor'; });
+                    H.titleHintShown = zone.op >= 0.5 && /^Tap to add /.test(zone.text) && editing;
+                    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+                    await closeEditor();
+                }
+                // ---- a note, then Duplicate from its hold menu
+                await page.evaluate(() => { const t = document.querySelector('[data-role="add-ann-menu"] [data-kind="text"]') ||
+                    document.querySelector('.graphbuilder2-host [data-kind="text"]'); if (t) t.click(); });
+                await page.waitForTimeout(1000);
+                await page.keyboard.type('Note'); await page.keyboard.press('Enter'); await page.waitForTimeout(900);
+                await page.evaluate(() => { try { window.getSelection().removeAllRanges(); } catch (e) {} });
+                await closeEditor();
+                const note = () => page.evaluate(() => {
+                    const n = document.querySelector('.graphbuilder2-host text[data-ann-id]'); if (!n) return null;
+                    n.scrollIntoView({ block: 'center' });
+                    const r = n.getBoundingClientRect();
+                    return { x: r.left + r.width / 2, y: r.top + r.height / 2,
+                        n: new Set([...document.querySelectorAll('.graphbuilder2-host [data-ann-id]')].map(e => e.getAttribute('data-ann-id'))).size };
+                });
+                await note(); await page.waitForTimeout(260);
+                const n0 = await note();
+                if (!n0) why.push('no note to duplicate');
+                if (n0) {
+                    await longPress(client, page, n0.x, n0.y, 900); await page.waitForTimeout(500);
+                    const first = await page.evaluate(() => { const m = document.getElementById('ps-contextmenu');
+                        const b = (m && getComputedStyle(m).display !== 'none') ? m.querySelector('button') : null; if (!b) return null;
+                        const r = b.getBoundingClientRect(), mr = m.getBoundingClientRect();
+                        return { text: (b.textContent || '').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2,
+                            onScreen: mr.top >= 0 && mr.bottom <= innerHeight && r.top >= 0 && r.bottom <= innerHeight }; });
+                    if (first && !first.onScreen) why.push('the note menu ran off the screen');
+                    if (first && first.text === 'Duplicate' && first.onScreen) {
+                        await page.touchscreen.tap(first.x, first.y); await page.waitForTimeout(1600);
+                        const n1 = await note();
+                        H.noteMenuDuplicates = !!n1 && n1.n === n0.n + 1;
+                    } else { why.push('the note menu began with ' + (first ? first.text : 'nothing')); await page.keyboard.press('Escape'); }
+                    await page.waitForTimeout(300); await closeEditor();
+                }
+            }
+            // ---- a data cell: Edit value in its hold menu
+            await goWorkspace('data'); await page.waitForTimeout(500);
+            const cell = await page.evaluate(() => {
+                for (const td of document.querySelectorAll('#ps-datagrid td[data-gc]')) {
+                    const r = td.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                    if (r.width < 8 || y < 80 || y > innerHeight - 120) continue;
+                    const h = document.elementFromPoint(x, y);
+                    if (h === td || td.contains(h)) return { x, y };
+                }
+                return null;
+            });
+            if (!cell) why.push('no data cell in reach');
+            if (cell) {
+                await longPress(client, page, cell.x, cell.y, 900); await page.waitForTimeout(450);
+                const ed = await page.evaluate(() => { const m = document.getElementById('ps-cellmenu'), b = document.getElementById('ps-cellmenu-edit');
+                    if (!m || !b || getComputedStyle(m).display === 'none' || getComputedStyle(b).display === 'none') return null;
+                    const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, first: m.querySelector('button') === b }; });
+                if (ed) {
+                    await page.touchscreen.tap(ed.x, ed.y); await page.waitForTimeout(600);
+                    H.cellMenuEdits = ed.first && await page.evaluate(() => { const a = document.activeElement; return !!a && !!a.classList && a.classList.contains('ps-grid-cellinput'); });
+                } else why.push('the cell menu has no Edit value row');
+                await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+            }
+            await goWorkspace('chart');
+        } catch (e) { why.push(String(e && e.message || e).slice(0, 120)); }
+        const note13 = why.length ? ' [' + why.join('; ') + ']' : '';
+        check(dev.id + '/hover/readout', H.readoutStaysOnPie && H.readoutStaysOnScatter && H.readoutOnSecondTap,
+            tag + 'a tapped mark keeps its values up while it is selected (pie ' + H.readoutStaysOnPie + ', scatter ' + H.readoutStaysOnScatter + ', a second tap on the same point ' + H.readoutOnSecondTap + ')' + note13);
+        check(dev.id + '/hover/readout-place', H.readoutClearOfLabel, tag + 'the readout sits inside the chart and clear of the tapped slice\'s own label (' + dbgPlace + ')');
+        check(dev.id + '/hover/readout-life', H.readoutSurvivesRebuild && H.readoutLeavesOnTapElsewhere,
+            tag + 'the readout survives an edit that rebuilds the chart (' + H.readoutSurvivesRebuild + ') and leaves on a tap elsewhere on the chart (' + H.readoutLeavesOnTapElsewhere + ')');
+        check(dev.id + '/hover/tip', H.holdShowsTip && H.holdTipIsNotAPress,
+            tag + 'touch and hold on a control shows its tip, which leaves by itself (' + H.holdShowsTip + '), and the lift is not a press of the control (' + H.holdTipIsNotAPress + '; ' + dbgTip + ')');
+        check(dev.id + '/hover/title', H.titleHintShown, tag + 'the empty title strip says Tap to add at rest, and one tap opens the title for typing');
+        check(dev.id + '/hover/cell', H.cellMenuEdits, tag + 'a held data cell offers Edit value first, and it opens the cell for typing');
+        check(dev.id + '/hover/duplicate', H.noteMenuDuplicates, tag + 'a held note offers Duplicate first, and it makes the copy');
+    }
+
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
     return result;
@@ -1204,6 +1426,15 @@ async function runDesktop(browser) {
             return getComputedStyle(document.getElementById('ps-exporter')).display === 'flex' && !!c && c.value === 'svg' && !!sh && getComputedStyle(sh).display === 'none'; }),
         'desktop: Export opens the dialog at once with SVG as the default, and no share sheet');
     await page.click('#ps-export-close'); await page.waitForTimeout(200);
+    const dh = await page.evaluate(() => {
+        const z = [...document.querySelectorAll('.graphbuilder2-host div[aria-hidden="true"]')].find(n => n.style.cursor === 'text' && getComputedStyle(n).display !== 'none');
+        const h = z && z.firstElementChild, e = document.getElementById('ps-cellmenu-edit');
+        return { hint: h ? h.textContent : '', op: h ? getComputedStyle(h).opacity : '', edit: e ? getComputedStyle(e).display : 'absent',
+            foot: document.querySelectorAll('.ps-grid-touchhint').length,
+            words: (document.getElementById('ps-grid-instructions') || {}).textContent || '' };
+    });
+    check('desktop/hover', /^Click to add /.test(dh.hint) && dh.op === '0' && dh.edit === 'absent' && dh.foot === 0 && !/Double tap/.test(dh.words),
+        'desktop: the title hint still waits for a hovering mouse and says Click, the cell menu has no Edit value row, and the grid\'s instructions name keys (' + dh.hint + ', opacity ' + dh.op + ', ' + dh.edit + ')');
     check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
 }
@@ -1326,13 +1557,16 @@ if (!CONTROL && !CONTROL_TH && !want.length) {
 await browser.close();
 
 if (CONTROL_TH) {
-    // With the engine key withheld, the two rules that need the engine's
-    // guard have to fail: a swipe opens the bar's editor again, and the
-    // finger lifting off the long-press menu selects the bar again.
+    // With the engine key withheld, the rules that need the engine have to
+    // fail: a swipe opens the bar's editor again, the finger lifting off the
+    // long-press menu selects the bar again, and a tapped mark's values do
+    // not stay (the readout pin is the engine's).
     const t = (measured.phone || {}).touch || {};
     const expect = [
         [t.swipeLeavesChartAlone === false, 'without the engine guard a swipe on a bar opens its editor again'],
-        [t.longPressLiftIsQuiet === false, 'without the engine guard the lift off the long-press menu selects the bar again']
+        [t.longPressLiftIsQuiet === false, 'without the engine guard the lift off the long-press menu selects the bar again'],
+        [t.readoutStaysOnScatter === false, 'without the engine key a scatter point\'s values are gone again a moment after the tap'],
+        [t.readoutSurvivesRebuild === false, 'without the engine key a readout does not come back after the chart is rebuilt']
     ];
     let bad = 0;
     for (const [red, msg] of expect) { console.log((red ? '  ok  ' : ' FAIL ') + 'control: ' + msg); if (!red) bad++; }

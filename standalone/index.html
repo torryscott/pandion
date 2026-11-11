@@ -3528,6 +3528,9 @@
     padding: 5px; color: var(--ps-ink-2); background: var(--ps-s0);
     border: 1px solid var(--ps-l4); border-radius: var(--ps-r-md);
     box-shadow: var(--ps-e-2);
+    /* A menu longer than the window scrolls inside itself (a phone held
+       sideways is 340 pixels tall, and the chart's menu is longer). */
+    max-height: calc(var(--ps-vh) - 28px); overflow-y: auto;
   }
   #ps-contextmenu button {
     display: block; width: 100%; min-height: 29px; padding: 5px 9px;
@@ -4940,6 +4943,10 @@
   /* iOS answers a held finger on text or an image with its own callout,
      and the hold is this app's drag and menu gesture. */
   .graphbuilder2-host svg[data-role="gb2-chart-svg"] { -webkit-touch-callout: none; }
+  /* The value readout is never a target: a tap aimed at the mark under it
+     must reach the mark. The engine's own rule says the same, but one of
+     its sweeps can clear it. */
+  #psroot [data-role="xy-tooltip"] { pointer-events: none !important; }
   /* Drawing a shape is a drag from the first pixel, and so is dragging in
      the colour square or along the hue strip: without this the browser
      took those touches for a page scroll and the colour never moved. */
@@ -5262,6 +5269,15 @@
     min-height: 44px; font-size: 15px;
   }
   body.ps-touch .ps-statusbar { font-size: 13px; padding-top: 4px; padding-bottom: 4px; }
+  /* The grid's one line for a finger (the footer writes it in touch mode). */
+  .ps-grid-touchhint { margin-left: 10px; color: var(--ps-muted); }
+  /* The empty title strip says what it is for. Its hint waited for a
+     hovering mouse, so on a touch screen nothing marked the one place a
+     title is added. A strip that has stepped aside for something drawn
+     under it (pointer-events none) stays quiet. */
+  body.ps-touch #psroot div[aria-hidden="true"]:is([style*="cursor: text"], [style*="cursor:text"]):not([style*="pointer-events: none"]):not([style*="pointer-events:none"]) > div {
+    opacity: 0.62 !important;
+  }
   body.ps-touch .ps-statusbar button { min-height: 32px; font-size: 13px; }
   body.ps-touch .ps-pinpage-bar button { min-height: 36px; font-size: 14px; padding: 4px 13px; }
   body.ps-touch .ps-ltools button, body.ps-touch #ps-ltoolbar button,

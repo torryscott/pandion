@@ -155,7 +155,18 @@
     "layoutItemDragMovesAtOnce": true,
     "layoutItemDragMoves": true,
     "tabTapSwitches": true,
-    "keepButtonKeeps": true
+    "keepButtonKeeps": true,
+    "readoutStaysOnPie": true,
+    "readoutClearOfLabel": true,
+    "readoutSurvivesRebuild": true,
+    "readoutLeavesOnTapElsewhere": true,
+    "readoutStaysOnScatter": true,
+    "readoutOnSecondTap": true,
+    "holdShowsTip": true,
+    "holdTipIsNotAPress": true,
+    "titleHintShown": true,
+    "cellMenuEdits": true,
+    "noteMenuDuplicates": true
    }
   },
   "phone-landscape": {
@@ -306,7 +317,18 @@
     "layoutItemDragMovesAtOnce": true,
     "layoutItemDragMoves": true,
     "tabTapSwitches": true,
-    "keepButtonKeeps": true
+    "keepButtonKeeps": true,
+    "readoutStaysOnPie": true,
+    "readoutClearOfLabel": true,
+    "readoutSurvivesRebuild": true,
+    "readoutLeavesOnTapElsewhere": true,
+    "readoutStaysOnScatter": true,
+    "readoutOnSecondTap": true,
+    "holdShowsTip": true,
+    "holdTipIsNotAPress": true,
+    "titleHintShown": true,
+    "cellMenuEdits": true,
+    "noteMenuDuplicates": true
    }
   },
   "android": {
@@ -457,7 +479,18 @@
     "layoutItemDragMovesAtOnce": true,
     "layoutItemDragMoves": true,
     "tabTapSwitches": true,
-    "keepButtonKeeps": true
+    "keepButtonKeeps": true,
+    "readoutStaysOnPie": true,
+    "readoutClearOfLabel": true,
+    "readoutSurvivesRebuild": true,
+    "readoutLeavesOnTapElsewhere": true,
+    "readoutStaysOnScatter": true,
+    "readoutOnSecondTap": true,
+    "holdShowsTip": true,
+    "holdTipIsNotAPress": true,
+    "titleHintShown": true,
+    "cellMenuEdits": true,
+    "noteMenuDuplicates": true
    }
   },
   "tablet": {
@@ -622,7 +655,18 @@
     "layoutPageSwipeLeavesItems": true,
     "layoutItemDragMovesAtOnce": true,
     "layoutItemDragMoves": true,
-    "tabTapSwitches": true
+    "tabTapSwitches": true,
+    "readoutStaysOnPie": true,
+    "readoutClearOfLabel": true,
+    "readoutSurvivesRebuild": true,
+    "readoutLeavesOnTapElsewhere": true,
+    "readoutStaysOnScatter": true,
+    "readoutOnSecondTap": true,
+    "holdShowsTip": true,
+    "holdTipIsNotAPress": true,
+    "titleHintShown": true,
+    "cellMenuEdits": true,
+    "noteMenuDuplicates": true
    }
   },
   "tablet-landscape": {
@@ -783,7 +827,18 @@
     "layoutPageSwipeLeavesItems": true,
     "layoutItemDragMovesAtOnce": true,
     "layoutItemDragMoves": true,
-    "tabTapSwitches": true
+    "tabTapSwitches": true,
+    "readoutStaysOnPie": true,
+    "readoutClearOfLabel": true,
+    "readoutSurvivesRebuild": true,
+    "readoutLeavesOnTapElsewhere": true,
+    "readoutStaysOnScatter": true,
+    "readoutOnSecondTap": true,
+    "holdShowsTip": true,
+    "holdTipIsNotAPress": true,
+    "titleHintShown": true,
+    "cellMenuEdits": true,
+    "noteMenuDuplicates": true
    }
   }
  }

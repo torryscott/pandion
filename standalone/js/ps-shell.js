@@ -14012,6 +14012,10 @@
   // code writes one, and it clears any title so the browser's cannot double up.
   var TIP_DELAY_MS = 420;
   var TIP_TIMER = null, TIP_FOR = null, TIP_WATCH = null;
+  // A tip raised by a held finger (wireTouch): it is not a hover tip, so a
+  // finger lifting or a focus change does not take it down; it leaves a
+  // moment after the lift, or on the next press.
+  var TIP_HELD = false, TIP_HELD_TIMER = 0;
   function setTip(node, text) {
     if (!node) return;
     if (text == null || text === "") {
@@ -14025,6 +14029,8 @@
     if (TIP_FOR === node) showTipFor(node);
   }
   function hideTip() {
+    TIP_HELD = false;
+    if (TIP_HELD_TIMER) { window.clearTimeout(TIP_HELD_TIMER); TIP_HELD_TIMER = 0; }
     if (TIP_TIMER) { window.clearTimeout(TIP_TIMER); TIP_TIMER = null; }
     if (TIP_WATCH) { window.clearInterval(TIP_WATCH); TIP_WATCH = null; }
     var t = document.getElementById("ps-tip");
@@ -14034,9 +14040,10 @@
       TIP_FOR.removeAttribute("aria-describedby");
     TIP_FOR = null;
   }
-  function showTipFor(node) {
+  function showTipFor(node, heldText) {
     var t = document.getElementById("ps-tip");
-    var text = node && node.getAttribute && node.getAttribute("data-tip");
+    var text = heldText ||
+      (node && node.getAttribute && node.getAttribute("data-tip"));
     if (!t || !text) return;
     TIP_FOR = node;
     t.textContent = text;
@@ -14087,6 +14094,8 @@
       }, TIP_DELAY_MS);
     });
     document.addEventListener("pointerout", function (e) {
+      // A finger "leaves" the moment it lifts; a held tip outlasts that.
+      if (e.pointerType === "touch") return;
       var target = tipTarget(e.target);
       if (!target) return;
       var to = tipTarget(e.relatedTarget);
@@ -14103,6 +14112,7 @@
     // first item of the menu it had opened. Keyboard focus is untouched, and
     // so is a programmatic focus() call, because neither carries a press.
     document.addEventListener("focusin", function (e) {
+      if (TIP_HELD) return;
       var target = tipTarget(e.target);
       if (target && target === TIP_PRESSED &&
           Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
@@ -17439,7 +17449,10 @@
       '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
       '<span class="ps-grid-shape">' + shapeText(n, t.order.length, "\u00d7", true) +
       (gridShouldVirtualize(t)
-       ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
+       ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>" +
+      // Touch mode only: a finger has no Enter or F2 to be told about.
+      (touchModeOn()
+       ? '<span class="ps-grid-touchhint">Double tap a cell to edit it</span>' : "");
   }
 
   // ---- data undo/redo (Cmd/Ctrl+Z, Cmd/Ctrl+Y or Shift+Z) ----
@@ -19164,6 +19177,25 @@
     CELL_MENU = { col: col, row: row, cells: cells, on: on,
                   rowOn: !rowExcluded };
     var m = el("ps-cellmenu");
+    // Edit value leads the menu in touch mode, where a double tap was the
+    // only way into a cell and nothing said so. A mouse has the double
+    // click, Enter and F2, and its menu is left exactly as it was.
+    var editRow = document.getElementById("ps-cellmenu-edit");
+    if (touchModeOn()) {
+      if (!editRow) {
+        editRow = document.createElement("button");
+        editRow.type = "button";
+        editRow.id = "ps-cellmenu-edit";
+        editRow.textContent = "Edit value";
+        editRow.addEventListener("click", function () {
+          if (!CELL_MENU) return;
+          var cm = CELL_MENU;
+          hideCellMenu();
+          gridOpenEditor(cm.col, cm.row);
+        });
+        m.insertBefore(editRow, m.firstChild);
+      }
+    } else if (editRow) editRow.parentNode.removeChild(editRow);
     var valueToggle = el("ps-cellmenu-toggle");
     valueToggle.disabled = rowExcluded;
     valueToggle.textContent = rowExcluded
@@ -36618,7 +36650,11 @@
     }
     menu.style.display = "block";
     menu.style.left = Math.min(x, window.innerWidth - 200) + "px";
-    menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 8) + "px";
+    // Never above the top edge. On a phone held sideways a long menu is
+    // taller than the window (the stylesheet caps it and lets it scroll),
+    // and the subtraction went negative: the first rows opened off screen.
+    menu.style.top = Math.max(6, Math.min(y, window.innerHeight - menu.offsetHeight - 8)) + "px";
+    menu.scrollTop = 0;
     var first = menu.querySelector("button:not([disabled])");
     if (first) first.focus();
   }
@@ -37048,6 +37084,7 @@
     TOUCH_MODE = on;
     if (had === on) return false;
     document.body.classList.toggle("ps-touch", on);
+    try { touchGridWords(); } catch (eW) {}
     return true;
   }
   // The chart SURFACE: the drawing and the engine's handles laid over it.
@@ -37160,9 +37197,48 @@
     if (v) host.setAttribute("data-ps-bar-drag", v);
     else host.removeAttribute("data-ps-bar-drag");
   }
+  // The empty title strips (chart title, a cleared axis or legend title)
+  // carry a hint that waited for a hovering mouse and said Click. On a touch
+  // screen the stylesheet shows the hint at rest; this gives it the word.
+  // Engine text, rewritten after each redraw like the bar axis above, and
+  // put back when touch mode leaves.
+  function touchZoneWords() {
+    var host = hostEl();
+    if (!host) return;
+    var on = touchModeOn();
+    var hints = host.querySelectorAll('div[aria-hidden="true"] > div');
+    for (var i = 0; i < hints.length; i++) {
+      var h = hints[i], z = h.parentNode;
+      if (!z || !z.style || z.style.cursor !== "text") continue;
+      var txt = h.textContent || "";
+      if (on && txt.indexOf("Click to add ") === 0)
+        h.textContent = "Tap to add " + txt.slice(13);
+      else if (!on && txt.indexOf("Tap to add ") === 0)
+        h.textContent = "Click to add " + txt.slice(11);
+    }
+  }
+  // The grid's spoken instructions name keys; in touch mode they lead with
+  // what a finger does. The key sentences stay for a phone with a keyboard.
+  function touchGridWords() {
+    var p = document.getElementById("ps-grid-instructions");
+    if (!p) return;
+    if (!p.hasAttribute("data-ps-keys"))
+      p.setAttribute("data-ps-keys", p.textContent.replace(/\s+/g, " ").trim());
+    var keys = p.getAttribute("data-ps-keys");
+    var want = touchModeOn()
+      ? "Double tap a cell to edit it, or touch and hold it and choose " +
+        "Edit value. " + keys
+      : keys;
+    if (p.textContent !== want) p.textContent = want;
+  }
   function touchBarAxisSoon() {
     if (TOUCH_BAR_AXIS_RAF) return;
-    try { TOUCH_BAR_AXIS_RAF = requestAnimationFrame(touchBarAxisSync); }
+    try {
+      TOUCH_BAR_AXIS_RAF = requestAnimationFrame(function () {
+        touchBarAxisSync();
+        try { touchZoneWords(); } catch (eZ) {}
+      });
+    }
     catch (e) { TOUCH_BAR_AXIS_RAF = 0; }
   }
   function touchCue(on, x, y) {
@@ -37191,6 +37267,53 @@
     touchCue(false);
     TP = null;
   }
+  // Touch and hold on an ordinary control asks what it does. A finger has
+  // no hover, so on a touch screen no control could say: the shell's own
+  // tips are off for touch (a tip raised by a tap never leaves), and the
+  // browser never shows the engine's title attributes there. What is shown
+  // is the control's own words: the shell's data-tip, the engine's title,
+  // or the accessible name where that says more than the visible label
+  // (an eye, a trash can, an arrow). The walk stops at the first control
+  // with nothing more to say, so a labelled button stays silent.
+  var TOUCH_TIP_CONTROLS = "button, a[href], summary, label, [role=button], " +
+    "[role=tab], [role=menuitem], [role=switch], [role=checkbox], [role=radio]";
+  function touchTipText(t) {
+    var n = t, hops = 0;
+    while (n && n.nodeType === 1 && n !== document.body && hops++ < 6) {
+      var tip = n.getAttribute("data-tip") || n.getAttribute("title") || "";
+      if (!tip && n.matches && n.matches(TOUCH_TIP_CONTROLS)) {
+        var name = String(n.getAttribute("aria-label") || "")
+          .replace(/\s+/g, " ").trim();
+        var seen = String(n.innerText || n.textContent || "")
+          .replace(/\s+/g, " ").trim();
+        if (!name || name.toLowerCase() === seen.toLowerCase()) return null;
+        tip = name;
+      }
+      tip = String(tip).replace(/\s+/g, " ").trim();
+      if (tip) return { node: n, text: tip };
+      n = n.parentNode;
+    }
+    return null;
+  }
+  function touchTipFire(tp, t) {
+    var hit = null;
+    try { hit = touchTipText(t); } catch (e) {}
+    if (!hit) return;
+    showTipFor(hit.node, hit.text);
+    if (TIP_FOR !== hit.node) return;      // nothing was shown
+    TIP_HELD = true;
+    // The lift is the end of a question, not a press of the control.
+    tp.consumed = true; tp.tip = true;
+    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e3) {}
+  }
+  function touchTipLinger() {
+    if (!TIP_HELD) return;
+    if (TIP_HELD_TIMER) window.clearTimeout(TIP_HELD_TIMER);
+    TIP_HELD_TIMER = window.setTimeout(function () {
+      TIP_HELD_TIMER = 0;
+      if (TIP_HELD) hideTip();
+    }, 2200);
+  }
   // The app's own long-press: the same contextmenu event a right-click
   // sends, at the same place, so every menu the app already has answers it.
   function touchMenuFire(tp) {
@@ -37209,7 +37332,7 @@
     // would swallow it.
     if (!tp.chart && !(t.closest && t.closest("#ps-datagrid, #ps-datacard, " +
         "#ps-lviewport, #ps-pinpane, .ps-tab, [data-chart-tab], " +
-        ".ps-project-panel"))) return;
+        ".ps-project-panel"))) { touchTipFire(tp, t); return; }
     var ev;
     try {
       ev = new MouseEvent("contextmenu", {
@@ -37466,6 +37589,7 @@
       if (!e.isTrusted) return;
       touchPressDrop();
       if (tp.dead) return;
+      if (tp.tip) touchTipLinger();
       var swiped = tp.chart && tp.early && !tp.armed;
       if (tp.consumed || swiped)
         TOUCH_SWALLOW_CLICK_UNTIL = Date.now() + 450;
@@ -38630,6 +38754,21 @@
             action: function () { pasteChartFormatting(); } },
           { label: "Reset chart styling", command: "reset" }
         ]);
+        // A drawn shape, a note, a reference line or a bracket under the
+        // press: Duplicate. It was Cmd/Ctrl+D or Alt-drag only, so a touch
+        // screen had no way to it at all. The engine makes the copy.
+        var annEl = t.closest("[data-ann-id]");
+        var annId = annEl && annEl.getAttribute("data-ann-id");
+        if (annId && typeof window.__gb2_duplicateAnnotation === "function") {
+          items = [
+            { label: "Duplicate", key: "ann-duplicate",
+              shortcut: touchModeOn() ? "" : "Cmd/Ctrl+D",
+              action: function () {
+                window.__gb2_duplicateAnnotation(annId);
+              } },
+            "separator"
+          ].concat(items);
+        }
       } else if (t.closest(".ps-controls, .ps-project-panel")) {
         items = [
           { label: "Rename document\u2026", command: "rename-document" },
