@@ -106713,6 +106713,44 @@
                 uniqKinds.push(kinds[uk]);
             }
             kinds = uniqKinds;
+            // Text the Label parts list leaves out still needs a stop. That
+            // list names one tick label, the Y axis numbers whenever there
+            // are any, so the X axis numbers of a scatter or a histogram
+            // had none; and it never names the legend's title or labels.
+            // They are listed here, for the keyboard only: a kind per
+            // family, one stop per label, straight from the registry of
+            // editable text (the rule _anatKindEls applies to "drag:").
+            function _kbTextKind(name, prefix) {
+                var tInsts = [];
+                var tWhole = prefix.charAt(prefix.length - 1) !== ":";
+                try {
+                    for (var tk in editableElsByDragId) {
+                        if (!Object.prototype.hasOwnProperty.call(editableElsByDragId, tk)) continue;
+                        if (tWhole ? tk !== prefix : tk.indexOf(prefix) !== 0) continue;
+                        var tEl = editableElsByDragId[tk];
+                        if (!tEl || !tEl.isConnected) continue;
+                        if (!(tEl.textContent || "").trim().length) continue;
+                        try { var tB = tEl.getBBox(); if (!(tB.width || tB.height)) continue; } catch (_eTB) { continue; }
+                        if (claimedKey["text:" + tk]) continue;
+                        claimedKey["text:" + tk] = true;
+                        tInsts.push({ key: "text:" + tk });
+                    }
+                } catch (_eTK) {}
+                return tInsts.length ? { name: name, insts: tInsts } : null;
+            }
+            function _kbPutAfter(kind, isAnchor) {
+                if (!kind) return;
+                for (var pa = 0; pa < kinds.length; pa++) {
+                    if (isAnchor(kinds[pa].insts[0].key)) { kinds.splice(pa + 1, 0, kind); return; }
+                }
+                kinds.push(kind);
+            }
+            _kbPutAfter(_kbTextKind("X tick label", "xTick:"),
+                function (k0) { return k0.indexOf("text:yTick:") === 0; });
+            var _kbLegLabels = _kbTextKind("Legend label", "groupItem:");
+            _kbPutAfter(_kbLegLabels, function (k0) { return k0 === "legend"; });
+            _kbPutAfter(_kbTextKind("Legend title", "groupTitle"),
+                function (k0) { return k0 === "legend"; });
             var dataRe = /^(bars:|line|dot|xyPoint|dataPoints|distHist:|distDens|distQQ|distEcdf|freqSlice:|paretoLine|likertLevel:|likertMeanDots|corrCells|box)/;
             var front = [], back = [];
             for (var f = 0; f < kinds.length; f++) {

@@ -30,6 +30,12 @@
 //      moves from slice to slice.
 //   4. Raincloud: Tab steps to the next part instead of leaving at once, and
 //      a full circle with Alt+Down never selects a cloud with no group.
+//   5. Scatter: the X axis numbers are a stop, right after the Y ones.
+//   6. The legend's title and labels are stops; Alt+Right moves between
+//      labels (plain arrows nudge a selected text).
+//   7. An axis title of a single letter is a stop.
+// Cases 5 to 7 came from the same review's second pass: text the Label
+// parts list leaves out, which the keyboard builds its stops from.
 // A guard for a chart that always worked: a bar chart keeps the same stops
 // in the same order.
 //
@@ -262,15 +268,81 @@ startCase('4', 'Raincloud: Tab steps on from a clicked cloud; no cloud without a
     await page.close();
 }
 
+// ---------------------------------------------------------------- 5
+// Text the Label parts list leaves out. That list names one tick label (the
+// Y axis numbers whenever there are any) and never the legend's own text,
+// so none of these had a stop.
+startCase('5', 'Scatter: Tab reaches the X axis numbers as well as the Y ones');
+{
+    const page = await openChart('xyplotbuilder', { xvar: 't1', yvar: 'score', groupVar: 'sex' }, { xyBin: 'none' });
+    const start = await clickMark(page, '[data-role="xy-point"]');
+    ok(!!start && /^xyPoint:/.test(start.key) && start.onChart,
+       `a click on a point selects its group (${start ? start.key : 'no point found'})`);
+    const walk = await tabWalk(page, 18);
+    const kinds = walk.stops.map(kindOf);
+    ok(kinds.includes('text:yTick'), 'the Y axis numbers are a stop');
+    key(kinds.includes('text:xTick'), `and so are the X axis numbers (${kinds.join(', ')})`);
+    key(kinds.indexOf('text:xTick') === kinds.indexOf('text:yTick') + 1, 'right after the Y ones');
+    ok(walk.left, 'and Tab leaves the chart in the end');
+    await page.close();
+}
+
+// ---------------------------------------------------------------- 6
+startCase('6', 'Legend: its title and its labels are stops; Right moves between labels');
+{
+    const page = await openChart('plotbuilder', { xvar: 'grp', yvar: 'score', groupVar: 'sex' }, { graphType: 'bar' });
+    await clickMark(page, '[data-bar-cat]:not([data-role])');
+    const walk = await tabWalk(page, 18);
+    const kinds = walk.stops.map(kindOf);
+    const at = kinds.indexOf('legend');
+    key(kinds[at + 1] === 'text:groupTitle' && kinds[at + 2] === 'text:groupItem',
+        `after the legend come its title and a label (${kinds.slice(at).join(', ')})`);
+    ok(walk.left, 'and Tab leaves the chart in the end');
+    // back in, to a legend label, then sideways
+    await clickMark(page, '[data-bar-cat]:not([data-role])');
+    let s = await state(page);
+    for (let i = 0; i < 16 && !/^text:groupItem:/.test(s.key); i++) {
+        await page.keyboard.press('Tab'); await w(page, 240);
+        s = await state(page);
+        if (!s.onChart) break;
+    }
+    const first = s.key;
+    await page.keyboard.press('Alt+ArrowRight'); await w(page, 260);
+    const second = (await state(page)).key;
+    key(/^text:groupItem:/.test(first) && /^text:groupItem:/.test(second) && first !== second,
+        `Alt+Right steps from one legend label to the next (${first || 'none'} then ${second || 'none'})`);
+    await page.close();
+}
+
+// ---------------------------------------------------------------- 7
+startCase('7', 'An axis title of one letter is a stop like any other');
+{
+    const page = await openChart('plotbuilder', { xvar: 'grp', yvar: 'score', groupVar: 'sex' },
+        { graphType: 'bar', chartSpec: JSON.stringify({ yTitleOverride: true, yTitle: 'S' }) });
+    const shown = await page.evaluate(() => {
+        const host = document.querySelector('.graphbuilder2-host');
+        return Array.from(host.querySelectorAll('svg text')).some(t => t.textContent.trim() === 'S');
+    });
+    ok(shown, 'the chart shows the one-letter title');
+    await clickMark(page, '[data-bar-cat]:not([data-role])');
+    const walk = await tabWalk(page, 18);
+    key(walk.stops.includes('text:yTitle'), `Tab reaches it (${walk.stops.map(kindOf).join(', ')})`);
+    await page.close();
+}
+
 // ---------------------------------------------------------------- guards
 startCase('guard', 'a bar chart keeps its stops in the same order', true);
 {
     const page = await openChart('plotbuilder', { xvar: 'grp', yvar: 'score', groupVar: 'sex' }, { graphType: 'bar' });
     const start = await clickMark(page, '[data-bar-cat]:not([data-role])');
-    const walk = await tabWalk(page, 14);
+    const walk = await tabWalk(page, 18);
     const kinds = walk.stops.map(kindOf).join(' > ');
-    ok(!!start && /^bars:/.test(start.key) &&
-       kinds === 'yAxis > text:yTitle > xAxis > text:xTitle > text:xCat > text:yTick > errorBars > legend' && walk.left,
+    // Since the legend's own text became reachable (case 6) the walk ends
+    // with it; under the control the pre-fix page stops at the legend.
+    const want = 'yAxis > text:yTitle > xAxis > text:xTitle > text:xCat > text:yTick > errorBars > legend';
+    const tail = ' > text:groupTitle > text:groupItem';
+    ok(!!start && /^bars:/.test(start.key) && walk.left &&
+       (kinds === want + tail || (EXPECT_BROKEN && kinds === want)),
        `bars, then ${kinds}, then out`);
     await page.close();
 }
