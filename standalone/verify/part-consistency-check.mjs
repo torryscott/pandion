@@ -20,6 +20,12 @@
 //            the dots editor). One now becomes the other, and the way back
 //            returns to the level that was open.
 //
+//   outline  A click on a number the chart computes (a bar's value, a pie
+//            slice's label, the number on a Likert segment or in a
+//            correlation cell, a number on the correlation colour scale)
+//            opened that kind's one shared editor and drew nothing on the
+//            chart. Every label of the kind is now outlined.
+//
 // Every case starts from real mouse and keyboard input on the standalone
 // page. CONTROL: PS_EXPECT_BROKEN=1 with PS_PAGE aimed at a page built
 // before the fixes must find every case red, or the probe proves nothing.
@@ -197,6 +203,21 @@ async function openChart(mod, roles, real) {
                     marks += g.childElementCount;
                 return { open, title: title.replace(/\s+/g, ' ').trim(), marks };
             },
+            // Of the visible labels of this kind, how many sit inside one
+            // of the light boxes that mark a shared-editor selection.
+            outlined(sel) {
+                const svg = svgOf();
+                const boxes = Array.from(svg.querySelectorAll('polygon.gb2-halo-union')).map(b => b.getBoundingClientRect());
+                let labels = 0, covered = 0;
+                for (const el of svg.querySelectorAll(sel)) {
+                    const r = el.getBoundingClientRect();
+                    if (!(r.width > 0 && r.height > 0)) continue;
+                    labels++;
+                    if (boxes.some(b => b.left <= r.left + 1 && b.top <= r.top + 1 &&
+                                        b.right >= r.right - 1 && b.bottom >= r.bottom - 1)) covered++;
+                }
+                return { labels, covered, boxes: boxes.length };
+            },
             // The one selected part, as the engine stores it.
             key() {
                 let sel = [];
@@ -352,6 +373,38 @@ if (wanted('likert')) {
         await switchType(page, 'likertdiverging');
         const p3 = await panelOf(page), k3 = await selKey(page);
         key(p3.open && /^likertLevel:.+/.test(k3), `with no level opened before, a switch to the bars opens a level's editor (${p3.open ? k3 : 'panel closed'})`);
+        await page.close();
+    }
+}
+
+// ---------------------------------------------------------------- outline
+if (wanted('outline')) {
+    startCase('outline', 'A click on a computed number outlines every label its editor changes');
+    const KINDS = [
+        { name: 'bar value labels', sel: 'text:barValueLabel', labels: '[data-role="bar-value-label"]',
+          chart: ['plotbuilder', { xvar: 'grp', yvar: 'y', groupVar: 'sex' },
+                  { graphType: 'bar', chartSpec: JSON.stringify({ barValueLabels: true }) }] },
+        { name: 'pie slice labels', sel: 'text:pieSliceLabel', labels: '[data-role="freq-slice-label"]',
+          chart: ['freqplotbuilder', { var: 'grp' }, { graphType: 'pie' }] },
+        { name: 'Likert segment numbers', sel: 'text:likertValueLabel', labels: '[data-role="likert-value"]',
+          chart: ['likertplotbuilder', { items: ['q1', 'q2', 'q3', 'q4'] }, { graphType: 'likertdiverging' }] },
+        { name: 'correlation cell numbers', sel: 'text:corrValueLabel', labels: '[data-role="corr-value"]',
+          chart: ['corrplotbuilder', { vars: ['x', 'y', 't1', 't2'] }, { graphType: 'corrheatmap' }] },
+        { name: 'colour scale numbers', sel: 'text:corrLegendTick', labels: '[data-role="corr-legend-tick"]',
+          chart: ['corrplotbuilder', { vars: ['x', 'y', 't1', 't2'] }, { graphType: 'corrheatmap' }] }
+    ];
+    for (const kind of KINDS) {
+        const page = await openChart(...kind.chart);
+        const clicked = await clickAt(page, kind.labels);
+        const k = await selKey(page);
+        ok(clicked && k === kind.sel, `${kind.name}: a click on one opens their editor (${k || 'nothing selected'})`);
+        const o = await page.evaluate((q) => window.__pc.outlined(q), kind.labels);
+        key(o.labels > 0 && o.covered === o.labels,
+            `${kind.name}: every label is outlined (${o.covered} of ${o.labels})`);
+        await page.keyboard.press('Escape'); await w(page, 350);
+        await page.keyboard.press('Escape'); await w(page, 350);
+        const gone = await page.evaluate((q) => window.__pc.outlined(q), kind.labels);
+        ok(gone.boxes === 0, `${kind.name}: and the outlines leave with the selection`);
         await page.close();
     }
 }

@@ -23391,6 +23391,53 @@
                     // group; the helper below works regardless.
                     try { addIndicatorPolygonForTextEl(el, { pad: 3 }); }
                     catch (e2) {}
+                } else {
+                    // Number labels the chart computes (the values on bars,
+                    // pie slices, Likert segments and correlation cells, and
+                    // the numbers on the correlation colour scale) share ONE
+                    // editor per kind: its selection names the kind, not a
+                    // label, so no element is registered under it and nothing
+                    // was drawn - a panel open with no mark on the chart.
+                    // Every label of the kind gets a light dashed box, since
+                    // an edit in that panel changes all of them. A chart
+                    // carrying more than 150 such labels gets one box round
+                    // the plot instead of a lattice of them.
+                    var _nlSel = {
+                        barValueLabel: '[data-role="bar-value-label"]',
+                        pieSliceLabel: '[data-role="freq-slice-label"]',
+                        likertValueLabel: '[data-role="likert-value"]',
+                        corrValueLabel: '[data-role="corr-value"], [data-role="corr-value-p"]',
+                        corrLegendTick: '[data-role="corr-legend-tick"]'
+                    };
+                    if (Object.prototype.hasOwnProperty.call(_nlSel, id)) {
+                        var _nlEls = [];
+                        try { _nlEls = svg.querySelectorAll(_nlSel[id]); } catch (_eNl) {}
+                        var _nlShown = [];
+                        for (var _nli = 0; _nli < _nlEls.length; _nli++) {
+                            try {
+                                var _nlB = _nlEls[_nli].getBBox();
+                                if (_nlB && _nlB.width && _nlB.height) _nlShown.push(_nlEls[_nli]);
+                            } catch (_eNb) {}
+                        }
+                        if (_nlShown.length > 150) {
+                            addIndicatorBox(chartLeft, chartTop, innerW, innerH);
+                        } else {
+                            for (var _nlj = 0; _nlj < _nlShown.length; _nlj++) {
+                                // These labels sit ON the marks, whose fill
+                                // can be as dark as the dashes: a white line
+                                // under them keeps the box readable on a
+                                // dark bar and disappears on a light one.
+                                try {
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, stroke: "#ffffff", strokeWidth: 2.75, strokeOpacity: 0.9,
+                                        dashArray: "none", "class": "gb2-halo-union" });
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, strokeWidth: 1.25, strokeOpacity: 0.9,
+                                        dashArray: "4,3", "class": "gb2-halo-union" });
+                                } catch (_eNp) {}
+                            }
+                        }
+                    }
                 }
             } else if (sel.indexOf("annotation:") === 0) {
                 // Treat text annotations like chart text - dashed halo
