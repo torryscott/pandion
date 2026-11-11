@@ -7,16 +7,19 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-11T05:45Z 6bab100">
+<meta name="pandion-build" content="2026-11-11T21:08Z 78fd7eb">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 6bab100: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 78fd7eb: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a tap edits, a drag moves a part at once, a swipe
      on empty space scrolls, touch and hold still opens the part's menu; a
      touch density with larger controls and text; the phone frame and
      sharing; a tapped part keeps its values on screen, touch and hold on a
      button shows its tip, the title strip says Tap to add title, a data
-     cell's menu starts with Edit value and a shape's with Duplicate), so it
+     cell's menu starts with Edit value and a shape's with Duplicate; a
+     long value readout wraps inside the screen, the editing panel's title
+     is whole with its Applies to switch on a line of its own, and menu rows
+     show no keyboard shortcuts until a keyboard is used), so it
      can be tried on a real phone before it ships. It does not carry the next-release queue that
      /app-next/ shows. Not linked from the site, not indexed, refreshed or
      removed as the work moves. The app at /app/ is the released one. -->
@@ -4969,6 +4972,21 @@
      must reach the mark. The engine's own rule says the same, but one of
      its sweeps can clear it. */
   #psroot [data-role="xy-tooltip"] { pointer-events: none !important; }
+  /* A readout is one unbroken line per fact, drawn for a mouse on a wide
+     chart. On a phone a long category or item name ran it past the right
+     edge of the screen (a pie slice named by a sentence: 12 px off a 390 px
+     screen, more with every word). In touch mode it wraps: never wider than
+     the chart it sits in, and never wider than the screen when the chart
+     has been zoomed past it (--ps-tip-max, the screen's width in the
+     chart's own units, written by touchTipRoom). width: max-content keeps
+     the size the same wherever the readout is placed, so the engine can
+     measure it once and then move it. border-box, or the limit would be
+     on the text alone and the padding would still cross the edge. */
+  body.ps-touch #psroot [data-role="xy-tooltip"] {
+    white-space: normal !important; width: max-content; box-sizing: border-box;
+    max-width: min(calc(100% - 8px), var(--ps-tip-max, 100000px));
+    overflow-wrap: anywhere;
+  }
   /* Drawing a shape is a drag from the first pixel, and so is dragging in
      the colour square or along the hue strip: without this the browser
      took those touches for a page scroll and the colour never moved. */
@@ -5351,6 +5369,29 @@
   /* Every tab stays reachable: the row wraps instead of clipping its end. */
   body.ps-touch #psroot .gb2-panel [data-gb2-promoted-tabbar="1"] {
     flex-wrap: wrap !important; height: auto !important;
+  }
+  /* The panel's title bar is one row drawn for a 700px panel: what is
+     being edited on the left, the Applies to switch and the eye on the
+     right. In a narrow panel the switch took the room and the title was
+     cut to "BAR C..." or to one letter. Same answer as the 380px dock
+     beside the chart: the title keeps the first line with the eye, and the
+     switch takes a line of its own under it. A panel is narrow by its OWN
+     width (data-ps-narrow, set by touchPanelWatch under 560px), since a
+     tablet held upright has a chart column as narrow as a phone and a
+     query asked of the zoomed chart answers differently in Chrome and
+     Safari. A wide panel keeps the single row. */
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] { flex-wrap: wrap; }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] > span:first-child:not([data-role]) {
+    flex: 1 1 0 !important; min-width: 0;
+  }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="gb2-crumb"] { max-width: 100%; overflow: hidden; }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="gb2-crumb"] > span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] [data-role="scope-title-host"],
+  body.ps-touch .gb2-panel[data-ps-narrow] [data-role="inspector-title"] [data-role="bs-title-scope"] {
+    flex-basis: 100%; margin-left: 0 !important; margin-right: 0 !important;
+    margin-top: 6px; order: 3; flex-wrap: wrap;
   }
 
   @media print {
@@ -7723,6 +7764,6 @@
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.061ded7503.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.939c149c05.js"></script>
+<script src="lib/ps-shell.9447bf8ca7.js"></script>
 </body>
 </html>
