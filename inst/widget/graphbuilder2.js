@@ -59227,6 +59227,35 @@
         }
         // Detect the labelable parts of the CURRENT chart. Each entry is
         // { name, explain, el, selKey }. Absent / hidden parts are skipped.
+        // The group (or, on an ungrouped chart, the category) of the cell an
+        // element sits in, for elements that carry no identity of their own:
+        // a raincloud draws its cloud and its mini box in unlabelled groups
+        // beside the cell's own [data-bar-cat] group, so the cell is found by
+        // position - the role-less cell group whose box overlaps this
+        // element's the most. Without it those parts keyed as a bare "bars:"
+        // and never matched the "bars:<group>" a click on them selects.
+        function _anatCellGroupOf(el) {
+            var best = "", bestA = -1;
+            try {
+                var eb = _anatBBoxInSvg(el);
+                if (!eb) return "";
+                var cells = svg.querySelectorAll('[data-bar-cat]:not([data-role])');
+                for (var ci = 0; ci < cells.length; ci++) {
+                    if (cells[ci] === el) continue;
+                    var cb = _anatBBoxInSvg(cells[ci]);
+                    if (!cb) continue;
+                    var ox = Math.min(eb.x + eb.w, cb.x + cb.w) - Math.max(eb.x, cb.x);
+                    var oy = Math.min(eb.y + eb.h, cb.y + cb.h) - Math.max(eb.y, cb.y);
+                    if (ox < 0 || oy < 0) continue;
+                    var oa = Math.max(ox, 1) * Math.max(oy, 1);
+                    if (oa > bestA) {
+                        bestA = oa;
+                        best = cells[ci].getAttribute("data-bar-group") || cells[ci].getAttribute("data-bar-cat") || "";
+                    }
+                }
+            } catch (_eCG) {}
+            return best;
+        }
         function _anatLabelSpecs() {
             var specs = [];
             var gt = (data && data.graphType) || "bar";
@@ -59259,7 +59288,7 @@
                 return best;
             }
             function grpOf(el) { if (!el) return ""; try { return el.getAttribute("data-bar-group") || el.getAttribute("data-bar-cat") || ""; } catch (_e) { return ""; } }
-            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode); } catch (_e) { return ""; } }
+            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode) || _anatCellGroupOf(el); } catch (_e) { return ""; } }
             function attrOf(el, a) { if (!el) return ""; try { return el.getAttribute(a) || ""; } catch (_e) { return ""; } }
             // --- Title + axes ---
             add("Chart title", "The overall heading for the whole figure. Double-click to rename it, or click to restyle.", editableElsByDragId["chartTitle"], "text:chartTitle");
@@ -59427,7 +59456,7 @@
             add("Normal curve", "A reference bell curve with the data's own mean and SD, for comparing the shape against a normal.", biggest('[data-role="dist-normal"]'), "distNormal", { anchor: "peak", edge: "top" });
             add("Rug marks", "Small ticks along the axis showing where each individual value falls.", biggest('[data-role="dist-rug"]'), "distRug");
             // --- Frequencies ---
-            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + grpOf(slice), { body: true });
+            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + (grpOf(slice) || attrOf(slice, "data-cat")), { body: true });
             var sliceLab = biggest('[data-role="freq-slice-label"]'); if (sliceLab) add("Slice label", "The percentage or count printed on each wedge.", sliceLab, "text:pieSliceLabel");
             add("Cumulative line", "Tracks the running cumulative percentage across the sorted categories (the Pareto line).", biggest('[data-role="pareto-line"]'), "paretoLine", { anchor: "line" });
             if (gt === "pareto") add("Cumulative % axis", "The right-hand 0-100% scale; the cumulative line is read against it.", biggest('[data-role="pareto-axis"]'), "");
@@ -59815,7 +59844,14 @@
             }
             var GRP = ["bars:", "distHist:", "distDensity:", "distQQ:", "distEcdf:", "xyPoint:", "xyFit:", "xyEllipse:", "xyDensity2D:", "freqSlice:"];
             for (var gi = 0; gi < GRP.length; gi++) {
-                if (oldKey.indexOf(GRP[gi]) === 0) { var g2 = grpOf2(el); return g2 ? (GRP[gi] + g2) : oldKey; }
+                if (oldKey.indexOf(GRP[gi]) === 0) {
+                    var g2 = grpOf2(el);
+                    // a pie slice names its category in data-cat; a
+                    // raincloud's cloud and box are found by their cell
+                    if (!g2 && GRP[gi] === "freqSlice:") g2 = ga(el, "data-cat");
+                    if (!g2 && GRP[gi] === "bars:") g2 = _anatCellGroupOf(el);
+                    return g2 ? (GRP[gi] + g2) : oldKey;
+                }
             }
             if (oldKey.indexOf("likertLevel:") === 0) { var lv2 = ga(el, "data-level"); return lv2 ? ("likertLevel:" + lv2) : oldKey; }
             if (oldKey.indexOf("likertItem:") === 0) { var it2 = ga(el, "data-item"); return it2 ? ("likertItem:" + it2) : oldKey; }
@@ -106653,6 +106689,26 @@
                 if (!insts.length) insts.push({ key: sp.selKey });
                 kinds.push({ name: sp.name || sp.selKey, insts: insts });
             }
+            // One stop per selection. Two parts that open the same editor
+            // (a line and its markers, Q-Q points and their reference line)
+            // are one place to the keyboard: _kbFindPos looks the current
+            // selection up by key, so when two kinds held the same keys it
+            // always answered the first and Tab stepped to the second
+            // forever, never reaching the axes, the legend or the editor.
+            var claimedKey = Object.create(null), uniqKinds = [];
+            for (var uk = 0; uk < kinds.length; uk++) {
+                var keptInsts = [];
+                for (var ui = 0; ui < kinds[uk].insts.length; ui++) {
+                    var instKey = kinds[uk].insts[ui].key;
+                    if (claimedKey[instKey]) continue;
+                    claimedKey[instKey] = true;
+                    keptInsts.push(kinds[uk].insts[ui]);
+                }
+                if (!keptInsts.length) continue;
+                kinds[uk].insts = keptInsts;
+                uniqKinds.push(kinds[uk]);
+            }
+            kinds = uniqKinds;
             var dataRe = /^(bars:|line|dot|xyPoint|dataPoints|distHist:|distDens|distQQ|distEcdf|freqSlice:|paretoLine|likertLevel:|likertMeanDots|corrCells|box)/;
             var front = [], back = [];
             for (var f = 0; f < kinds.length; f++) {
