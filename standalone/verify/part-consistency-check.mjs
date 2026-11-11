@@ -26,6 +26,11 @@
 //            opened that kind's one shared editor and drew nothing on the
 //            chart. Every label of the kind is now outlined.
 //
+//   rename   A double-click renames a category label, a legend label or
+//            an axis title on the chart, but did nothing on a Likert item
+//            label or a correlation variable label. Both now open the same
+//            editor.
+//
 // Every case starts from real mouse and keyboard input on the standalone
 // page. CONTROL: PS_EXPECT_BROKEN=1 with PS_PAGE aimed at a page built
 // before the fixes must find every case red, or the probe proves nothing.
@@ -218,6 +223,18 @@ async function openChart(mod, roles, real) {
                 }
                 return { labels, covered, boxes: boxes.length };
             },
+            // The text editor that opens ON the chart (not the panel's
+            // text box): is it open, what does it hold, where is it.
+            editor() {
+                const act = document.activeElement;
+                const panel = document.querySelector('[data-gb2-inspector="1"]');
+                if (!act || act.tagName !== 'TEXTAREA' || (panel && panel.contains(act))) return { open: false };
+                const r = act.getBoundingClientRect();
+                return { open: true, value: act.value, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+            },
+            texts(sel) {
+                return Array.from(svgOf().querySelectorAll(sel)).map(t => t.textContent.trim());
+            },
             // The one selected part, as the engine stores it.
             key() {
                 let sel = [];
@@ -405,6 +422,76 @@ if (wanted('outline')) {
         await page.keyboard.press('Escape'); await w(page, 350);
         const gone = await page.evaluate((q) => window.__pc.outlined(q), kind.labels);
         ok(gone.boxes === 0, `${kind.name}: and the outlines leave with the selection`);
+        await page.close();
+    }
+}
+
+// ---------------------------------------------------------------- rename
+if (wanted('rename')) {
+    startCase('rename', 'A double-click renames a Likert item label and a correlation variable label on the chart');
+    const editorOf = (page) => page.evaluate(() => window.__pc.editor());
+    const centreOf = (page, sel, n) => page.evaluate(([q, i]) => {
+        const el = window.__pc.svg().querySelectorAll(q)[i];
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }, [sel, n || 0]);
+    async function retype(page, text) {
+        await page.keyboard.press('ControlOrMeta+a');
+        await page.keyboard.type(text);
+        await page.keyboard.press('Enter');
+        await w(page, ECHO);
+    }
+    {
+        // q2 is reverse-scored, so its label on the chart reads "q2 (R)"
+        const page = await openChart('likertplotbuilder', { items: ['q1', 'q2', 'q3', 'q4'] },
+            { graphType: 'likertdiverging', chartSpec: JSON.stringify({ likertReverseItems: ['q2'] }) });
+        const lab = '[data-role="likert-item-label"]';
+        const c0 = await centreOf(page, lab, 0);
+        await page.mouse.dblclick(c0.x, c0.y); await w(page, 450);
+        const e0 = await editorOf(page);
+        key(e0.open && e0.value === 'q1', `Likert item: a double-click opens the editor on the chart (${e0.open ? '"' + e0.value + '"' : 'no editor'})`);
+        if (e0.open) {
+            await retype(page, 'Trust');
+            const names = await page.evaluate((q) => window.__pc.texts(q), lab);
+            const saved = await page.evaluate(() => window.__pc.setting('likertplotbuilder', 'likertItemRelabels'));
+            key(names[0] === 'Trust' && JSON.stringify(saved || []).includes('"Trust"'),
+                `Likert item: typing a name and Enter renames it (${names.join(', ')})`);
+        }
+        const before = await page.evaluate((q) => window.__pc.texts(q), lab);
+        ok(/\(R\)$/.test(before[1] || ''), `the reverse-scored item is marked on the chart ("${before[1]}")`);
+        const c1 = await centreOf(page, lab, 1);
+        await page.mouse.dblclick(c1.x, c1.y); await w(page, 450);
+        const e1 = await editorOf(page);
+        key(e1.open && e1.value === 'q2', `Likert item: the editor starts from the name, without the reverse-scored mark (${e1.open ? '"' + e1.value + '"' : 'no editor'})`);
+        await page.keyboard.press('Escape'); await w(page, 300);
+        const after = await page.evaluate((q) => window.__pc.texts(q), lab);
+        ok(after[1] === before[1], 'Escape leaves the name as it was');
+        await page.close();
+    }
+    {
+        const page = await openChart('corrplotbuilder', { vars: ['x', 'y', 't1', 't2'] }, { graphType: 'corrheatmap' });
+        const col = '[data-role="corr-var-label-g"][data-axis="col"] text';
+        const row = '[data-role="corr-var-label-g"][data-axis="row"] text';
+        const cc = await centreOf(page, col, 1);
+        await page.mouse.dblclick(cc.x, cc.y); await w(page, 450);
+        const e0 = await editorOf(page);
+        key(e0.open && e0.value === 'y', `correlation variable: a double-click on a column label opens the editor (${e0.open ? '"' + e0.value + '"' : 'no editor'})`);
+        if (e0.open) {
+            ok(Math.hypot(e0.x - cc.x, e0.y - cc.y) < 40, 'over the label that was double-clicked');
+            await retype(page, 'Height');
+            const cols = await page.evaluate((q) => window.__pc.texts(q), col);
+            const rows = await page.evaluate((q) => window.__pc.texts(q), row);
+            const saved = await page.evaluate(() => window.__pc.setting('corrplotbuilder', 'corrVarRelabels'));
+            key(cols[1] === 'Height' && rows[1] === 'Height' && JSON.stringify(saved || []).includes('"Height"'),
+                `correlation variable: the new name shows on its row and its column (${rows.join(', ')})`);
+        }
+        const rc = await centreOf(page, row, 2);
+        await page.mouse.dblclick(rc.x, rc.y); await w(page, 450);
+        const e1 = await editorOf(page);
+        key(e1.open && e1.value === 't1' && Math.hypot(e1.x - rc.x, e1.y - rc.y) < 40,
+            `correlation variable: and a row label does the same (${e1.open ? '"' + e1.value + '"' : 'no editor'})`);
+        await page.keyboard.press('Escape'); await w(page, 300);
         await page.close();
     }
 }

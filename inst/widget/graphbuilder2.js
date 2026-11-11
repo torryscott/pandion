@@ -44298,6 +44298,23 @@
                         ev.stopPropagation(); ev.preventDefault();
                         setInspectorSelection("corrVar:" + v);
                     });
+                    // Double-click renames on the chart, as it does on a
+                    // category label or an axis title: the same inline
+                    // editor, saving through the rename the panel's text box
+                    // uses (selecting the variable is what wires that
+                    // commit). The editor opens over the label that was
+                    // double-clicked, row or column, so that label is the
+                    // registered one while it is open; the next draw
+                    // registers the row label again.
+                    t.addEventListener("dblclick", function (ev) {
+                        ev.stopPropagation(); ev.preventDefault();
+                        try {
+                            setInspectorSelection("corrVar:" + v);
+                            if (!t.isConnected) return;
+                            editableElsByDragId["corrVar:" + v] = t;
+                            showInlineTextEditor("corrVar:" + v);
+                        } catch (_eCvD) {}
+                    });
                     // Wrap in a group so the drag-to-reorder gesture can
                     // translate this label with its row / column.
                     var lblG = svgEl("g", {
@@ -45576,6 +45593,22 @@
                         _lkSetLabelMove(ilbl, "likertItem:" + itL, _itOff.dx, _itOff.dy);
                         _lkWireLabelMove(ilbl, "likertItem:" + itL, function () {
                             setInspectorSelection("likertItem:" + itL);
+                        });
+                        // Double-click renames on the chart (see the
+                        // correlation variable labels). The label drawn here
+                        // may carry the reverse-scored mark, which is not
+                        // part of the name, so the editor starts from the
+                        // name alone.
+                        ilbl.addEventListener("dblclick", function (ev) {
+                            ev.stopPropagation(); ev.preventDefault();
+                            try {
+                                setInspectorSelection("likertItem:" + itL);
+                                if (!ev.currentTarget || !ev.currentTarget.isConnected) return;
+                                showInlineTextEditor("likertItem:" + itL);
+                                if (_inlineTextEditor && _inlineTextEditor.dragId === "likertItem:" + itL) {
+                                    _inlineTextEditor.input.value = _lkDispItem(itL);
+                                }
+                            } catch (_eLkD) {}
                         });
                     })(it);
                     dataGroup.appendChild(ilbl);
