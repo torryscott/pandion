@@ -15,6 +15,11 @@
 //            variable, a Likert item). It now hides them through the store
 //            the button writes, so Cmd/Ctrl+Z brings them back.
 //
+//   likert   Switching a Likert chart between its bar views and its means
+//            view closed whichever editor was open (the level editor or
+//            the dots editor). One now becomes the other, and the way back
+//            returns to the level that was open.
+//
 // Every case starts from real mouse and keyboard input on the standalone
 // page. CONTROL: PS_EXPECT_BROKEN=1 with PS_PAGE aimed at a page built
 // before the fixes must find every case red, or the probe proves nothing.
@@ -179,6 +184,19 @@ async function openChart(mod, roles, real) {
                 }
                 return out;
             },
+            // The editing panel: is it open, what is it called, and how
+            // many shapes mark the selection on the chart.
+            panel() {
+                const panel = document.querySelector('[data-gb2-inspector="1"]');
+                const open = !!(panel && panel.offsetHeight > 8 && panel.textContent.trim().length > 0);
+                const crumb = panel && panel.querySelector('[data-role="gb2-crumb"]');
+                let title = '';
+                if (open && crumb && crumb.children.length) title = crumb.children[crumb.children.length - 1].textContent;
+                let marks = 0;
+                for (const g of svgOf().querySelectorAll('[data-role^="inspector-indicator"], [data-role="inspector-bar-glow"]'))
+                    marks += g.childElementCount;
+                return { open, title: title.replace(/\s+/g, ' ').trim(), marks };
+            },
             // The one selected part, as the engine stores it.
             key() {
                 let sel = [];
@@ -206,6 +224,14 @@ async function clickAt(page, sel, n, fx, fy) {
 }
 // Long enough for the engine's own flush and the app's echo re-render.
 const ECHO = 2600;
+const panelOf = (page) => page.evaluate(() => window.__pc.panel());
+// Pick another chart type from the toolbar's own menu.
+async function switchType(page, gt) {
+    await page.locator('[data-role="graphtype-trigger"]').first().click();
+    await w(page, 300);
+    await page.locator(`[data-role="graphtype-flyout"] [data-gt="${gt}"]`).first().click({ force: true });
+    await w(page, ECHO);
+}
 
 // ------------------------------------------------------------------- gap
 if (wanted('gap')) {
@@ -297,6 +323,35 @@ if (wanted('delete')) {
         const back = await page.evaluate(([mo, st]) => window.__pc.setting(mo, st), [mod, part.store]);
         ok(n2 === n0 && !(Array.isArray(back) && back.includes(id)),
            `${part.name}: Undo brings it back (${n2} marks)`);
+        await page.close();
+    }
+}
+
+// ---------------------------------------------------------------- likert
+if (wanted('likert')) {
+    startCase('likert', 'Likert: the open editor follows a switch between the bar views and the means view');
+    const items = { items: ['q1', 'q2', 'q3', 'q4'] };
+    {
+        const page = await openChart('likertplotbuilder', items, { graphType: 'likertdiverging' });
+        // the corner of a segment: its middle belongs to the number on it
+        ok(await clickAt(page, '[data-role="likert-seg"]', 2, .12, .15), 'a segment was clicked');
+        const k0 = await selKey(page);
+        ok(/^likertLevel:.+/.test(k0), `it opens that level's editor (${k0 || 'nothing selected'})`);
+        await switchType(page, 'likertmeans');
+        const p1 = await panelOf(page), k1 = await selKey(page);
+        key(p1.open && k1 === 'likertMeanDots', `on a switch to means the dots editor is open (${p1.open ? k1 : 'panel closed'})`);
+        await switchType(page, 'likertstacked');
+        const p2 = await panelOf(page), k2 = await selKey(page);
+        key(p2.open && k2 === k0, `on a switch back the same level's editor is open again (${p2.open ? k2 : 'panel closed'})`);
+        await page.close();
+    }
+    {
+        const page = await openChart('likertplotbuilder', items, { graphType: 'likertmeans' });
+        ok(await clickAt(page, '[data-role="likert-dot-hit"]'), 'a mean dot was clicked');
+        ok((await selKey(page)) === 'likertMeanDots', 'it opens the dots editor');
+        await switchType(page, 'likertdiverging');
+        const p3 = await panelOf(page), k3 = await selKey(page);
+        key(p3.open && /^likertLevel:.+/.test(k3), `with no level opened before, a switch to the bars opens a level's editor (${p3.open ? k3 : 'panel closed'})`);
         await page.close();
     }
 }

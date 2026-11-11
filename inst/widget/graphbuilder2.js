@@ -48766,6 +48766,41 @@
                                 window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
                         } catch (_eFqRs) {}
                     }
+                    // Likert equivalent. The response-level editor belongs
+                    // to the diverging and stacked views and the mean-dots
+                    // editor to the means view, each the editor of its
+                    // view's main mark; the validity rules below dropped
+                    // whichever was open on a switch between the two, so the
+                    // panel closed. One now becomes the other: to the dots on
+                    // the way to means, and on the way back to the level that
+                    // was open before (remembered for the session), or the
+                    // first level when there was none.
+                    if (_dtg === "likertmeans" || _dtg === "likertdiverging" || _dtg === "likertstacked") {
+                        var _lkRestoreBefore = "";
+                        try { _lkRestoreBefore = JSON.stringify(arr); } catch (_eLkRb) {}
+                        arr = arr.map(function (s0) {
+                            if (typeof s0 !== "string") return s0;
+                            if (_dtg === "likertmeans" && s0.indexOf("likertLevel:") === 0) {
+                                try { window.__gb2_lkLastLevel = s0.substring("likertLevel:".length); } catch (_eLkL) {}
+                                return "likertMeanDots";
+                            }
+                            if (_dtg !== "likertmeans" && s0 === "likertMeanDots") {
+                                var _lkLvs = (data && Array.isArray(data.likertLevels)) ? data.likertLevels : [];
+                                var _lkWant = (typeof window.__gb2_lkLastLevel === "string") ? window.__gb2_lkLastLevel : null;
+                                var _lkHas = false;
+                                for (var _lkI = 0; _lkI < _lkLvs.length; _lkI++) {
+                                    if (String(_lkLvs[_lkI]) === _lkWant) { _lkHas = true; break; }
+                                }
+                                if (!_lkHas) _lkWant = _lkLvs.length ? String(_lkLvs[0]) : null;
+                                return (_lkWant !== null) ? ("likertLevel:" + _lkWant) : s0;
+                            }
+                            return s0;
+                        });
+                        try {
+                            if (_lkRestoreBefore !== JSON.stringify(arr) && window.localStorage)
+                                window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
+                        } catch (_eLkRs) {}
+                    }
                     var kept = arr.filter(function (s) {
                         if (s === "boxOptions") return false;
                         // Draw mode is a transient action, not a restorable
