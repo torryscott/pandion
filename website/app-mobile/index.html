@@ -7,9 +7,9 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-10T04:28Z 405035e">
+<meta name="pandion-build" content="2026-11-10T16:44Z a91dca8">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 405035e: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at a91dca8: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a swipe scrolls, a tap edits, touch and hold then
      drag moves a part, touch and hold still opens its menu; and a touch
@@ -4954,7 +4954,7 @@
      screen, the chart's share goes from 413 to about 514 points.
      ------------------------------------------------------------------ */
   .ps-phone-only, .ps-phone-label, .ps-phone-nav, #ps-phone-sheet,
-  #ps-phone-sheet-scrim, #ps-phone-more { display: none; }
+  #ps-phone-share, #ps-phone-sheet-scrim, #ps-phone-more { display: none; }
   body.ps-phone { --ps-phone-nav-h: 56px;
     --ps-phone-sheet-h: min(calc(var(--ps-vh) * 0.47), 440px); }
   body.ps-phone .ps-phone-only { display: inline-flex; align-items: center; justify-content: center; }
@@ -5074,7 +5074,8 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     body.ps-phone .ps-app-body.ps-narrow-inspector-open .ps-controls,
-    body.ps-phone #ps-phone-sheet.ps-open { animation: ps-phone-sheet-up 160ms ease-out; }
+    body.ps-phone #ps-phone-sheet.ps-open,
+    body.ps-phone #ps-phone-share.ps-open { animation: ps-phone-sheet-up 160ms ease-out; }
     @keyframes ps-phone-sheet-up {
       from { transform: translateY(28px); opacity: 0.6; } to { transform: none; opacity: 1; }
     }
@@ -5109,7 +5110,7 @@
   body.ps-phone #ps-phone-sheet-scrim.ps-open {
     display: block; position: fixed; inset: 0; z-index: 9400; background: var(--ps-scrim);
   }
-  body.ps-phone #ps-phone-sheet.ps-open {
+  body.ps-phone #ps-phone-sheet.ps-open, body.ps-phone #ps-phone-share.ps-open {
     display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 9401;
     max-height: 72%; overflow: auto; background: var(--ps-s0); color: var(--ps-ink-2);
     border-radius: 16px 16px 0 0; box-shadow: var(--ps-e-3);
@@ -5117,7 +5118,7 @@
   }
   .ps-phone-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; }
   .ps-phone-sheet-head strong { font-size: 15px; }
-  #ps-phone-sheet-done {
+  #ps-phone-sheet-done, #ps-phone-share-done {
     -webkit-appearance: none; appearance: none; min-height: 44px; padding: 0 8px; border: 0;
     background: transparent; color: var(--ps-accent-ink); font-size: 14.5px; font-weight: 700;
   }
@@ -5129,6 +5130,11 @@
   }
   .ps-phone-row small { display: block; color: var(--ps-muted); font-size: 13px; font-weight: 400; }
   .ps-phone-row select { flex: none; max-width: 46%; }
+  /* Share is the first thing offered and the usual one: it reads as the
+     sheet's main action. While the picture is still being drawn it waits. */
+  #ps-phone-share-go { color: var(--ps-accent-ink); }
+  #ps-phone-share-go:disabled { color: var(--ps-muted); }
+  #ps-phone-share-status { min-height: 18px; padding: 6px 4px 0; color: var(--ps-ink-4); font-size: 13px; }
   /* The Find popup takes its place from the hidden button, which has none. */
   body.ps-phone #psroot [data-role="setting-search"] {
     zoom: var(--ps-chrome-zoom, 1); left: 0 !important; right: auto !important;
@@ -6436,6 +6442,15 @@
     <label class="ps-phone-row" for="ps-phone-zoom"><span>Zoom<small>How large the chart appears on this screen</small></span>
       <select id="ps-phone-zoom" aria-label="Chart view zoom"></select></label>
   </div>
+  <div id="ps-phone-share" role="dialog" aria-modal="true" aria-labelledby="ps-phone-share-title">
+    <div class="ps-phone-sheet-head">
+      <strong id="ps-phone-share-title">Export chart</strong>
+      <button type="button" id="ps-phone-share-done">Done</button>
+    </div>
+    <button type="button" class="ps-phone-row" id="ps-phone-share-go" disabled><span>Share<small id="ps-phone-share-sub">Preparing the picture</small></span></button>
+    <button type="button" class="ps-phone-row" id="ps-phone-share-save"><span>Save a file<small>PNG, PDF, SVG or JPG, with a caption and a size</small></span></button>
+    <div id="ps-phone-share-status" role="status" aria-live="polite"></div>
+  </div>
   <div class="ps-statusbar" role="status" aria-live="polite">
     <span id="ps-status-context">Ready</span>
     <span class="ps-status-spacer"></span>
@@ -7635,7 +7650,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.143e64cad0.js"></script>
-<script src="lib/ps-tours.19ee33a5bf.js"></script>
-<script src="lib/ps-shell.21f43a729d.js"></script>
+<script src="lib/ps-tours.c6c1499b94.js"></script>
+<script src="lib/ps-shell.6634626161.js"></script>
 </body>
 </html>
