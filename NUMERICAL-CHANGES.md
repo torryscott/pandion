@@ -30,6 +30,25 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Bonferroni, Holm and FDR keep a test picked by hand as each pair's own test.** <!-- ledger: corrections-follow-test-menu -->
+Since 3.2.0 every correction but Games-Howell ran each Compare Groups
+pair on the one-way ANOVA's pooled error term, to match jamovi's ANOVA
+post hoc, and it did so even when Test was set to Welch's t or Student's
+t by hand. Pooling assumes the groups share one spread: with SDs of 1.5,
+2.4 and 7.2 (n = 8, 20, 40) one pair read p = .273 under Holm where its
+own Welch test gives .002 (Holm .004). Tukey and Dunnett still pool,
+because their math needs one error term, and Bonferroni, Holm and FDR
+still pool while Test is left on Auto, so those numbers are unchanged
+and still match jamovi line for line. With Welch's or Student's t picked
+by hand, the statistic, the unadjusted p, the adjusted p and Cohen's d
+under Bonferroni, Holm or FDR are now that pair's own two-group values.
+Checked against R's `pairwise.t.test` and `p.adjust`
+(`stats-judgment-check`, and the rendered fuzzer's new reference for
+Holm over each pair's Welch test). Affects: brackets and Compare pairs
+on Compare Groups, both hosts, only where Test was changed from Auto
+and Correct is Bonferroni, Holm or FDR. Implemented 2026-11-11. Not yet
+live on the web app.
+
 **Tukey and Games-Howell adjusted p values are accurate for large samples and for groups of two.** <!-- ledger: ptukey-df-scaled-grid -->
 The studentized-range integral behind Tukey HSD and Games-Howell
 adjusted p averaged over the error-SD estimate on a grid fixed between
