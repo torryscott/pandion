@@ -11783,8 +11783,15 @@
                     ci95c: "difference-adjusted 95 percent intervals, read by whether one group\u2019s mean falls inside the other group\u2019s interval",
                     ci: "confidence intervals"
                 }[String(d.errorBarType || "").toLowerCase()];
-                if (_ebName)
-                    parts.push("Error bars show " + _ebName);
+                if (_ebName) {
+                    // Repeated measures draws within-subject bars by default
+                    // (Nov 2026, the statistical review): say so, and on a
+                    // chart with groups say what they cannot be used for.
+                    var _ebWithin = (d.isRepeatedMeasures === true && d.errorBarMethod === "within");
+                    parts.push("Error bars show " + (_ebWithin ? "within-subject " : "") + _ebName);
+                    if (_ebWithin && gs.length > 1 && !_pieish)
+                        parts.push("They show change within each group and cannot be used to compare the groups");
+                }
                 var _hiddenDataCount =
                     (Array.isArray(d.hiddenBars) ? d.hiddenBars.length : 0) +
                     (Array.isArray(d.hiddenPoints) ? d.hiddenPoints.length : 0) +
@@ -54472,6 +54479,18 @@
                     why: _ccWhich + " has no natural order, so the chart plots its categories in whatever order they happen to be in. " + _ccWhat + " then computed on those positions, and putting the categories in a different order would give a different answer. Compare Groups compares unordered categories honestly. If the categories really do have an order, set the variable's measure type to Ordinal and the numbers become meaningful. Two categories are the exception and are never flagged here: that is what a point-biserial, or a phi between two dichotomies, already is.",
                     fixGt: null });
             })();
+            // --- Within-subject error bars on a chart with groups (Nov
+            // 2026, the statistical review): each group's marks carry bars
+            // that describe change across the occasions. They ran 2 to 6
+            // times narrower than ordinary standard errors on the review's
+            // mixed design, where two groups looked far apart at an
+            // occasion whose own test gave p = .076. A note, never a pass.
+            if (_mk === "rm" && isBarType && data.hasGroups === true &&
+                data.errorBarMethod === "within" && data.summaryFunc !== "median" &&
+                typeof data.errorBarType === "string" && data.errorBarType !== "none")
+                out.push({ id: "rmwithin", sev: "tip", title: "These error bars cannot compare the groups",
+                    why: "The error bars are within-subject: they show how consistently each group changed from one occasion to the next, with the differences between people taken out, so they are much narrower than ordinary error bars. They say nothing about whether one group differs from another at the same occasion. For that, read the Compare pairs tab in the Statistics panel, or set Method to between-subjects in the error bar panel.",
+                    fixGt: null });
             var _skApp = false;
             (function () {
                 if (!((_mk === "cg" || _mk === "rm") && isBarType)) return;
@@ -54802,6 +54821,7 @@
                 { id: "heatfew", name: "Enough points for a heatmap", tip: "A heatmap earns its keep when points overlap heavily; few points suit a scatter.", applies: _hmOn },
                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
+                { id: "rmwithin", name: "Within-subject error bars", tip: "Within-subject error bars describe change across the occasions, not differences between groups.", applies: false },
                 { id: "corrmany", name: "Many-tests caveat", tip: "Testing many correlations at once produces some false alarms by chance.", applies: false },
                 { id: "brorphan", name: "Brackets match the chart", tip: "A significance bracket must still name bars that exist; when the variables, grouping or panels change underneath one, it is not drawn.", applies: _bkAnyBracket },
                 { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
@@ -57886,12 +57906,23 @@
                 // to its reading width. Short there, with the full name in the
                 // aria-label, the title and the popover; jamovi and the panel
                 // under the chart keep the long headers.
+                // Repeated measures prints the within-subject SE and an
+                // interval built from it, beside the raw SD (the table
+                // matches the drawn bars). The headers now say so (Nov
+                // 2026): read as the mean's own SE and CI they were far
+                // too narrow.
+                var _dWithin = (data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
+                    (data.errorBarType || "se") !== "none");
                 var _ciLoHdr = _ciP + "% CI lower", _ciHiHdr = _ciP + "% CI upper";
-                if (_gb2DockActive()) {
-                    _ciLoHdr = { html: _stTerm("CI lo", "ci95", _ciP + "% CI lower") };
-                    _ciHiHdr = { html: _stTerm("CI hi", "ci95", _ciP + "% CI upper") };
+                if (_dWithin) {
+                    _ciLoHdr = { html: _stTerm(_ciP + "% CI lower (within)", "ci95") };
+                    _ciHiHdr = { html: _stTerm(_ciP + "% CI upper (within)", "ci95") };
                 }
-                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
+                if (_gb2DockActive()) {
+                    _ciLoHdr = { html: _stTerm(_dWithin ? "CI lo (within)" : "CI lo", "ci95", _ciP + "% CI lower" + (_dWithin ? " (within-subject)" : "")) };
+                    _ciHiHdr = { html: _stTerm(_dWithin ? "CI hi (within)" : "CI hi", "ci95", _ciP + "% CI upper" + (_dWithin ? " (within-subject)" : "")) };
+                }
+                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm(_dWithin ? "SE (within)" : "SE", "se") }, _ciLoHdr, _ciHiHdr);
                 var descCardHtml = _stCard("",
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
@@ -57902,7 +57933,7 @@
                             : "") +
                         ((data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
                           (data.errorBarType || "se") !== "none")
-                            ? " SE is the Cousineau-Morey within-subject value, matching the drawn error bars."
+                            ? " SE and the CI are Cousineau-Morey within-subject values, matching the drawn error bars: they describe change across the occasions, not how precisely each mean is known, and cannot compare one group with another."
                             : "")));
                 // ---- Omnibus (visible chart, like the brackets)
                 var oLines = _stOmniLines();

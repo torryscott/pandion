@@ -2615,7 +2615,9 @@ async function copyFlips(page, actKey) {
         const se = {};
         // SE by its header, not by position: Mode joined the table Sep 19 2026.
         const head = rows[0] || [];
-        const seIdx = head.indexOf('SE') >= 0 ? head.indexOf('SE') : 6;
+        // The header reads "SE (within)" on a within-subject chart (Nov 2026).
+        const seAt = head.findIndex(h => /^SE\b/i.test(h));
+        const seIdx = seAt >= 0 ? seAt : 6;
         for (const row of rows) if (['t1', 't2', 't3'].includes(row[0])) se[row[0]] = row[seIdx];
         return { se, cm: /Cousineau-Morey within-subject value/i.test(pane ? pane.textContent : '') };
     });
