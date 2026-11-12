@@ -7,14 +7,14 @@
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-10T16:44Z a91dca8">
+<meta name="pandion-build" content="2026-11-10T21:20Z ed17064">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at a91dca8: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at ed17064: the
      released app plus the phone and tablet work (touch gestures on the chart
-     and on a layout page: a swipe scrolls, a tap edits, touch and hold then
-     drag moves a part, touch and hold still opens its menu; and a touch
-     density with larger controls and text), so it can be tried on a real
-     phone before it ships. It does not carry the next-release queue that
+     and on a layout page: a tap edits, a drag moves a part at once, a swipe
+     on empty space scrolls, touch and hold still opens the part's menu; a
+     touch density with larger controls and text; the phone frame and
+     sharing), so it can be tried on a real phone before it ships. It does not carry the next-release queue that
      /app-next/ shows. Not linked from the site, not indexed, refreshed or
      removed as the work moves. The app at /app/ is the released one. -->
 <meta name="robots" content="noindex, nofollow">
@@ -4903,6 +4903,59 @@
   @media (prefers-reduced-motion: no-preference) {
     #ps-touch-cue.ps-touch-cue-in { animation: ps-touch-cue-in 140ms ease-out; }
   }
+  /* A dialog taller than the screen keeps its buttons in reach (Nov 2026:
+     in New layout on a phone, choosing a template only highlighted it,
+     and Create layout was three screens down the list). */
+  body.ps-touch .ps-dialog-card > .ps-dialog-actions:last-child {
+    position: sticky; bottom: 0; z-index: 2; background: var(--ps-s0);
+  }
+  /* GRAB: a part that can be dragged moves the moment a finger moves it
+     (Nov 2026; the first touch rule made every drag wait for a hold, and
+     on a real phone the wait read as lag). touch-action is how: it is the
+     one thing Safari and Chromium both honor on SVG parts, and it must be
+     in force before the finger lands, so it is written here and the
+     shell's press handler reads the same values back (touchGrabAxis)
+     instead of keeping a list of its own.
+       pinch-zoom          moves any way: the browser never pans here
+       pan-y pinch-zoom    moves sideways only: an up or down swipe that
+                           starts here still scrolls the page
+       pan-x pinch-zoom    the mirror
+     The engine already marks what drags with its cursors (the text cursor
+     on a label, grab, move, a corner arrow), so those are the selectors;
+     a pie slice and a drawn shape drag under an ordinary pointer and are
+     named, and so is the chart's own corner grip (two levels under the
+     card). Anything this misses keeps the old rule: hold, then drag.
+     LEFT OUT on purpose: everything with an up-and-down or a sideways
+     resize cursor. Those are invisible strips (the axis range strips run
+     the whole length of an axis, the marginal and stats-box edges
+     likewise), a browser hands a touch to the nearest tappable thing
+     within a finger's width, and a swipe begun near the Y axis would
+     have changed the axis range instead of scrolling the page
+     (mobile-check caught exactly that). They still answer a hold. */
+  #psroot svg[data-role="gb2-chart-svg"] :is(
+      text[style*="cursor: text"]:not([data-bar-cat]),
+      text[style*="cursor:text"]:not([data-bar-cat]),
+      [style*="cursor: grab"], [style*="cursor:grab"],
+      [style*="cursor: move"], [style*="cursor:move"],
+      [style*="nwse-resize"], [style*="nesw-resize"],
+      [data-ann-id], [data-role="freq-slice"]),
+  #psroot [data-role="chart-card"] > div > div[style*="nwse-resize"],
+  #ps-lcanvas :is(.ps-litem, .ps-lhandle, .ps-lhandle-end, .ps-lbar) {
+    touch-action: pinch-zoom;
+  }
+  /* Bars, boxes, markers and their category labels reorder along the
+     category axis and nowhere else. data-ps-bar-drag is the shell's
+     reading of the drawing (touchBarAxis): x on an upright chart, y on
+     one lying down, any where stacked segments also restack. */
+  #psroot svg[data-role="gb2-chart-svg"] [data-bar-cat] {
+    touch-action: pan-y pinch-zoom;
+  }
+  #psroot[data-ps-bar-drag="y"] svg[data-role="gb2-chart-svg"] [data-bar-cat] {
+    touch-action: pan-x pinch-zoom;
+  }
+  #psroot[data-ps-bar-drag="any"] svg[data-role="gb2-chart-svg"] [data-bar-cat] {
+    touch-action: pinch-zoom;
+  }
   /* iOS answers a held finger on text or an image with its own callout,
      and the hold is this app's drag and menu gesture. */
   .graphbuilder2-host svg[data-role="gb2-chart-svg"] { -webkit-touch-callout: none; }
@@ -7650,7 +7703,7 @@
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.143e64cad0.js"></script>
-<script src="lib/ps-tours.c6c1499b94.js"></script>
-<script src="lib/ps-shell.6634626161.js"></script>
+<script src="lib/ps-tours.9fc7ad2e97.js"></script>
+<script src="lib/ps-shell.b0cf6cca22.js"></script>
 </body>
 </html>

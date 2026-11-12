@@ -10453,6 +10453,116 @@
         function _xyTooltipHide() {
             _xyTooltip.style.display = "none";
         }
+        // ---- Readouts for bars, markers, boxes and heatmap tiles ---------
+        // Pie slices, histogram bars, Likert segments, scatter points and
+        // correlation cells say what they show when the pointer rests on
+        // them; these marks did not. The numbers come from the same values
+        // the marks are drawn from, so a readout can never disagree with
+        // its mark.
+        // Four significant figures, whole numbers from 1000 up: one figure
+        // more than the value labels on bars print.
+        function _tipNum(v) {
+            v = +v;
+            if (!isFinite(v)) return "";
+            if (Math.abs(v) >= 1000) return String(Math.round(v));
+            return (+v.toPrecision(4)).toString();
+        }
+        function _tipLine(label, value) {
+            return "<div>" + label + " " + value + "</div>";
+        }
+        // A bar, a line or dot marker, a box, a violin or a raincloud:
+        // its name, the value it is drawn at, its error bar as drawn
+        // (named by the current type), and how many values are in it.
+        // `siblings` are the bars drawn with it: a Pareto bar's share is
+        // of its own panel's total.
+        function _cellTipHtml(bar, siblings) {
+            if (!bar) return "";
+            var gt = String(data.graphType || "");
+            var parts = [];
+            var fac = "";
+            try { fac = _facetOf(String(bar.x)); } catch (_eCtF) {}
+            if (fac) parts.push(_facetDisplayLabel(fac));
+            var catN = "";
+            try { catN = displayCategory(String(bar.x)); } catch (_eCtC) {}
+            if (catN != null && String(catN) !== "") parts.push(catN);
+            // Frequencies pie data aside, a bar's group is its series.
+            if (hasGroups && bar.group != null && String(bar.group) !== "") parts.push(displayGroup(String(bar.group)));
+            var html = "";
+            if (parts.length) {
+                var esc = [];
+                for (var np = 0; np < parts.length; np++) esc.push(_nmEsc(parts[np]));
+                html += "<div style='font-weight:600;margin-bottom:2px;'>" + esc.join(" &middot; ") + "</div>";
+            }
+            if (gt === "box" || gt === "violin" || gt === "raincloud") {
+                var st = null;
+                try { st = _computeBoxStats(bar.values || []); } catch (_eCtS) {}
+                if (!st) return "";
+                html += _tipLine("Median =", _tipNum(st.median));
+                html += _tipLine("Quartiles:", _tipNum(st.q1) + " to " + _tipNum(st.q3));
+                if (gt === "box") {
+                    html += _tipLine("Whiskers:", _tipNum(st.whiskerLow) + " to " + _tipNum(st.whiskerHigh));
+                    if (st.min < st.whiskerLow || st.max > st.whiskerHigh) {
+                        html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                    }
+                } else {
+                    html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                }
+                html += _tipLine("n =", String(st.n));
+                return html;
+            }
+            if (_gbFreqMode) {
+                var raw = (typeof bar._freqRawCount === "number") ? bar._freqRawCount : bar.mean;
+                if (typeof raw !== "number" || !isFinite(raw)) return "";
+                html += _tipLine("Count =", String(Math.round(raw)));
+                if (gt === "pareto") {
+                    var tot = 0;
+                    var myFac = fac;
+                    for (var sb = 0; siblings && sb < siblings.length; sb++) {
+                        var sbBar = siblings[sb];
+                        if (!sbBar) continue;
+                        var sbFac = "";
+                        try { sbFac = _facetOf(String(sbBar.x)); } catch (_eCtP) {}
+                        if (sbFac !== myFac) continue;
+                        var sbRaw = (typeof sbBar._freqRawCount === "number") ? sbBar._freqRawCount : sbBar.mean;
+                        if (typeof sbRaw === "number" && isFinite(sbRaw)) tot += sbRaw;
+                    }
+                    if (tot > 0) html += _tipLine("Share:", _tipNum(100 * raw / tot) + "% of " + String(Math.round(tot)));
+                } else if (typeof bar.mean === "number" && isFinite(bar.mean)) {
+                    var isFill = (gt === "bar" && hasGroups && data.freqPosition === "fill");
+                    if (isFill || data.freqStat === "percent") html += _tipLine("Percent =", _tipNum(bar.mean) + "%");
+                    else if (data.freqStat === "proportion") html += _tipLine("Proportion =", _tipNum(bar.mean));
+                }
+                return html;
+            }
+            if (typeof bar.mean !== "number" || !isFinite(bar.mean)) return "";
+            var isMed = (data.summaryFunc === "median");
+            html += _tipLine(isMed ? "Median =" : "Mean =", _tipNum(bar.mean));
+            var half = (typeof bar.se === "number" && isFinite(bar.se)) ? bar.se : 0;
+            var et = (typeof data.errorBarType === "string") ? data.errorBarType : "";
+            if (!isMed && half > 0 && et !== "none" && !_isElementHidden("errorBars")) {
+                var within = (data.isRepeatedMeasures === true && data.errorBarMethod === "within")
+                    ? " (within-subject)" : "";
+                var lo = _tipNum(bar.mean - half), hi = _tipNum(bar.mean + half);
+                if (et === "se") html += _tipLine("SE =", _tipNum(half) + within);
+                else if (et === "sd") html += _tipLine("SD =", _tipNum(half) + within);
+                else if (et === "ci95") html += _tipLine("95% CI:", lo + " to " + hi + within);
+                else if (et === "ci99") html += _tipLine("99% CI:", lo + " to " + hi + within);
+                else if (et === "ci95c") html += _tipLine("Difference-adjusted 95% interval:", lo + " to " + hi);
+                else html += _tipLine("Error bar:", lo + " to " + hi);
+            }
+            if (typeof bar.n === "number" && isFinite(bar.n)) html += _tipLine("n =", String(bar.n));
+            return html;
+        }
+        // A heatmap tile: how many observations it holds and the X and Y
+        // ranges it covers, named by the axis titles.
+        function _binTipHtml(bin) {
+            if (!bin || typeof bin.count !== "number") return "";
+            var xn = (typeof data.xLabel === "string" && data.xLabel.trim().length) ? data.xLabel : "X";
+            var yn = (typeof data.yLabel === "string" && data.yLabel.trim().length) ? data.yLabel : "Y";
+            return "<div style='font-weight:600;margin-bottom:2px;'>Count = " + String(Math.round(bin.count)) + "</div>" +
+                _tipLine(_nmEsc(xn) + ":", _tipNum(bin.x_lo) + " to " + _tipNum(bin.x_hi)) +
+                _tipLine(_nmEsc(yn) + ":", _tipNum(bin.y_lo) + " to " + _tipNum(bin.y_hi));
+        }
 
         // A flex-column "card" holds the toolbar (top), chart wrap
         // (middle), and inspector panel (bottom) as siblings. Flex
@@ -23881,6 +23991,53 @@
                     // group; the helper below works regardless.
                     try { addIndicatorPolygonForTextEl(el, { pad: 3 }); }
                     catch (e2) {}
+                } else {
+                    // Number labels the chart computes (the values on bars,
+                    // pie slices, Likert segments and correlation cells, and
+                    // the numbers on the correlation colour scale) share ONE
+                    // editor per kind: its selection names the kind, not a
+                    // label, so no element is registered under it and nothing
+                    // was drawn - a panel open with no mark on the chart.
+                    // Every label of the kind gets a light dashed box, since
+                    // an edit in that panel changes all of them. A chart
+                    // carrying more than 150 such labels gets one box round
+                    // the plot instead of a lattice of them.
+                    var _nlSel = {
+                        barValueLabel: '[data-role="bar-value-label"]',
+                        pieSliceLabel: '[data-role="freq-slice-label"]',
+                        likertValueLabel: '[data-role="likert-value"]',
+                        corrValueLabel: '[data-role="corr-value"], [data-role="corr-value-p"]',
+                        corrLegendTick: '[data-role="corr-legend-tick"]'
+                    };
+                    if (Object.prototype.hasOwnProperty.call(_nlSel, id)) {
+                        var _nlEls = [];
+                        try { _nlEls = svg.querySelectorAll(_nlSel[id]); } catch (_eNl) {}
+                        var _nlShown = [];
+                        for (var _nli = 0; _nli < _nlEls.length; _nli++) {
+                            try {
+                                var _nlB = _nlEls[_nli].getBBox();
+                                if (_nlB && _nlB.width && _nlB.height) _nlShown.push(_nlEls[_nli]);
+                            } catch (_eNb) {}
+                        }
+                        if (_nlShown.length > 150) {
+                            addIndicatorBox(chartLeft, chartTop, innerW, innerH);
+                        } else {
+                            for (var _nlj = 0; _nlj < _nlShown.length; _nlj++) {
+                                // These labels sit ON the marks, whose fill
+                                // can be as dark as the dashes: a white line
+                                // under them keeps the box readable on a
+                                // dark bar and disappears on a light one.
+                                try {
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, stroke: "#ffffff", strokeWidth: 2.75, strokeOpacity: 0.9,
+                                        dashArray: "none", "class": "gb2-halo-union" });
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, strokeWidth: 1.25, strokeOpacity: 0.9,
+                                        dashArray: "4,3", "class": "gb2-halo-union" });
+                                } catch (_eNp) {}
+                            }
+                        }
+                    }
                 }
             } else if (sel.indexOf("annotation:") === 0) {
                 // Treat text annotations like chart text - dashed halo
@@ -37968,6 +38125,26 @@
                             this.removeAttribute("stroke-width");
                             this.removeAttribute("stroke-opacity");
                         });
+                        // Readout: the tile's count and the ranges it covers.
+                        (function (tileEl, tileBin) {
+                            var _tlHtml = null, _tlShown = false;
+                            function _tlMove(ev) {
+                                if (ev.buttons) {
+                                    if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                                    return;
+                                }
+                                if (_tlShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                                if (_tlHtml === null) {
+                                    try { _tlHtml = _binTipHtml(tileBin); } catch (_eTl) { _tlHtml = ""; }
+                                }
+                                if (_tlHtml) { _xyTooltipShow(_tlHtml, ev.clientX, ev.clientY); _tlShown = true; }
+                            }
+                            tileEl.addEventListener("mouseenter", _tlMove);
+                            tileEl.addEventListener("mousemove", _tlMove);
+                            tileEl.addEventListener("mouseleave", function () {
+                                if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                            });
+                        })(_binEl, _bin);
                         _binEl.addEventListener("click", function (e) {
                             e.stopPropagation();
                             e.preventDefault();
@@ -42186,13 +42363,22 @@
                 // the destroy/recreate cycle of redraw().
                 barRect.setAttribute("data-bar-cat", catName);
                 barRect.setAttribute("data-bar-group", hasGroups ? (bar.group || "") : "");
-                (function (visuals, grp, catName) {
+                (function (visuals, grp, catName, tipBar) {
+                    // The readout's text, built when the pointer arrives.
+                    var _ctHtml = null, _ctShown = false;
                     // Hover affordance: bump opacity to 1 (so the pop is
                     // dramatic at low base opacity) AND lift brightness
                     // a touch (so there's still visible feedback when
                     // base opacity is already 1 - opacity-only would be
                     // a no-op there).
-                    barRect.addEventListener("mouseenter", function () {
+                    barRect.addEventListener("mouseenter", function (ev) {
+                        // Readout (see _cellTipHtml). Not while a button is
+                        // down: a drag across the bars is not a question.
+                        _ctHtml = null; _ctShown = false;
+                        if (ev && !ev.buttons) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt) { _ctHtml = ""; }
+                            if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                        }
                         for (var i = 0; i < visuals.length; i++) {
                             // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
                             if (visuals[i].getAttribute("data-base-fill-opacity") == null) visuals[i].setAttribute("data-base-fill-opacity", visuals[i].getAttribute("fill-opacity") || "");
@@ -42224,7 +42410,19 @@
                             }
                         }
                     });
+                    barRect.addEventListener("mousemove", function (ev) {
+                        if (ev.buttons) {
+                            if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
+                            return;
+                        }
+                        if (_ctShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                        if (_ctHtml === null) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt2) { _ctHtml = ""; }
+                        }
+                        if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                    });
                     barRect.addEventListener("mouseleave", function () {
+                        if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
                         // Read opacity at handler-call time, not at
                         // bar-creation time: the user can drag the
                         // opacity slider after this bar was created
@@ -42256,7 +42454,7 @@
                     // mode and reorders the bar's group (or category
                     // when Shift is held).
                     _attachBarDragReorder(barRect, catName, hasGroups ? grp : "");
-                })(built.visuals, bar.group, bar.x);
+                })(built.visuals, bar.group, bar.x, bar);
                 dataGroup.appendChild(barRect);
 
                 // Individual data points (overlay) - skipped when the
@@ -44744,6 +44942,23 @@
                         ev.stopPropagation(); ev.preventDefault();
                         setInspectorSelection("corrVar:" + v);
                     });
+                    // Double-click renames on the chart, as it does on a
+                    // category label or an axis title: the same inline
+                    // editor, saving through the rename the panel's text box
+                    // uses (selecting the variable is what wires that
+                    // commit). The editor opens over the label that was
+                    // double-clicked, row or column, so that label is the
+                    // registered one while it is open; the next draw
+                    // registers the row label again.
+                    t.addEventListener("dblclick", function (ev) {
+                        ev.stopPropagation(); ev.preventDefault();
+                        try {
+                            setInspectorSelection("corrVar:" + v);
+                            if (!t.isConnected) return;
+                            editableElsByDragId["corrVar:" + v] = t;
+                            showInlineTextEditor("corrVar:" + v);
+                        } catch (_eCvD) {}
+                    });
                     // Wrap in a group so the drag-to-reorder gesture can
                     // translate this label with its row / column.
                     var lblG = svgEl("g", {
@@ -46022,6 +46237,22 @@
                         _lkSetLabelMove(ilbl, "likertItem:" + itL, _itOff.dx, _itOff.dy);
                         _lkWireLabelMove(ilbl, "likertItem:" + itL, function () {
                             setInspectorSelection("likertItem:" + itL);
+                        });
+                        // Double-click renames on the chart (see the
+                        // correlation variable labels). The label drawn here
+                        // may carry the reverse-scored mark, which is not
+                        // part of the name, so the editor starts from the
+                        // name alone.
+                        ilbl.addEventListener("dblclick", function (ev) {
+                            ev.stopPropagation(); ev.preventDefault();
+                            try {
+                                setInspectorSelection("likertItem:" + itL);
+                                if (!ev.currentTarget || !ev.currentTarget.isConnected) return;
+                                showInlineTextEditor("likertItem:" + itL);
+                                if (_inlineTextEditor && _inlineTextEditor.dragId === "likertItem:" + itL) {
+                                    _inlineTextEditor.input.value = _lkDispItem(itL);
+                                }
+                            } catch (_eLkD) {}
                         });
                     })(it);
                     dataGroup.appendChild(ilbl);
@@ -49265,6 +49496,41 @@
                             if (_fqRestoreBefore !== JSON.stringify(arr) && window.localStorage)
                                 window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
                         } catch (_eFqRs) {}
+                    }
+                    // Likert equivalent. The response-level editor belongs
+                    // to the diverging and stacked views and the mean-dots
+                    // editor to the means view, each the editor of its
+                    // view's main mark; the validity rules below dropped
+                    // whichever was open on a switch between the two, so the
+                    // panel closed. One now becomes the other: to the dots on
+                    // the way to means, and on the way back to the level that
+                    // was open before (remembered for the session), or the
+                    // first level when there was none.
+                    if (_dtg === "likertmeans" || _dtg === "likertdiverging" || _dtg === "likertstacked") {
+                        var _lkRestoreBefore = "";
+                        try { _lkRestoreBefore = JSON.stringify(arr); } catch (_eLkRb) {}
+                        arr = arr.map(function (s0) {
+                            if (typeof s0 !== "string") return s0;
+                            if (_dtg === "likertmeans" && s0.indexOf("likertLevel:") === 0) {
+                                try { window.__gb2_lkLastLevel = s0.substring("likertLevel:".length); } catch (_eLkL) {}
+                                return "likertMeanDots";
+                            }
+                            if (_dtg !== "likertmeans" && s0 === "likertMeanDots") {
+                                var _lkLvs = (data && Array.isArray(data.likertLevels)) ? data.likertLevels : [];
+                                var _lkWant = (typeof window.__gb2_lkLastLevel === "string") ? window.__gb2_lkLastLevel : null;
+                                var _lkHas = false;
+                                for (var _lkI = 0; _lkI < _lkLvs.length; _lkI++) {
+                                    if (String(_lkLvs[_lkI]) === _lkWant) { _lkHas = true; break; }
+                                }
+                                if (!_lkHas) _lkWant = _lkLvs.length ? String(_lkLvs[0]) : null;
+                                return (_lkWant !== null) ? ("likertLevel:" + _lkWant) : s0;
+                            }
+                            return s0;
+                        });
+                        try {
+                            if (_lkRestoreBefore !== JSON.stringify(arr) && window.localStorage)
+                                window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
+                        } catch (_eLkRs) {}
                     }
                     var kept = arr.filter(function (s) {
                         if (s === "boxOptions") return false;
@@ -59753,6 +60019,35 @@
         }
         // Detect the labelable parts of the CURRENT chart. Each entry is
         // { name, explain, el, selKey }. Absent / hidden parts are skipped.
+        // The group (or, on an ungrouped chart, the category) of the cell an
+        // element sits in, for elements that carry no identity of their own:
+        // a raincloud draws its cloud and its mini box in unlabelled groups
+        // beside the cell's own [data-bar-cat] group, so the cell is found by
+        // position - the role-less cell group whose box overlaps this
+        // element's the most. Without it those parts keyed as a bare "bars:"
+        // and never matched the "bars:<group>" a click on them selects.
+        function _anatCellGroupOf(el) {
+            var best = "", bestA = -1;
+            try {
+                var eb = _anatBBoxInSvg(el);
+                if (!eb) return "";
+                var cells = svg.querySelectorAll('[data-bar-cat]:not([data-role])');
+                for (var ci = 0; ci < cells.length; ci++) {
+                    if (cells[ci] === el) continue;
+                    var cb = _anatBBoxInSvg(cells[ci]);
+                    if (!cb) continue;
+                    var ox = Math.min(eb.x + eb.w, cb.x + cb.w) - Math.max(eb.x, cb.x);
+                    var oy = Math.min(eb.y + eb.h, cb.y + cb.h) - Math.max(eb.y, cb.y);
+                    if (ox < 0 || oy < 0) continue;
+                    var oa = Math.max(ox, 1) * Math.max(oy, 1);
+                    if (oa > bestA) {
+                        bestA = oa;
+                        best = cells[ci].getAttribute("data-bar-group") || cells[ci].getAttribute("data-bar-cat") || "";
+                    }
+                }
+            } catch (_eCG) {}
+            return best;
+        }
         function _anatLabelSpecs() {
             var specs = [];
             var gt = (data && data.graphType) || "bar";
@@ -59774,8 +60069,12 @@
             // Axis titles only when a REAL title is drawn - skip empty or
             // single-character default titles (the raw variable name "y"/"x"),
             // which otherwise point a "title" chip at the bare axis line.
+            // An axis title of a single letter ("N", "x") is a title like
+            // any other: asking for two characters left it out of this
+            // list, and so out of the keyboard's stops. Only a title with
+            // nothing in it is skipped.
             function addTitle(name, explain, el, selKey) {
-                if (el && visible(el) && (el.textContent || "").trim().length >= 2) add(name, explain, el, selKey);
+                if (el && visible(el) && (el.textContent || "").trim().length >= 1) add(name, explain, el, selKey);
             }
             function biggest(sel) {
                 var nl = qAll(sel), best = null, bestA = -1;
@@ -59785,7 +60084,7 @@
                 return best;
             }
             function grpOf(el) { if (!el) return ""; try { return el.getAttribute("data-bar-group") || el.getAttribute("data-bar-cat") || ""; } catch (_e) { return ""; } }
-            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode); } catch (_e) { return ""; } }
+            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode) || _anatCellGroupOf(el); } catch (_e) { return ""; } }
             function attrOf(el, a) { if (!el) return ""; try { return el.getAttribute(a) || ""; } catch (_e) { return ""; } }
             // --- Title + axes ---
             add("Chart title", "The overall heading for the whole figure. Double-click to rename it, or click to restyle.", editableElsByDragId["chartTitle"], "text:chartTitle");
@@ -59953,7 +60252,7 @@
             add("Normal curve", "A reference bell curve with the data's own mean and SD, for comparing the shape against a normal.", biggest('[data-role="dist-normal"]'), "distNormal", { anchor: "peak", edge: "top" });
             add("Rug marks", "Small ticks along the axis showing where each individual value falls.", biggest('[data-role="dist-rug"]'), "distRug");
             // --- Frequencies ---
-            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + grpOf(slice), { body: true });
+            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + (grpOf(slice) || attrOf(slice, "data-cat")), { body: true });
             var sliceLab = biggest('[data-role="freq-slice-label"]'); if (sliceLab) add("Slice label", "The percentage or count printed on each wedge.", sliceLab, "text:pieSliceLabel");
             add("Cumulative line", "Tracks the running cumulative percentage across the sorted categories (the Pareto line).", biggest('[data-role="pareto-line"]'), "paretoLine", { anchor: "line" });
             if (gt === "pareto") add("Cumulative % axis", "The right-hand 0-100% scale; the cumulative line is read against it.", biggest('[data-role="pareto-axis"]'), "");
@@ -60341,7 +60640,14 @@
             }
             var GRP = ["bars:", "distHist:", "distDensity:", "distQQ:", "distEcdf:", "xyPoint:", "xyFit:", "xyEllipse:", "xyDensity2D:", "freqSlice:"];
             for (var gi = 0; gi < GRP.length; gi++) {
-                if (oldKey.indexOf(GRP[gi]) === 0) { var g2 = grpOf2(el); return g2 ? (GRP[gi] + g2) : oldKey; }
+                if (oldKey.indexOf(GRP[gi]) === 0) {
+                    var g2 = grpOf2(el);
+                    // a pie slice names its category in data-cat; a
+                    // raincloud's cloud and box are found by their cell
+                    if (!g2 && GRP[gi] === "freqSlice:") g2 = ga(el, "data-cat");
+                    if (!g2 && GRP[gi] === "bars:") g2 = _anatCellGroupOf(el);
+                    return g2 ? (GRP[gi] + g2) : oldKey;
+                }
             }
             if (oldKey.indexOf("likertLevel:") === 0) { var lv2 = ga(el, "data-level"); return lv2 ? ("likertLevel:" + lv2) : oldKey; }
             if (oldKey.indexOf("likertItem:") === 0) { var it2 = ga(el, "data-item"); return it2 ? ("likertItem:" + it2) : oldKey; }
@@ -107200,6 +107506,64 @@
                 if (!insts.length) insts.push({ key: sp.selKey });
                 kinds.push({ name: sp.name || sp.selKey, insts: insts });
             }
+            // One stop per selection. Two parts that open the same editor
+            // (a line and its markers, Q-Q points and their reference line)
+            // are one place to the keyboard: _kbFindPos looks the current
+            // selection up by key, so when two kinds held the same keys it
+            // always answered the first and Tab stepped to the second
+            // forever, never reaching the axes, the legend or the editor.
+            var claimedKey = Object.create(null), uniqKinds = [];
+            for (var uk = 0; uk < kinds.length; uk++) {
+                var keptInsts = [];
+                for (var ui = 0; ui < kinds[uk].insts.length; ui++) {
+                    var instKey = kinds[uk].insts[ui].key;
+                    if (claimedKey[instKey]) continue;
+                    claimedKey[instKey] = true;
+                    keptInsts.push(kinds[uk].insts[ui]);
+                }
+                if (!keptInsts.length) continue;
+                kinds[uk].insts = keptInsts;
+                uniqKinds.push(kinds[uk]);
+            }
+            kinds = uniqKinds;
+            // Text the Label parts list leaves out still needs a stop. That
+            // list names one tick label, the Y axis numbers whenever there
+            // are any, so the X axis numbers of a scatter or a histogram
+            // had none; and it never names the legend's title or labels.
+            // They are listed here, for the keyboard only: a kind per
+            // family, one stop per label, straight from the registry of
+            // editable text (the rule _anatKindEls applies to "drag:").
+            function _kbTextKind(name, prefix) {
+                var tInsts = [];
+                var tWhole = prefix.charAt(prefix.length - 1) !== ":";
+                try {
+                    for (var tk in editableElsByDragId) {
+                        if (!Object.prototype.hasOwnProperty.call(editableElsByDragId, tk)) continue;
+                        if (tWhole ? tk !== prefix : tk.indexOf(prefix) !== 0) continue;
+                        var tEl = editableElsByDragId[tk];
+                        if (!tEl || !tEl.isConnected) continue;
+                        if (!(tEl.textContent || "").trim().length) continue;
+                        try { var tB = tEl.getBBox(); if (!(tB.width || tB.height)) continue; } catch (_eTB) { continue; }
+                        if (claimedKey["text:" + tk]) continue;
+                        claimedKey["text:" + tk] = true;
+                        tInsts.push({ key: "text:" + tk });
+                    }
+                } catch (_eTK) {}
+                return tInsts.length ? { name: name, insts: tInsts } : null;
+            }
+            function _kbPutAfter(kind, isAnchor) {
+                if (!kind) return;
+                for (var pa = 0; pa < kinds.length; pa++) {
+                    if (isAnchor(kinds[pa].insts[0].key)) { kinds.splice(pa + 1, 0, kind); return; }
+                }
+                kinds.push(kind);
+            }
+            _kbPutAfter(_kbTextKind("X tick label", "xTick:"),
+                function (k0) { return k0.indexOf("text:yTick:") === 0; });
+            var _kbLegLabels = _kbTextKind("Legend label", "groupItem:");
+            _kbPutAfter(_kbLegLabels, function (k0) { return k0 === "legend"; });
+            _kbPutAfter(_kbTextKind("Legend title", "groupTitle"),
+                function (k0) { return k0 === "legend"; });
             var dataRe = /^(bars:|line|dot|xyPoint|dataPoints|distHist:|distDens|distQQ|distEcdf|freqSlice:|paretoLine|likertLevel:|likertMeanDots|corrCells|box)/;
             var front = [], back = [];
             for (var f = 0; f < kinds.length; f++) {
@@ -107916,6 +108280,8 @@
 
             var hideElements = [];
             var hideBars = [];
+            // Scatter groups to hide: their Hide button keeps its own list.
+            var hideXyGroups = [];
             // Drawn-shape annotation ids to DELETE outright (not hide).
             var deleteShapeIds = [];
             // Title-style text clearings: each entry is { id: "chartTitle"|"groupTitle" }.
@@ -107969,6 +108335,22 @@
                     hideElements.push("xCatLabel:" + s.substring("text:xCat:".length));
                 } else if (s.indexOf("text:groupItem:") === 0) {
                     hideElements.push("groupItemLabel:" + s.substring("text:groupItem:".length));
+                } else if (s.indexOf("distHist:") === 0 || s.indexOf("distDensity:") === 0 ||
+                           s.indexOf("distQQ:") === 0 || s.indexOf("distEcdf:") === 0) {
+                    // Wherever a panel's title bar has a Hide button, Delete
+                    // does the same thing through the same store, so Undo
+                    // and Show or hide parts bring the part back. These
+                    // parts had the button and no rule here, so the key did
+                    // nothing on them. A Distribution series (histogram,
+                    // density, Q-Q, ECDF) hides as "distGroup:<group>".
+                    hideElements.push("distGroup:" + s.substring(s.indexOf(":") + 1));
+                } else if (s.indexOf("freqSlice:") === 0 || s.indexOf("corrVar:") === 0 ||
+                           s.indexOf("likertItem:") === 0 || s === "paretoLine") {
+                    // A pie slice, a correlation variable, a Likert item and
+                    // the Pareto line hide under their own selection key.
+                    hideElements.push(s);
+                } else if (s.indexOf("xyPoint:") === 0) {
+                    hideXyGroups.push(s.substring("xyPoint:".length));
                 } else if (s === "legend") {
                     hideElements.push("legend");
                 } else if (s === "yAxis") {
@@ -108007,6 +108389,7 @@
 
             if (hideElements.length === 0 &&
                 hideBars.length === 0 &&
+                hideXyGroups.length === 0 &&
                 clearTitles.length === 0 &&
                 deleteShapeIds.length === 0) return;
 
@@ -108025,6 +108408,16 @@
             }
             for (var bi = 0; bi < hideBars.length; bi++) {
                 _addHiddenBar(hideBars[bi].cat, hideBars[bi].group);
+            }
+            if (hideXyGroups.length > 0) {
+                var _xyHidNow = Array.isArray(data.xyHiddenGroups) ? data.xyHiddenGroups.slice() : [];
+                for (var xgi = 0; xgi < hideXyGroups.length; xgi++) {
+                    if (_xyHidNow.indexOf(hideXyGroups[xgi]) < 0) _xyHidNow.push(hideXyGroups[xgi]);
+                }
+                data.xyHiddenGroups = _xyHidNow;
+                if (hasSetOption) {
+                    try { _setOption("xyHiddenGroups", _xyHidNow); } catch (_eXg) {}
+                }
             }
             // Title clears: empty string -> render path skips, click-
             // to-add ghost re-appears so the user can type again.
@@ -108051,7 +108444,7 @@
                 try { _setOption("hiddenBars", data.hiddenBars); } catch (_e) {}
             }
             if (hideElements.length > 0 || hideBars.length > 0 ||
-                clearTitles.length > 0) {
+                hideXyGroups.length > 0 || clearTitles.length > 0) {
                 if (typeof window.__gb2_updateVisBtnIcon === "function") {
                     try { window.__gb2_updateVisBtnIcon(); } catch (_e) {}
                 }

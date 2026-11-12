@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "ptukey-df-scaled-grid", since: "3.2.1",
+      label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
       label: "Compare Groups comparisons under a correction run on the ANOVA's pooled error term, with Cohen's d on the model SD" },
     { id: "rm-posthoc-complete-subjects", since: "3.2.0",
@@ -1364,24 +1366,10 @@
     var want = pref === "beside" ? true
              : pref === "below" ? false
              : (STATS_WIDE != null ? DOCK_BESIDE : dockAutoBeside(DOCK_BESIDE));
-    // The dock's home is the settings column, and below 760px that column
-    // is a drawer: display none until its button is pressed. A panel docked
-    // there opens where nobody can see it. A phone held sideways is both
-    // narrow and short, so the automatic rule chose the column and a tap on
-    // a bar showed nothing at all (found by mobile-check, Nov 2026). The
-    // same media query the stylesheet uses decides it, so the two can never
-    // disagree, and a stored Beside preference waits for a wider window.
-    if (want && dockColumnIsDrawer()) want = false;
     var changed = want !== DOCK_BESIDE;
     DOCK_BESIDE = want;
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
     return changed;
-  }
-  function dockColumnIsDrawer() {
-    try {
-      return !!(window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches);
-    } catch (e) { return false; }
   }
   function panelDockWanted() { return DOCK_BESIDE; }
   function dockSlot() { return el("ps-engine-dock-slot"); }
@@ -5823,11 +5811,8 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    // A phone's picture format is PNG: Photos cannot hold an SVG and
-    // Messages shows one as a nameless file. Only the DEFAULT moves; a
-    // format the person chose before is still theirs.
-    var out = { format: phoneOn() ? "png" : "svg", dpi: 300,
-                background: "shown", pinRecord: true };
+    var out = { format: "svg", dpi: 300, background: "shown",
+                pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -6366,9 +6351,7 @@
       // whole record - and every choice lands in the SAME export dialog
       // charts use. Anchored under the Export button - the accelerator
       // and File menu land here too, so every route gets the same choice.
-      var ebEl = (phoneOn() && document.getElementById("ps-phone-export")) ||
-        el("ps-export");
-      var eb = ebEl.getBoundingClientRect();
+      var eb = el("ps-export").getBoundingClientRect();
       var act = activePinBoard();
       var pbs = pinBoards().filter(function (b) { return b.pins.length; });
       var total = allPins().length;
@@ -7016,6 +6999,23 @@
     }
     applySvgAccessibility(doc, exportAccessibleTitle(),
       exportAccessibleDescription());
+    // PowerPoint-safe paints at the EXPORT boundary only (Nov 2026, Torry's
+    // deck): PowerPoint's SVG importer paints "transparent" and rgba() as
+    // opaque black once a saved deck is reopened, so every chart's invisible
+    // click targets came back as solid black boxes over the error bars. The
+    // chart export gets this inside the engine's harvest; a layout's panels
+    // come from the chart SNAPSHOTS, whose bytes must not change (the
+    // Notebook's drift verdict compares them), so the rewrite runs here, on
+    // the assembled export root, never on the snapshot.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportSafePaints === "function")
+      window.GraphBuilder2.exportSafePaints(root);
+    // Pattern fills become plain clipped geometry at the same boundary:
+    // every SVG-to-PDF writer turns an SVG pattern into a PDF tiling pattern,
+    // and tiling patterns draw hairline seams in some viewers and print RIPs.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportFlattenPatterns === "function")
+      window.GraphBuilder2.exportFlattenPatterns(root);
     return {
       svg: serializeExportSvg(root),
       w: page.w, h: page.h
@@ -8658,7 +8658,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast(exportedNotice(base + ".xlsx", notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast("Exported " + base + ".xlsx" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       if (e && e.name === "AbortError") {
         showToast("Export cancelled \u00b7 nothing was written");
@@ -8680,7 +8680,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast(exportedNotice(base + ".csv", notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       // Swallowing a deliberate cancel is right, saying nothing at all is
       // not: a cancelled save and a dead button looked identical.
@@ -8691,23 +8691,9 @@
       showToast("Could not export the data: " + String(e && e.message || e), true);
     });
   }
-  // "Exported" claims the file exists. With the browser's own Save dialog
-  // that is known. With a download link it is known on a computer, where
-  // the browser simply saves. On a phone or tablet the browser asks first
-  // (Safari: "Do you want to download...?"), and the notice was already on
-  // screen saying Exported while that question stood unanswered. There the
-  // app says only what it knows: the file is ready and the browser has it.
-  var EXPORT_LAST_HOW = "";
-  function exportedNotice(filename, tail) {
-    if (EXPORT_LAST_HOW === "downloaded" && touchModeOn())
-      return filename + " is ready. If your browser asks, choose Download." +
-        (tail || "");
-    return "Exported " + filename + (tail || "");
-  }
   function saveExportBlob(blob, filename, ext) {
     var framed = false;
     try { framed = window.top !== window; } catch (e) { framed = true; }
-    EXPORT_LAST_HOW = "";
     if (nativeSaveAvailable()) {
       return window.showSaveFilePicker({
         suggestedName: filename,
@@ -8719,7 +8705,7 @@
         return h.createWritable().then(function (w) {
           return w.write(blob).then(function () { return w.close(); });
         });
-      }).then(function () { EXPORT_LAST_HOW = "saved"; return "saved"; });
+      }).then(function () { return "saved"; });
     }
     return new Promise(function (resolve, reject) {
       try {
@@ -8728,7 +8714,6 @@
         a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-        EXPORT_LAST_HOW = "downloaded";
         resolve("downloaded");
       } catch (e) { reject(e); }
     });
@@ -8763,7 +8748,7 @@
         EXPORT_BUSY = false;
         el("ps-export-go").textContent = "Export";
         closeExporter();
-        showToast(exportedNotice(filename), false);
+        showToast("Exported " + filename, false);
       })
       .catch(function (e) {
         EXPORT_BUSY = false;
@@ -9289,11 +9274,6 @@
     // The editing panel may dock beside the chart; the host published in
     // __gb2_inspectorDockHost answers per placement (see applyPanelDock).
     payload.inspectorDock = "host";
-    // Touch presses are arbitrated by this host (wireTouch): the engine
-    // reads __gb2_touchCancelAt and __gb2_touchPressConsumed in its
-    // selection entry point only when this key says a host is writing
-    // them. jamovi never ships it.
-    payload.touchHost = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -9717,19 +9697,10 @@
     if (!pins.length) {
       scroll.removeAttribute("role");
       scroll.removeAttribute("aria-label");
-      // A finger has no right-click. A phone has a Keep button; a tablet
-      // reaches the same menu by touching and holding the chart.
-      var empty = mkEl("div", "ps-pinboard-empty", phoneOn()
-        ? "Nothing kept yet. In Charts, tap Keep, or press Keep on a " +
-          "comparison in the \u03a3 Statistics panel. Each lands here " +
-          "as a page."
-        : touchModeOn()
-        ? "Nothing kept yet. Touch and hold a chart and choose Keep, or " +
-          "press Keep on a comparison in the \u03a3 Statistics panel. " +
-          "Each lands here as a page."
-        : "Nothing kept yet. Right-click a chart, or press Keep on a " +
-          "comparison in the \u03a3 Statistics panel. Each lands here " +
-          "as a page.");
+      var empty = mkEl("div", "ps-pinboard-empty",
+        "Nothing kept yet. Right-click a chart, or press Keep on a " +
+        "comparison in the \u03a3 Statistics panel. Each lands here " +
+        "as a page.");
       scroll.appendChild(empty);
       // "New here?" under the empty state, until the tour has been taken.
       if (window.PS_TOURS && !window.PS_TOURS.seen("notebook")) {
@@ -10688,7 +10659,7 @@
       EXPORT_BUSY = false;
       el("ps-export-go").textContent = "Export";
       closeExporter();
-      showToast(exportedNotice(filename, tail));
+      showToast("Exported " + filename + (tail || ""));
     }
     function fail(e) {
       EXPORT_BUSY = false;
@@ -11153,20 +11124,6 @@
       window.innerWidth - w - 12));
     c.style.left = left + "px";
     c.style.top = Math.min(box.top + 44, window.innerHeight - 150) + "px";
-    // On a phone the note is nearly as wide as the chart, and sitting on
-    // the chart it hid about two fifths of the thing it is describing
-    // (mobile-check, Nov 2026); on a tablet's narrow middle column it hid
-    // more. In touch mode it goes under the chart instead, or as low as
-    // the screen allows.
-    if (touchModeOn()) {
-      var chart = host.querySelector('svg[data-role="gb2-chart-svg"]');
-      if (chart) {
-        var cb = chart.getBoundingClientRect();
-        var h = c.offsetHeight || 150;
-        c.style.top = Math.max(8, Math.min(cb.bottom + 10,
-          window.innerHeight - h - 34)) + "px";
-      }
-    }
   }
   function maybeShowCoach() {
     if (COACH_SHOWN || coachSeen()) return;
@@ -11185,11 +11142,6 @@
     COACH_SHOWN = true;
     var c = document.getElementById("ps-coach");
     if (!c) return;
-    // A finger taps, and moves a part by holding it first.
-    var say = document.getElementById("ps-coach-say");
-    if (say && touchModeOn())
-      say.textContent = "Tap a bar, an axis, a label or the legend to " +
-        "style just that part. To move a part, touch and hold it, then drag.";
     c.hidden = false;
     coachPlace();
   }
@@ -13073,15 +13025,6 @@
     });
   }
   function applyViewZoom() {
-    var zHost = hostEl();
-    var zWas = zHost ? zHost.style.zoom : "";
-    applyViewZoomCore();
-    // The touch text floor measured its sizes under the old zoom.
-    try {
-      if (zHost && zHost.style.zoom !== zWas) touchFloorRecheck(zHost);
-    } catch (eTf) {}
-  }
-  function applyViewZoomCore() {
     var host = hostEl();
     if (!host) return;
     var doc = activeChartTab();
@@ -13139,28 +13082,6 @@
     S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
-    if (mode === "fit" && phoneSheetFit()) {
-      // A phone with chart setup open as a sheet: the pane ends where the
-      // sheet begins, and the point of the sheet is to watch the chart
-      // change while variables are chosen. Width alone left the chart's
-      // lower half behind the sheet, so trim until its bottom edge is in
-      // the pane. Measured on the drawing itself, because an editing panel
-      // may be open under it and that panel is not what has to fit.
-      var shPane = document.querySelector(".ps-main-workspace");
-      var shSvg = host.querySelector('svg[data-role="gb2-chart-svg"]');
-      var shH = chartLogicalHeightPx();
-      try { if (shPane) shPane.scrollTop = 0; } catch (eSc) {}
-      for (var sp = 0; shPane && shSvg && shH > 0 && sp < 5 && S > 0.35; sp++) {
-        var shOver = shSvg.getBoundingClientRect().bottom -
-          (shPane.getBoundingClientRect().bottom - 8);
-        if (shOver <= 1) break;
-        var shNext = Math.max(0.35, S - (shOver + 2) / shH);
-        if (shNext >= S) break;
-        S = shNext;
-        host.style.zoom = Math.abs(S - 1) < 0.005
-          ? "" : String(Math.round(S * 1000) / 1000);
-      }
-    }
     if (mode === "fit" && panelDockWanted() && !dockPanelBelow()) {
       // Beside the panel the whole chart has to stay on screen, and the
       // chart's chrome (tab strip, toolbar, note) is not in the logical
@@ -13539,18 +13460,6 @@
       : Math.max(clickY, chartTop + 80);
     var cap = Math.floor(anchorY - (Math.max(sr.top, 0) + 44));
     var by = Math.min(needed, Math.max(0, cap));
-    // A short pane cannot keep the tapped part in view AND show the panel.
-    // A phone held sideways leaves about 150px of pane in Safari, the
-    // anchor bound won every time, and the editor opened entirely below
-    // the fold: a tap on a bar looked like it had done nothing. There the
-    // panel is owed its header and first row: 96px of it, or six tenths
-    // of the pane. Taller panes keep the anchor rule untouched.
-    var paneH = viewBottom - Math.max(sr.top, 0);
-    if (paneH < 320) {
-      var minShow = Math.min(pr.height, Math.max(96, Math.round(paneH * 0.6)));
-      if (viewBottom - (pr.top - by) < minShow)
-        by = Math.min(needed, Math.ceil(pr.top - (viewBottom - minShow)));
-    }
     if (by < 4) return 0;
     var reduce = false;
     try {
@@ -14069,15 +13978,8 @@
   // What a press last landed on, so the focus it causes does not re-summon
   // the tip it just dismissed.
   var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
-  // A finger has no hover and never leaves: a tip raised by a tap stays up
-  // until the next tap somewhere else. Tapping a chart tab rebuilt the tab
-  // strip and focused the new tab, and its tip then sat across the chart
-  // toolbar (seen in the iPhone simulator, Nov 2026). So a touch press
-  // raises no tip, by hover or by the focus it causes.
-  var TIP_TOUCH_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
-      if (e.pointerType === "touch") return;
       var target = tipTarget(e.target);
       if (!target) return;
       if (TIP_TIMER) window.clearTimeout(TIP_TIMER);
@@ -14106,7 +14008,6 @@
       var target = tipTarget(e.target);
       if (target && target === TIP_PRESSED &&
           Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
-      if (Date.now() - TIP_TOUCH_AT < 900) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
@@ -14126,7 +14027,6 @@
     document.addEventListener("pointerdown", function (e) {
       TIP_PRESSED = tipTarget(e.target);
       TIP_PRESSED_AT = Date.now();
-      if (e.pointerType === "touch") TIP_TOUCH_AT = TIP_PRESSED_AT;
       hideTip();
     }, true);
     window.addEventListener("scroll", hideTip, true);
@@ -15366,6 +15266,21 @@
     if (!moved) return null;
     syncDataGrid();
     return gridFindTd(col, row);
+  }
+  // The column half of gridBuildCell, for a header: scroll the column
+  // window to the column when it is outside what is built, touching no
+  // row. The header row is sticky, so a column name is on screen the
+  // moment its column is.
+  function gridBuildColumn(col) {
+    var grid = el("ps-datagrid"), t = PROJECT.table;
+    if (!grid || !t || !GRID_COL_WINDOWED) return;
+    var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+    if (ci < 0 || (ci >= GRID_COL_START && ci < GRID_COL_END)) return;
+    var edge = gridColumnEdges(cols, ci);
+    grid.scrollLeft = ci < GRID_COL_START
+      ? Math.max(0, edge.left - 46)
+      : Math.max(0, edge.right - grid.clientWidth);
+    syncDataGrid();
   }
   function gridShouldVirtualize(t) {
     if (!t) return false;
@@ -16650,8 +16565,11 @@
     }
   }
   function gridFindResultKey(result) {
-    if (!result || !PROJECT.table || !PROJECT.table.caseIds[result.row])
-      return "";
+    if (!result || !PROJECT.table) return "";
+    // A column-name match (row -1) has no case id; its key is the name, so
+    // the current match survives a refresh the way a cell match does.
+    if (result.row === -1) return result.col + "\u0000#name";
+    if (!PROJECT.table.caseIds[result.row]) return "";
     return result.col + "\u0000" + PROJECT.table.caseIds[result.row];
   }
   // t3-47. Replace runs over GRID_FIND_RESULTS, so it acts on exactly the
@@ -16674,10 +16592,25 @@
     }
     var repl = String(el("ps-data-replace").value == null
       ? "" : el("ps-data-replace").value);
-    var targets = all ? GRID_FIND_RESULTS.slice()
-      : (GRID_FIND_INDEX >= 0 && GRID_FIND_RESULTS[GRID_FIND_INDEX]
-         ? [GRID_FIND_RESULTS[GRID_FIND_INDEX]] : []);
-    if (!targets.length) { showToast("No matches to replace"); return; }
+    // Column names are matches to Find (they lead the list) but never to
+    // Replace (Torry, Nov 2 2026): renaming a column through a bulk
+    // substitution is exactly the silent change the whole-cell default
+    // exists to prevent, and a header has its own rename path. All skips
+    // them; Replace on a name says so instead of silently doing nothing.
+    var current = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    if (!all && current && current.row === -1) {
+      showToast("Replace changes cells only. This match is a column name.");
+      return;
+    }
+    var targets = all
+      ? GRID_FIND_RESULTS.filter(function (r) { return r.row >= 0; })
+      : (current ? [current] : []);
+    if (!targets.length) {
+      showToast(GRID_FIND_RESULTS.length
+        ? "Only column names match. Replace changes cells only."
+        : "No matches to replace");
+      return;
+    }
     var needle = GRID_FIND_QUERY, lower = needle.toLocaleLowerCase();
     var wholeBox = el("ps-data-replace-whole");
     var whole = !wholeBox || wholeBox.checked;
@@ -16733,6 +16666,14 @@
     var t = PROJECT.table, needle = GRID_FIND_QUERY.toLocaleLowerCase();
     if (t && needle && GRID_FIND_QUERY.trim()) {
       var visible = gridVisibleColumns(t);
+      // Column NAMES match too (Torry, Nov 2 2026: "it'd be really nice to
+      // be able to search for the names of these different variables").
+      // They lead the list in table order, the way the grid reads: a name
+      // sits above its column's cells. row -1 marks one; the reveal selects
+      // the whole column and Replace leaves it alone.
+      for (var hc = 0; hc < visible.length; hc++)
+        if (String(visible[hc]).toLocaleLowerCase().indexOf(needle) !== -1)
+          GRID_FIND_RESULTS.push({ col: visible[hc], row: -1 });
       for (var row = 0; row < nRows(t); row++)
         for (var ci = 0; ci < visible.length; ci++) {
           var col = visible[ci];
@@ -16760,7 +16701,12 @@
       (GRID_FIND_RESULTS.length
        ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
        : "No matches");
-    el("ps-data-find-count").textContent = findCountTxt;
+    // The popup's readout says when the current match is a column name,
+    // which is why a whole column lit up; the closed button keeps the bare
+    // count, which is all its width has room for.
+    var findCur = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    el("ps-data-find-count").textContent = findCountTxt +
+      (findCountTxt && findCur && findCur.row === -1 ? " \u00b7 column name" : "");
     // The trigger carries the live state so a sticky query is never
     // invisible while the popup is closed (the Filter button's idiom).
     var findBtn = el("ps-data-find-btn");
@@ -16873,43 +16819,59 @@
   }
   function gridRevealFound(result) {
     var t = PROJECT.table;
-    if (!t || !result || !t.raw[result.col] ||
-        result.row < 0 || result.row >= nRows(t)) return;
+    if (!t || !result || !t.raw[result.col]) return;
+    var isName = result.row === -1;
+    if (!isName && (result.row < 0 || result.row >= nRows(t))) return;
     if (GRID_EDIT) gridCommitEdit(null);
     var grid = el("ps-datagrid");
-    var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
-      Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
-    // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
-    // scroll is what says the row was ALREADY there rather than that the
-    // grid was replaced, which is the same reason the engine scrolls its own
-    // stats rows rather than snapping them. Only for a move worth animating,
-    // and never under the motion preference, where the jump IS the answer.
-    var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
-    var smooth = far && APP_PREFS.motion !== "reduce" &&
+    var motionOk = APP_PREFS.motion !== "reduce" &&
       !(window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    // The window is rendered FROM the scroll position, so the rows have to
-    // exist before an animated scroll can travel across them: set the
-    // position, let syncDataGrid build that window, then animate the last
-    // part. Animating first and syncing after cancels the scroll outright,
-    // which is worse than the jump it was meant to replace.
-    grid.scrollTop = want;
-    syncDataGrid();
-    if (smooth && grid.scrollTo) {
-      grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
-      try { grid.scrollTo({ top: want, behavior: "smooth" }); }
-      catch (e) { grid.scrollTop = want; }
+    var smooth = false, cell = null;
+    if (isName) {
+      // A column-name match. The header row is sticky, so there is no
+      // vertical travel to make: the column only has to be BUILT (it may
+      // sit outside the column window) and then selected whole, the way a
+      // header click selects it, so the match reads as "this column".
+      gridBuildColumn(result.col);
+      if (nRows(t))
+        gridSetSelection(result.col, 0, result.col, nRows(t) - 1, "column");
+      else selectInspectorVariable(result.col);
+      smooth = motionOk;
+      cell = gridFindTh(result.col);
+    } else {
+      var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
+        Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+      // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
+      // scroll is what says the row was ALREADY there rather than that the
+      // grid was replaced, which is the same reason the engine scrolls its own
+      // stats rows rather than snapping them. Only for a move worth animating,
+      // and never under the motion preference, where the jump IS the answer.
+      var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
+      smooth = far && motionOk;
+      // The window is rendered FROM the scroll position, so the rows have to
+      // exist before an animated scroll can travel across them: set the
+      // position, let syncDataGrid build that window, then animate the last
+      // part. Animating first and syncing after cancels the scroll outright,
+      // which is worse than the jump it was meant to replace.
+      grid.scrollTop = want;
+      syncDataGrid();
+      if (smooth && grid.scrollTo) {
+        grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
+        try { grid.scrollTo({ top: want, behavior: "smooth" }); }
+        catch (e) { grid.scrollTop = want; }
+      }
+      gridSetSelection(result.col, result.row,
+                       result.col, result.row, "cells");
+      // Vertical only was half a reveal. At 40 columns every match Find walked
+      // to was off screen to the RIGHT while the counter cheerfully advanced,
+      // so the one feature for locating a value could not show you one. Done
+      // after the selection, because the cell has to be painted before it can
+      // be measured, and only when it is actually out of view so an in-view
+      // match never jolts sideways.
+      cell = gridFindTd(result.col, result.row) ||
+             gridBuildCell(result.col, result.row);
     }
-    gridSetSelection(result.col, result.row,
-                     result.col, result.row, "cells");
-    // Vertical only was half a reveal. At 40 columns every match Find walked
-    // to was off screen to the RIGHT while the counter cheerfully advanced,
-    // so the one feature for locating a value could not show you one. Done
-    // after the selection, because the cell has to be painted before it can
-    // be measured, and only when it is actually out of view so an in-view
-    // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row) ||
-               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -17952,6 +17914,13 @@
     var tds = el("ps-datagrid").querySelectorAll('td[data-gr="' + row + '"]');
     for (var i = 0; i < tds.length; i++)
       if (tds[i].getAttribute("data-gc") === col) return tds[i];
+    return null;
+  }
+  // The header's twin: the built th for a column, by attribute equality.
+  function gridFindTh(col) {
+    var ths = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < ths.length; i++)
+      if (ths[i].getAttribute("data-grid-col") === col) return ths[i];
     return null;
   }
   function gridRefreshComputedCells(previousFilterMask) {
@@ -23438,6 +23407,7 @@
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
+  var LAY_PAGE_DRAG = null;
   var LAY_RESIZE_TIMER = null;
   var LAY_PRESETS = {
     // Screen-ish presets are defined on ROUND INCHES (Torry's ruling,
@@ -24147,7 +24117,6 @@
     if (!ct || !host) return;
     var bar = host.querySelector('[data-role="chart-toolbar"]');
     if (bar && !bar.contains(ct)) bar.appendChild(ct);
-    try { phoneDockMore(bar); } catch (eMore) {}
     syncToolbarTight();
   }
   // Narrow bars COMPRESS the labels back to icons (Torry, Aug 6 2026):
@@ -27499,6 +27468,294 @@
     layClampAllItems();
     persist(); renderLayout();
   }
+  // ---- page edges (Nov 2026, Torry's ask: "handles on the very edge of
+  // the layout, to pull it in to the size of your graphs"). The presets,
+  // the typed size and the orientation flip all SCALE the arrangement onto
+  // the new page (layRefitToPage). A page edge in hand does the other
+  // thing: it moves that edge only. Items keep their size and their place
+  // (a left or top edge re-bases every item by the same amount, so nothing
+  // moves on the paper), the edge stops at the outermost item, so nothing
+  // is ever cropped, and it snaps to the item plus the margin, which is
+  // what "the size of your graphs" means on a page with an inset. Fit page
+  // to content is the same operation in one click. The whole gesture lives
+  // in integer pixels, the model's unit, so layNormalizeLayout's rounding
+  // on every layPage() read is a no-op mid-drag.
+  function layContentBounds() {
+    var items = layItems(), p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i], p);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo) || !isFinite(ln)) return null;
+    return { x: lo, y: ln, w: hi - lo, h: hn - ln, right: hi, bottom: hn };
+  }
+  function layShiftAllItems(dx, dy) {
+    if (!dx && !dy) return;
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      items[i].x = (Number(items[i].x) || 0) + dx;
+      items[i].y = (Number(items[i].y) || 0) + dy;
+    }
+  }
+  function layFitPageToContent() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return false;
+    var p = layPage(), cb = layContentBounds();
+    if (!cb) {
+      layAnnounce("There is nothing on the page to fit it to.");
+      showToast("Add a chart, text, or an image first; the page fits to " +
+        "what is on it.");
+      return false;
+    }
+    var m = p.margin;
+    var w = Math.round(layClamp(cb.w + 2 * m, 320, LAY_PAGE_MAX));
+    var h = Math.round(layClamp(cb.h + 2 * m, 240, LAY_PAGE_MAX));
+    // The content sits inside the margin; when the page minimum leaves
+    // more room than that, it is centred in the room.
+    var ox = Math.max(0, Math.round((w - cb.w) / 2));
+    var oy = Math.max(0, Math.round((h - cb.h) / 2));
+    var shiftX = ox - cb.x, shiftY = oy - cb.y;
+    if (p.w === w && p.h === h &&
+        Math.abs(shiftX) < 0.5 && Math.abs(shiftY) < 0.5) {
+      layAnnounce("The page already fits its content.");
+      showToast("The page already fits its content.");
+      return false;
+    }
+    laySnapshot("page size");
+    p.w = w; p.h = h; p.preset = "custom";
+    layShiftAllItems(shiftX, shiftY);
+    layNormalizeLayout(c);
+    layClampAllItems();
+    persist(); renderLayout();
+    layAnnounce("Page fitted to its content: " + pxToUnit(p.w) + " by " +
+      pxToUnit(p.h) + " " + unitLabel() + ".");
+    return true;
+  }
+  function layPageEdgePointerDown(e) {
+    if (e.button !== 0) return;
+    var grip = e.target && e.target.closest ? e.target.closest("[data-edge]") : null;
+    if (!grip) return;
+    var c = activeChart();
+    if (!isLayoutTab(c) || LAY_DRAG) return;
+    // preventDefault keeps the press from focusing the viewport, whose
+    // focus handler would select the active item; a grip is page chrome.
+    e.preventDefault();
+    e.stopPropagation();
+    if (LAY_PAGE_DRAG) layPageEdgeTeardown();
+    layNormalizeLayout(c);
+    var p = layPage(), items = layItems(), origins = [];
+    for (var i = 0; i < items.length; i++)
+      origins.push({ item: items[i], x: Number(items[i].x) || 0,
+                     y: Number(items[i].y) || 0 });
+    // The stage is centred by margin auto, so a width change on its own
+    // would move BOTH edges by half and the grip would run at half the
+    // pointer's speed. Pinning the stage's used margins keeps the edge
+    // that is not in hand still and the one in hand under the pointer;
+    // release lets the page settle back to centre.
+    var stage = el("ps-lstage"), vp = el("ps-lviewport");
+    var cs = vp ? window.getComputedStyle(vp) : null;
+    var padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+    var padT = cs ? parseFloat(cs.paddingTop) || 0 : 0;
+    LAY_PAGE_DRAG = {
+      edge: grip.getAttribute("data-edge") || "", grip: grip, docId: c.id,
+      sx: e.clientX, sy: e.clientY, zoom: layZoom(),
+      w0: p.w, h0: p.h, origins: origins, content: layContentBounds(),
+      ml0: stage ? stage.offsetLeft - padL : 0,
+      mt0: stage ? stage.offsetTop - padT : 0,
+      cursor0: document.body.style.cursor || "",
+      moved: false, before: laySnapState(c)
+    };
+    document.addEventListener("pointermove", layPageEdgeMove);
+    document.addEventListener("pointerup", layPageEdgeUp);
+    document.addEventListener("pointercancel", layPageEdgeCancelEvent);
+  }
+  function layPageEdgeMove(e) {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    var live = activeChart();
+    if (appWorkspace() !== "layout" || !isLayoutTab(live) ||
+        live.id !== d.docId) { layCancelPageEdgeDrag(); return; }
+    var z = d.zoom;
+    var dx = (e.clientX - d.sx) / z, dy = (e.clientY - d.sy) / z;
+    if (!d.moved && Math.abs(dx) < 3 / z && Math.abs(dy) < 3 / z) return;
+    if (!d.moved) {
+      d.moved = true;
+      d.grip.classList.add("ps-lpage-edge-active");
+      var st0 = el("ps-lstage");
+      if (st0) st0.classList.add("ps-lstage-resizing");
+      // The pointer leaves the grip at once; the body carries its cursor.
+      try { document.body.style.cursor = window.getComputedStyle(d.grip).cursor || ""; }
+      catch (ignore) {}
+    }
+    var p = layPage(), cb = d.content, m = p.margin, snapT = 8 / z;
+    var ed = d.edge, gx = null, gy = null;
+    var newW = d.w0, newH = d.h0, shiftX = 0, shiftY = 0;
+    if (ed.indexOf("e") !== -1) {
+      newW = d.w0 + dx;
+      var floorW = Math.max(320, cb ? Math.ceil(cb.right) : 0);
+      var wantW = cb ? cb.right + m : null;
+      if (wantW != null && wantW >= floorW && wantW <= LAY_PAGE_MAX &&
+          Math.abs(newW - wantW) <= snapT) { newW = wantW; gx = cb.right; }
+      newW = Math.round(layClamp(newW, floorW, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("w") !== -1) {
+      // The left edge moves by s (inward when positive); the width loses s
+      // and every item re-bases by -s, so nothing moves on the paper.
+      var s = dx;
+      var maxS = d.w0 - 320;
+      if (cb) maxS = Math.min(maxS, Math.floor(cb.x));
+      var minS = d.w0 - LAY_PAGE_MAX;
+      var wantS = cb ? cb.x - m : null;
+      if (wantS != null && wantS <= maxS && wantS >= minS &&
+          Math.abs(s - wantS) <= snapT) { s = wantS; gx = m; }
+      s = Math.round(layClamp(s, minS, maxS));
+      newW = d.w0 - s; shiftX = -s;
+    }
+    if (ed.indexOf("s") !== -1) {
+      newH = d.h0 + dy;
+      var floorH = Math.max(240, cb ? Math.ceil(cb.bottom) : 0);
+      var wantH = cb ? cb.bottom + m : null;
+      if (wantH != null && wantH >= floorH && wantH <= LAY_PAGE_MAX &&
+          Math.abs(newH - wantH) <= snapT) { newH = wantH; gy = cb.bottom; }
+      newH = Math.round(layClamp(newH, floorH, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("n") !== -1) {
+      var t = dy;
+      var maxT = d.h0 - 240;
+      if (cb) maxT = Math.min(maxT, Math.floor(cb.y));
+      var minT = d.h0 - LAY_PAGE_MAX;
+      var wantT = cb ? cb.y - m : null;
+      if (wantT != null && wantT <= maxT && wantT >= minT &&
+          Math.abs(t - wantT) <= snapT) { t = wantT; gy = m; }
+      t = Math.round(layClamp(t, minT, maxT));
+      newH = d.h0 - t; shiftY = -t;
+    }
+    p.w = newW; p.h = newH;
+    for (var i = 0; i < d.origins.length; i++) {
+      d.origins[i].item.x = d.origins[i].x + shiftX;
+      d.origins[i].item.y = d.origins[i].y + shiftY;
+    }
+    layPageEdgeApplyLive(d, gx, gy);
+    e.preventDefault();
+  }
+  // The live frame: canvas and stage take the new size, the stage's pinned
+  // margins hold the far edge still, re-based items move with the paper,
+  // the margin guide and the rail's fields follow. No rebuild mid-gesture.
+  function layPageEdgeApplyLive(d, gx, gy) {
+    var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
+    var p = layPage(), z = d.zoom;
+    if (canvas) {
+      canvas.style.width = p.w + "px";
+      canvas.style.height = p.h + "px";
+    }
+    if (stage) {
+      stage.style.width = Math.ceil(p.w * z) + "px";
+      stage.style.height = Math.ceil(p.h * z) + "px";
+      stage.style.marginLeft = (d.ml0 + (d.edge.indexOf("w") !== -1
+        ? (d.w0 - p.w) * z : 0)) + "px";
+      stage.style.marginTop = (d.mt0 + (d.edge.indexOf("n") !== -1
+        ? (d.h0 - p.h) * z : 0)) + "px";
+    }
+    laySyncMarginGuide();
+    for (var i = 0; i < d.origins.length; i++) {
+      var it = d.origins[i].item;
+      var node = canvas && canvas.querySelector(
+        '.ps-litem[data-item-id="' + it.id + '"]');
+      if (node) { node.style.left = it.x + "px"; node.style.top = it.y + "px"; }
+    }
+    layShowGuides(gx, gy);
+    var wf = el("ps-lpage-w"), hf = el("ps-lpage-h");
+    if (wf && document.activeElement !== wf) wf.value = pxToUnit(p.w);
+    if (hf && document.activeElement !== hf) hf.value = pxToUnit(p.h);
+    syncLayoutShellStatus();
+  }
+  // After release the pinned margins come off and the page re-centres; a
+  // short glide covers the move so the settle reads as the page coming to
+  // rest, not a jump. Position only: a fit zoom re-sizes in the same frame.
+  function layPageEdgeSettle(stage) {
+    if (!stage) return;
+    var fromL = stage.offsetLeft, fromT = stage.offsetTop;
+    stage.style.marginLeft = ""; stage.style.marginTop = "";
+    var dx = fromL - stage.offsetLeft, dy = fromT - stage.offsetTop;
+    if (!dx && !dy) return;
+    var reduced = false;
+    try {
+      reduced = !!(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (ignore) {}
+    if (reduced) return;
+    stage.style.transition = "none";
+    stage.style.transform = "translate(" + dx + "px," + dy + "px)";
+    void stage.offsetWidth;
+    stage.style.transition = "transform 0.18s ease-out";
+    stage.style.transform = "";
+    window.setTimeout(function () { stage.style.transition = ""; }, 240);
+  }
+  function layPageEdgeTeardown() {
+    var d = LAY_PAGE_DRAG;
+    LAY_PAGE_DRAG = null;
+    document.removeEventListener("pointermove", layPageEdgeMove);
+    document.removeEventListener("pointerup", layPageEdgeUp);
+    document.removeEventListener("pointercancel", layPageEdgeCancelEvent);
+    if (d) document.body.style.cursor = d.cursor0 || "";
+    layHideGuides();
+    var stage = el("ps-lstage");
+    if (stage) stage.classList.remove("ps-lstage-resizing");
+    if (d && d.grip) d.grip.classList.remove("ps-lpage-edge-active");
+  }
+  function layPageEdgeUp() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage"), c = activeChart();
+    if (!d.moved || !isLayoutTab(c) || c.id !== d.docId) {
+      // A press that never travelled is not a resize: nothing changes and
+      // no history entry lands.
+      if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+      return;
+    }
+    var p = layPage();
+    // The floor was computed from the content at the press; after the
+    // re-base the content is where it is, so the page is held at or past
+    // it once more before anything is clamped.
+    var cb = layContentBounds();
+    if (cb) {
+      p.w = Math.max(p.w, Math.min(LAY_PAGE_MAX, Math.ceil(cb.right)));
+      p.h = Math.max(p.h, Math.min(LAY_PAGE_MAX, Math.ceil(cb.bottom)));
+    }
+    p.preset = "custom";
+    layNormalizeLayout(c);
+    var h = layHist();
+    if (h && d.before) {
+      h.undo.push({ label: "page size", state: d.before });
+      if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+      h.redo.length = 0;
+      LAY_COALESCE = null;
+    }
+    layClampAllItems();
+    persist(); renderLayout();
+    layPageEdgeSettle(stage);
+    layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+      " " + unitLabel() + ".");
+  }
+  function layPageEdgeCancelEvent() { layCancelPageEdgeDrag(); }
+  // Escape, a cancelled pointer, or the layout leaving the screen mid-drag:
+  // the page and every item go back to the press-time state, no history.
+  function layCancelPageEdgeDrag() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return false;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage");
+    if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+    var c = activeChart();
+    if (d.moved && isLayoutTab(c) && c.id === d.docId) layRestoreState(d.before);
+    return true;
+  }
   function layToggleView(key) {
     var v = layView();
     v[key] = !v[key];
@@ -27851,6 +28108,7 @@
       if (e.key === "Escape") {
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
+        if (layCancelPageEdgeDrag()) { e.preventDefault(); return; }
         if (layCancelDrag()) { e.preventDefault(); return; }
         if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
@@ -27927,6 +28185,18 @@
                                      Math.min(p.w, p.h) / 3));
       this.value = pxToUnit(p.margin);
       persist(); laySyncMarginGuide();
+    });
+    var pageEdges = el("ps-lpage-edges");
+    if (pageEdges) {
+      var grips = pageEdges.querySelectorAll("[data-edge]");
+      for (var gi = 0; gi < grips.length; gi++)
+        setTip(grips[gi], "Drag to resize the page from this edge. It stops " +
+          "at the items and snaps to the margin.");
+      pageEdges.addEventListener("pointerdown", layPageEdgePointerDown);
+    }
+    var fitPageBtn = el("ps-lpage-fit");
+    if (fitPageBtn) fitPageBtn.addEventListener("click", function () {
+      layFitPageToContent();
     });
     el("ps-lzoom").addEventListener("change", function () {
       layView().zoom = this.value; persist(); renderLayout();
@@ -30480,7 +30750,6 @@
     syncProjectNavigator();
     updateDocumentState();
     syncChartCheck();
-    try { syncPhoneFrame(); } catch (ePhone) {}
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -32602,10 +32871,10 @@
   }
 
   // ---- Find open data (Torry, Sep 21 2026) ----
-  // Two collections whose search AND file hosts both let a page on another
+  // Three collections whose search AND file hosts both let a page on another
   // origin read them (probed with a pandionplots.com origin the day this
-  // was built; Figshare, OSF, Dryad and Kaggle refuse one half or both, so
-  // they are not offered).
+  // was built and again on Nov 2 2026; Figshare, OSF, Dryad and Kaggle refuse
+  // one half or both, so they are not offered).
   //   rdatasets: the data shipped with R packages, indexed as one CSV on
   //     GitHub Pages. The index loads once per session and the search runs
   //     in this browser, so nothing typed leaves the machine.
@@ -32613,6 +32882,9 @@
   //     zenodo.org (30 a minute for anonymous callers, so it runs on Enter,
   //     never per keystroke), filtered to records holding a file this app
   //     can open.
+  //   dataverse: replication and survey data behind DOIs on Harvard
+  //     Dataverse. Each search is one request for FILES, filtered to the
+  //     content types this app reads, grouped under their dataset.
   // Every Open goes through openFromLink, so the fetch, the size guard, the
   // import preview and the provenance line are the link path's, unchanged.
   var FIND_SOURCES = {
@@ -32626,8 +32898,20 @@
       api: "https://zenodo.org/api/records",
       placeholder: "Type some words, then press Enter"
     },
+    // Harvard Dataverse (Nov 2 2026): replication and survey data behind
+    // DOIs. Its search API and its file downloads both send the CORS header
+    // (probed with a pandionplots.com origin), and a file hit already names
+    // its dataset, size, content type and whether it is restricted, so one
+    // request per search is enough.
+    dataverse: {
+      note: "Each search is sent to dataverse.harvard.edu. Only CSV, tab-separated or Excel files are listed, under the dataset they belong to. Opening one fetches the file into this browser; nothing is uploaded.",
+      api: "https://dataverse.harvard.edu/api/search",
+      access: "https://dataverse.harvard.edu/api/access/datafile/",
+      page: "https://dataverse.harvard.edu/dataset.xhtml?persistentId=",
+      placeholder: "Type some words, then press Enter"
+    },
     // A link the person already has (Torry, Sep 22 2026: the welcome's From
-    // a link folded in here, beside the two sources that always allow it).
+    // a link folded in here, beside the sources that always allow it).
     link: {
       note: "Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.",
       placeholder: "https://"
@@ -32675,7 +32959,7 @@
       return;
     }
     el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
-    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    el("ps-finddata-go").style.display = (id === "zenodo" || id === "dataverse") ? "" : "none";
     findRun();
   }
   function findLinkGo() {
@@ -32734,6 +33018,7 @@
   function findRun() {
     var q = String(el("ps-finddata-q").value || "").trim();
     if (FIND_SOURCE === "zenodo") findRunZenodo(q);
+    else if (FIND_SOURCE === "dataverse") findRunDataverse(q);
     else findRunRdatasets(q);
   }
   function findTokens(q) {
@@ -32887,11 +33172,111 @@
         findOpenButtonHtml(fl.url, fl.name) + "</div>";
     }
     if (rec.files.length > max)
-      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on Zenodo</div>";
+      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on " + escHtml(rec.more || "Zenodo") + "</div>";
     return '<div class="ps-finddata-row" data-find-record>' +
       '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(rec.title) + "</div>" +
       '<div class="ps-finddata-meta">' + meta + "</div>" + files + "</div>" +
       '<div class="ps-finddata-actions">' + findAboutHtml(rec.page) + "</div></div>";
+  }
+  // Harvard Dataverse: one request per Enter, asking for FILES (a file hit
+  // carries its dataset, size and content type, so no second request per
+  // dataset is needed), filtered server-side to the content types this app
+  // reads. Hits are grouped under their dataset so a study with several
+  // tables reads as one row, the way a Zenodo record does.
+  var FIND_DV_TYPES = ["text/csv", "text/tab-separated-values", "text/tsv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
+  function findRunDataverse(q) {
+    var seq = ++FIND_SEQ;
+    var box = el("ps-finddata-results");
+    if (!q) { box.innerHTML = ""; findStatus("Type some words and press Enter to search Harvard Dataverse.", false); return; }
+    findStatus("Searching dataverse.harvard.edu\u2026", false);
+    var types = FIND_DV_TYPES.map(function (t) { return '"' + t + '"'; }).join(" OR ");
+    var url = FIND_SOURCES.dataverse.api + "?type=file&per_page=50&q=" + encodeURIComponent(q) +
+      "&fq=" + encodeURIComponent("fileContentType:(" + types + ")");
+    fetch(url, { mode: "cors", cache: "no-store", headers: { Accept: "application/json" } }).then(function (r) {
+      if (r.status === 429) throw new Error("rate");
+      if (!r.ok) throw new Error("dataverse.harvard.edu answered " + r.status + ".");
+      return r.json();
+    }).then(function (j) {
+      if (seq !== FIND_SEQ) return;
+      var d = (j && j.data) || {};
+      var items = Array.isArray(d.items) ? d.items : [];
+      var total = Number(d.total_count) || items.length;
+      var recs = findDataverseRecords(items);
+      var h = "";
+      for (var i = 0; i < recs.length; i++) h += findZenodoRowHtml(recs[i]);
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      if (!recs.length) {
+        findStatus(items.length ? "The matching files are restricted or too large to read here. Try other words."
+          : "No datasets match those words.", false);
+        return;
+      }
+      findStatus(recs.length + (recs.length === 1 ? " dataset" : " datasets") + (total > items.length
+        ? " from the first " + items.length + " of about " + total.toLocaleString() + " matching files. Add a word to narrow it."
+        : " found."), false);
+    }).catch(function (e) {
+      if (seq !== FIND_SEQ) return;
+      var msg = String(e && e.message || e);
+      if (msg === "rate") msg = "dataverse.harvard.edu is limiting searches from this address for a minute. Wait a little and try again.";
+      else if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not reach dataverse.harvard.edu. Check the connection and try again.";
+      findStatus(msg, true);
+    });
+  }
+  // Groups file hits under their dataset, keeping the files this app can
+  // read: a listed content type or a readable extension, not restricted
+  // (the download would refuse), and under the size cap. The authors and
+  // year come from the citation line Dataverse writes for every file
+  // (A. Author; B. Author, 2022, "Title", https://doi.org/...), the DOI from
+  // the dataset's persistent id. The same file can appear once per dataset
+  // version, so a name already listed under its dataset is skipped. A file
+  // named without an extension (Dataverse allows it) gets one from its
+  // content type, because the Excel reader goes by name and openFromLink
+  // would otherwise call it .csv.
+  function findDataverseRecords(items) {
+    var recs = [], byKey = {};
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i] || {};
+      var name = String(it.name || "");
+      var ctype = String(it.file_content_type || "").toLowerCase();
+      var id = String(it.file_id || "");
+      if (!/^\d+$/.test(id) || it.restricted) continue;
+      if (FIND_DV_TYPES.indexOf(ctype) < 0 && !FIND_READABLE.test(name)) continue;
+      if (/\.txt$/i.test(name) && FIND_PROSE.test(name)) continue;
+      if (Number(it.size_in_bytes) > DATA_REFUSE_BYTES) continue;
+      if (!/\.[a-z0-9]{2,5}$/i.test(name)) {
+        var ext = ctype === "text/csv" ? ".csv"
+          : (ctype === "text/tab-separated-values" || ctype === "text/tsv") ? ".tsv"
+          : ctype === FIND_DV_TYPES[3] ? ".xlsx" : "";
+        if (ext) name += ext;
+      }
+      var pid = String(it.dataset_persistent_id || "");
+      var key = pid || ("id:" + String(it.dataset_id || name));
+      var rec = byKey[key];
+      if (!rec) {
+        var m = /^(.*?),\s*(\d{4}),\s*"/.exec(String(it.dataset_citation || ""));
+        var who = [];
+        if (m) {
+          var parts = m[1].split(/;\s*/).filter(Boolean);
+          who = parts.slice(0, 3);
+          if (parts.length > 3) who.push("and others");
+        }
+        rec = byKey[key] = {
+          title: String(it.dataset_name || "Untitled"), who: who.join(", "),
+          year: m ? m[2] : String(it.published_at || "").slice(0, 4),
+          doi: pid.replace(/^doi:/i, ""),
+          page: pid ? FIND_SOURCES.dataverse.page + encodeURIComponent(pid) : "",
+          files: [], more: "Dataverse"
+        };
+        recs.push(rec);
+      }
+      var dup = false;
+      for (var f = 0; f < rec.files.length; f++) if (rec.files[f].name === name) { dup = true; break; }
+      if (dup) continue;
+      rec.files.push({ name: name, size: Number(it.size_in_bytes) || 0, url: FIND_SOURCES.dataverse.access + id });
+    }
+    return recs;
   }
   function wireFindDataDialog() {
     var dlg = el("ps-finddata-dialog");
@@ -32967,7 +33352,22 @@
   var SHARE_FREEZE_SHA = null;    // {url, sha} from the commits API
   var SHARE_LONG_CHARS = 10000;
   var LOCK_MAGIC = "PANDION-LOCKED 1";
-  function appLinkBase() { return String(window.location.href).split(/[?#]/)[0]; }
+  // The address a shared link opens (Torry, Nov 4 2026). The page's own
+  // when this IS the hosted app (a preview copy such as /app-next links to
+  // itself); otherwise the app at pandionplots.com. The desktop app loads a
+  // file from its own disk and the portable file sits wherever it was
+  // saved, and a link to either opens nowhere else. A carried link holds
+  // the whole project, so the hosted app opens it with nothing installed,
+  // which is the point of sharing; a hosted-file link names the file's
+  // address, which any copy of the app can read.
+  var HOSTED_APP = "https://pandionplots.com/app/";
+  function appIsHosted() {
+    try { return /(^|\.)pandionplots\.com$/i.test(window.location.hostname); }
+    catch (e) { return false; }
+  }
+  function appLinkBase() {
+    return appIsHosted() ? String(window.location.href).split(/[?#]/)[0] : HOSTED_APP;
+  }
   function appLinkFor(kind, url) {
     return appLinkBase() + "?" + kind + "=" +
       encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
@@ -33102,6 +33502,10 @@
         : "This project was opened from " + escHtml(linkHost(src)) +
           '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
     } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
+    // From the desktop app or the portable file the link opens the hosted
+    // app, and the dialog says so; the hosted app's own links need no note.
+    var opens = el("ps-share-opens");
+    if (opens) opens.hidden = appIsHosted();
     shareSetMode(SHARE_MODE);
     openShellDialog("ps-share-dialog");
   }
@@ -36865,7 +37269,6 @@
     add(document.querySelector(".ps-bypass"));
     add(document.querySelector(".ps-commandbar"));
     add(document.querySelector(".ps-statusbar"));
-    add(document.getElementById("ps-phone-nav"));
     if (which === "menu") {
       add(document.querySelector(".ps-app-body"));
       var appbar = document.querySelector(".ps-appbar");
@@ -36946,14 +37349,6 @@
       if (priorOpen && !skipFocus) shellRestoreFocus(NARROW_LAST_FOCUS);
       NARROW_LAST_FOCUS = null;
     }
-    if (PHONE) {
-      try { syncPhoneFrame(); } catch (ePh) {}
-      // The sheet takes the lower half: the chart is fitted into what is
-      // left above it, and back again when the sheet goes.
-      if (which === "inspector" || priorOpen === "inspector") {
-        try { applyViewZoom(); } catch (eZ) {}
-      }
-    }
   }
   function narrowToggle(which) {
     narrowSet(NARROW_OPEN === which ? null : which);
@@ -36962,804 +37357,6 @@
   // drawer; leaving it over their chart would be the drawer's own fault.
   function narrowCloseAfterNavigation() {
     if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null, true);
-  }
-  // ===================================================================== touch
-  // Phones and tablets (mobile step 1, Nov 2026). Two separate things live
-  // here, on purpose:
-  //
-  //   TOUCH MODE is a layout density, on when the PRIMARY pointer is a
-  //   finger ((pointer: coarse)): body.ps-touch, read by the stylesheet for
-  //   bigger controls and by the text floor below.
-  //
-  //   TOUCH GESTURES are judged per event, by pointerType, on any device,
-  //   so a touchscreen laptop with a mouse gets them for its finger and
-  //   keeps its mouse exactly as it was.
-  //
-  // What a finger did before this (measured by mobile-check): every drag on
-  // the chart died after about three moves, because the browser took the
-  // touch for a page scroll and cancelled it; the parts that had moved
-  // stayed moved; the engine read the cancel as a click, so swiping the
-  // page past a bar opened that bar's editor; and a tap that wobbled more
-  // than five pixels counted as a drag and did nothing. The rule now, on
-  // the chart surface:
-  //
-  //   a quick swipe scrolls the page and touches nothing;
-  //   a tap edits, wobble included;
-  //   touch and hold, then drag, moves a part;
-  //   touch and hold still opens the part's menu (iOS never sends the
-  //   browser's own menu event, so right-click menus were out of reach).
-  //
-  // Mechanics. Until a press has held still for TOUCH_HOLD_MS its
-  // pointermoves are withheld from everything below window, so an unarmed
-  // press can never move a part or trip a drag threshold. Once armed, the
-  // host's non-passive touchmove listener refuses the browser's pan and the
-  // moves flow; the engine's own drag systems do the rest unchanged. The
-  // engine reads two globals this block writes (its only part in this, and
-  // only when the payload carries touchHost): __gb2_touchCancelAt, so a
-  // cancelled press is not a click, and __gb2_touchPressConsumed, so the
-  // finger lifting off an open menu does not select what is under it.
-  var TOUCH_MODE = false;
-  var TOUCH_HOLD_MS = 250, TOUCH_MENU_MS = 650, TOUCH_SLOP = 10;
-  var TP = null;                        // the one tracked touch press
-  var TOUCH_SWALLOW_CLICK_UNTIL = 0;
-  function touchPrimary() {
-    try {
-      return !!(window.matchMedia &&
-        window.matchMedia("(pointer: coarse)").matches);
-    } catch (e) { return false; }
-  }
-  function touchModeOn() { return TOUCH_MODE; }
-  function touchModeSync() {
-    var on = touchPrimary();
-    var had = document.body.classList.contains("ps-touch");
-    TOUCH_MODE = on;
-    if (had === on) return false;
-    document.body.classList.toggle("ps-touch", on);
-    return true;
-  }
-  // The chart SURFACE: the drawing and the engine's handles laid over it.
-  // Its toolbar, panel, menus and form fields are ordinary controls and
-  // keep their immediate response (a slider must not wait for a hold).
-  function touchChartSurface(t) {
-    if (!t || !t.closest) return false;
-    if (!t.closest(".graphbuilder2-host")) return false;
-    if (t.closest('.gb2-panel, [data-role="chart-toolbar"], ' +
-        '[data-role="graphtype-flyout"], [data-role="palette-flyout"], ' +
-        '[data-role="add-ann-menu"], [data-role="setting-search"], ' +
-        '[data-role="inline-text-editor"], [data-role="color-picker"], ' +
-        // Drawing a shape IS a drag from the first pixel (touch-action
-        // none on the sheet, in the stylesheet).
-        '[data-role="draw-capture"], ' +
-        "input, textarea, select, button, a[href]")) return false;
-    return true;
-  }
-  // The layout page is the same kind of surface: before this a finger could
-  // not move a layout item at all (the browser cancelled the drag about
-  // thirteen pixels in, and the item stayed nudged). Same rule there: a
-  // swipe scrolls the page view, a hold then a drag moves the item, drags
-  // a handle, or draws the selection box. Text being edited is left alone.
-  function touchLayoutSurface(t) {
-    if (!t || !t.closest || !t.closest("#ps-lcanvas")) return false;
-    if (t.closest("input, textarea, select, button, [contenteditable]"))
-      return false;
-    return true;
-  }
-  function touchCue(on, x, y) {
-    var c = document.getElementById("ps-touch-cue");
-    if (!on) { if (c) c.hidden = true; return; }
-    if (!c) {
-      c = document.createElement("div");
-      c.id = "ps-touch-cue";
-      c.setAttribute("aria-hidden", "true");
-      document.body.appendChild(c);
-    }
-    c.style.left = x + "px"; c.style.top = y + "px";
-    c.hidden = false;
-    // Restart the arrive animation for this press.
-    c.classList.remove("ps-touch-cue-in");
-    void c.offsetWidth;
-    c.classList.add("ps-touch-cue-in");
-  }
-  function touchClearTimers(tp) {
-    if (!tp) return;
-    if (tp.holdTimer) { clearTimeout(tp.holdTimer); tp.holdTimer = 0; }
-    if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
-  }
-  function touchPressDrop() {
-    touchClearTimers(TP);
-    touchCue(false);
-    TP = null;
-  }
-  // The app's own long-press: the same contextmenu event a right-click
-  // sends, at the same place, so every menu the app already has answers it.
-  function touchMenuFire(tp) {
-    if (TP !== tp || tp.dead || tp.early || tp.dragging) return;
-    var t = null;
-    try { t = document.elementFromPoint(tp.x, tp.y); } catch (e) {}
-    t = t || tp.target;
-    if (!t || !t.dispatchEvent) return;
-    // Form fields keep the system's own long-press (select, paste, look up).
-    if (t.closest && t.closest("input, textarea, select, [contenteditable]"))
-      return;
-    // Only where the app has a menu worth a held finger: the chart, a
-    // layout page, the data grid, a Notebook page, a document tab, the
-    // navigator. A slow, firm press on an ordinary button has to stay a
-    // press of that button; the catch-all menu a right-click gets there
-    // would swallow it.
-    if (!tp.chart && !(t.closest && t.closest("#ps-datagrid, #ps-datacard, " +
-        "#ps-lviewport, #ps-pinpane, .ps-tab, [data-chart-tab], " +
-        ".ps-project-panel"))) return;
-    var ev;
-    try {
-      ev = new MouseEvent("contextmenu", {
-        bubbles: true, cancelable: true, view: window, button: 2,
-        clientX: tp.x, clientY: tp.y, screenX: tp.x, screenY: tp.y });
-    } catch (e2) { return; }
-    var unhandled = t.dispatchEvent(ev);
-    if (unhandled) return;              // nothing here has a menu
-    touchPressConsumed(tp);
-  }
-  function touchPressConsumed(tp) {
-    tp.consumed = true; tp.menuOpen = true;
-    touchCue(false);
-    try { window.__gb2_touchPressConsumed = true; } catch (e) {}
-    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e3) {}
-  }
-  // The text floor. In touch mode no interface text renders under
-  // TOUCH_TEXT_FLOOR pixels. A stylesheet cannot express "at least 13px"
-  // about sizes it did not set, and most of the engine's panel text is
-  // sized inline, so this reads what each text-bearing element really
-  // renders at (its computed size times any CSS zoom above it) and lifts
-  // only the ones below the floor. It runs from a MutationObserver, which
-  // fires before the next paint, so text never shows small and then jumps.
-  // Skipped on purpose: SVG (the chart's text is the figure, not the
-  // interface), the layout canvas and Notebook pages (content at the
-  // document's own scale), and the data grid (thousands of cells, sized
-  // by one stylesheet rule instead).
-  var TOUCH_TEXT_FLOOR = 13;
-  var TOUCH_FLOOR_SKIP = "svg, script, style, #ps-lcanvas, #ps-datagrid, " +
-    ".ps-pinpage-canvas, .ps-visually-hidden, #ps-touch-cue";
-  function touchFloorOne(p) {
-    if (!p || p.nodeType !== 1 || p.hasAttribute("data-ps-tf")) return;
-    var cs;
-    try { cs = window.getComputedStyle(p); } catch (e) { return; }
-    if (!cs) return;
-    var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
-      ? p.currentCSSZoom : 1;
-    var px = parseFloat(cs.fontSize) * z;
-    if (!(px > 0) || px >= TOUCH_TEXT_FLOOR - 0.25) return;
-    // Remember the inline size it had, so leaving touch mode restores it,
-    // and the zoom this was measured under, so a later zoom is noticed.
-    p.setAttribute("data-ps-tf", p.style.fontSize || "");
-    p.setAttribute("data-ps-tfz", String(z));
-    p.style.setProperty("font-size",
-      (Math.round(TOUCH_TEXT_FLOOR / z * 100) / 100) + "px", "important");
-  }
-  // A lifted size is right only at the zoom it was measured under, and the
-  // chart host's zoom moves: Fit follows the window, the chart's own size
-  // and a phone being turned. A size pinned under a 0.53 zoom stood at
-  // 24.6px once the zoom went back to 1, which drew the "This chart needs
-  // variables" card at nearly double size with its buttons off the screen
-  // (seen in the iPhone simulator, Nov 2026). So anything whose zoom has
-  // moved since its lift is put back as it was and measured again, and the
-  // host is swept for text the new zoom has pushed under the floor.
-  function touchFloorRecheck(root) {
-    if (!TOUCH_MODE) return;
-    var lifted = document.querySelectorAll("[data-ps-tf]");
-    for (var i = 0; i < lifted.length; i++) {
-      var p = lifted[i];
-      var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
-        ? p.currentCSSZoom : 1;
-      var at = parseFloat(p.getAttribute("data-ps-tfz")) || 1;
-      if (Math.abs(z - at) < 0.01) continue;
-      var orig = p.getAttribute("data-ps-tf");
-      p.style.removeProperty("font-size");
-      if (orig) p.style.fontSize = orig;
-      p.removeAttribute("data-ps-tf");
-      p.removeAttribute("data-ps-tfz");
-      touchFloorOne(p);
-    }
-    if (root) touchFloorSweep(root);
-  }
-  function touchFloorSweep(root) {
-    if (!root) return;
-    if (!TOUCH_MODE) {
-      // Back to a mouse: put every lifted size back as it was.
-      var lifted = document.querySelectorAll("[data-ps-tf]");
-      for (var i = 0; i < lifted.length; i++) {
-        var was = lifted[i].getAttribute("data-ps-tf");
-        lifted[i].style.removeProperty("font-size");
-        if (was) lifted[i].style.fontSize = was;
-        lifted[i].removeAttribute("data-ps-tf");
-        lifted[i].removeAttribute("data-ps-tfz");
-      }
-      return;
-    }
-    if (root.nodeType === 3) root = root.parentNode;
-    if (!root || root.nodeType !== 1) return;
-    if (root.closest && root.closest(TOUCH_FLOOR_SKIP)) return;
-    var walker;
-    try {
-      walker = document.createTreeWalker(root, 5 /* elements + text */, {
-        acceptNode: function (n) {
-          if (n.nodeType === 1)
-            return (n.matches && n.matches(TOUCH_FLOOR_SKIP)) ? 2 : 3;
-          return (n.nodeValue && /\S/.test(n.nodeValue)) ? 1 : 2;
-        }
-      });
-    } catch (eW) { return; }
-    var seen = [];
-    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
-      var par = n.parentNode;
-      if (par && seen.indexOf(par) === -1) seen.push(par);
-    }
-    for (var k = 0; k < seen.length; k++) touchFloorOne(seen[k]);
-  }
-  function wireTouchFloor() {
-    if (!window.MutationObserver) return;
-    var obs = new MutationObserver(function (records) {
-      if (!TOUCH_MODE) return;
-      for (var i = 0; i < records.length; i++) {
-        var added = records[i].addedNodes;
-        for (var j = 0; j < added.length; j++) {
-          var nd = added[j];
-          if (nd.nodeType === 1 || nd.nodeType === 3) touchFloorSweep(nd);
-        }
-      }
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-    // The chart host's zoom is also written directly: every engine render
-    // clears and restores it, and leaving the Charts workspace clears it
-    // while the chrome's counter-zoom stays. So the floor follows the
-    // host's style itself, not only the one function that usually sets it.
-    try {
-      var zHostEl = hostEl();
-      if (zHostEl) {
-        var zPending = false;
-        new MutationObserver(function () {
-          if (!TOUCH_MODE || zPending) return;
-          zPending = true;
-          window.setTimeout(function () {
-            zPending = false;
-            try { touchFloorRecheck(hostEl()); } catch (eR) {}
-          }, 0);
-        }).observe(zHostEl, { attributes: true, attributeFilter: ["style"] });
-      }
-    } catch (eZh) {}
-    touchFloorSweep(document.body);
-  }
-  function wireTouch() {
-    touchModeSync();
-    wireTouchFloor();
-    try {
-      var mq = window.matchMedia("(pointer: coarse)");
-      var onMq = function () {
-        if (!touchModeSync()) return;
-        try { phoneSync(); } catch (eP) {}
-        try { touchFloorSweep(document.body); } catch (e) {}
-        try { syncAppShell(); } catch (eS) {}
-        try { render(); } catch (e2) {}
-      };
-      if (mq.addEventListener) mq.addEventListener("change", onMq);
-      else if (mq.addListener) mq.addListener(onMq);
-    } catch (eMq) {}
-
-    window.addEventListener("pointerdown", function (e) {
-      if (e.pointerType !== "touch") return;
-      if (e.isPrimary === false) {
-        // A second finger: this is a pinch, and nothing here is a press.
-        // Judged by isPrimary, not by "a press is already tracked": every
-        // touch gets a new pointer id, so a press whose lift was somehow
-        // never seen would have made every later press look like a pinch.
-        if (TP) { touchClearTimers(TP); touchCue(false); TP.dead = true; }
-        return;
-      }
-      try {
-        window.__gb2_touchPressConsumed = false;
-        window.__gb2_touchCancelAt = 0;
-      } catch (eG) {}
-      // A new press owns its own click: only the lift of the press that
-      // opened a menu (or swiped) is ever swallowed.
-      TOUCH_SWALLOW_CLICK_UNTIL = 0;
-      touchPressDrop();
-      var tp = {
-        id: e.pointerId, x: e.clientX, y: e.clientY, target: e.target,
-        chart: touchChartSurface(e.target) || touchLayoutSurface(e.target),
-        armed: false, early: false, dragging: false, dead: false,
-        consumed: false, menuOpen: false, holdTimer: 0, menuTimer: 0
-      };
-      TP = tp;
-      if (tp.chart) tp.holdTimer = setTimeout(function () {
-        tp.holdTimer = 0;
-        if (TP !== tp || tp.dead || tp.early) return;
-        tp.armed = true;
-        touchCue(true, tp.x, tp.y);
-      }, TOUCH_HOLD_MS);
-      tp.menuTimer = setTimeout(function () {
-        tp.menuTimer = 0;
-        touchMenuFire(tp);
-      }, TOUCH_MENU_MS);
-    }, true);
-
-    window.addEventListener("pointermove", function (e) {
-      var tp = TP;
-      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId || tp.dead)
-        return;
-      var far = Math.abs(e.clientX - tp.x) > TOUCH_SLOP ||
-                Math.abs(e.clientY - tp.y) > TOUCH_SLOP;
-      if (!tp.chart) {
-        // Shell surfaces move on their own terms (a layout item drags at
-        // once); here a move only means this press is not a long-press.
-        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
-        return;
-      }
-      if (!tp.armed) {
-        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
-        e.stopImmediatePropagation();
-        return;
-      }
-      if (!tp.dragging) {
-        if (!far) { e.stopImmediatePropagation(); return; }
-        // Held, then moved: a drag. A menu that opened while the finger
-        // rested gives way to it, the way a held home-screen icon does.
-        tp.dragging = true;
-        touchClearTimers(tp);
-        touchCue(false);
-        if (tp.menuOpen) {
-          tp.menuOpen = false; tp.consumed = false;
-          try { hideContextMenu(); } catch (eH) {}
-          try { window.__gb2_touchPressConsumed = false; } catch (eG2) {}
-        }
-      }
-    }, true);
-
-    // The browser's own long-press menu event (Android sends one): the
-    // app's menus answer it as they answer a right-click, so the timer
-    // above stands down and the lift is told not to select.
-    window.addEventListener("contextmenu", function (e) {
-      var tp = TP;
-      if (!e.isTrusted || !tp || tp.dead) return;
-      if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
-      setTimeout(function () {
-        if (TP === tp && e.defaultPrevented && !tp.dragging)
-          touchPressConsumed(tp);
-      }, 0);
-    }, true);
-
-    window.addEventListener("pointerup", function (e) {
-      var tp = TP;
-      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId) return;
-      if (!e.isTrusted) return;
-      touchPressDrop();
-      if (tp.dead) return;
-      var swiped = tp.chart && tp.early && !tp.armed;
-      if (tp.consumed || swiped)
-        TOUCH_SWALLOW_CLICK_UNTIL = Date.now() + 450;
-      if (!swiped) return;
-      // A swipe the browser did not take for a scroll (nothing to scroll
-      // that way). The engine saw a press and no movement, and would read
-      // this lift as a click on the part the swipe STARTED on. Give it the
-      // cancel the browser would have sent.
-      e.stopImmediatePropagation();
-      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG3) {}
-      try {
-        var t = tp.target && tp.target.isConnected ? tp.target : document.body;
-        t.dispatchEvent(new PointerEvent("pointercancel", {
-          bubbles: true, cancelable: false, composed: true,
-          pointerId: tp.id, pointerType: "touch", isPrimary: true,
-          clientX: e.clientX, clientY: e.clientY }));
-      } catch (eS) {}
-    }, true);
-
-    window.addEventListener("pointercancel", function (e) {
-      if (e.pointerType !== "touch") return;
-      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG4) {}
-      if (!e.isTrusted) return;
-      if (TP && TP.id === e.pointerId) touchPressDrop();
-    }, true);
-
-    window.addEventListener("click", function (e) {
-      if (!e.isTrusted || !TOUCH_SWALLOW_CLICK_UNTIL) return;
-      if (Date.now() > TOUCH_SWALLOW_CLICK_UNTIL) {
-        TOUCH_SWALLOW_CLICK_UNTIL = 0; return;
-      }
-      TOUCH_SWALLOW_CLICK_UNTIL = 0;
-      // The lift after a long-press menu, or after a swipe: not a click.
-      // No exception for the menu itself: on a short screen it opens
-      // right under the finger, and lifting would choose whichever item
-      // happened to be there. Choosing an item takes a fresh tap, and a
-      // fresh press clears this window before its own click arrives.
-      e.stopImmediatePropagation(); e.preventDefault();
-    }, true);
-
-    // Refuse the browser's pan for an armed press. Non-passive, and only on
-    // the two drag surfaces (the chart host and the layout page view), so
-    // page scrolling everywhere else never waits on it.
-    var holdPan = function (e) {
-      var tp = TP;
-      if (!tp || !tp.chart || !tp.armed || tp.dead) return;
-      if (e.touches && e.touches.length !== 1) return;
-      if (e.cancelable) e.preventDefault();
-    };
-    var surfaces = [hostEl(), el("ps-lviewport")];
-    for (var si = 0; si < surfaces.length; si++) {
-      if (!surfaces[si]) continue;
-      surfaces[si].addEventListener("touchstart", function () {}, { passive: true });
-      surfaces[si].addEventListener("touchmove", holdPan, { passive: false });
-    }
-  }
-  // =============================================================== phone frame
-  // The find-your-way pass (Nov 2026). On a phone the three unnamed icons
-  // were the only way to the menu, the other workspaces and chart setup, half
-  // the chart toolbar sat off the right edge, and nothing on screen kept a
-  // chart to the Notebook. PHONE is touch mode AND a window under the 760px
-  // drawer breakpoint: a narrow desktop window and a tablet keep the frame
-  // they had. Everything here is a second handle on something that already
-  // exists (the workspace switch, the drawers, the Export button, the
-  // toolbar's own buttons), so there is one behavior behind each and the
-  // phone frame cannot drift from the desktop one.
-  var PHONE = false;
-  var PHONE_MORE_NODE = null;
-  var PHONE_SHEET_FOCUS = null;
-  function phoneWanted() {
-    try {
-      return TOUCH_MODE && !!window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches;
-    } catch (e) { return false; }
-  }
-  function phoneOn() { return PHONE; }
-  function phoneSync() {
-    var on = phoneWanted();
-    if (on === PHONE && document.body.classList.contains("ps-phone") === on)
-      return false;
-    PHONE = on;
-    document.body.classList.toggle("ps-phone", on);
-    return true;
-  }
-  // Chart setup is open as a sheet: the chart is refitted into the room
-  // above it (see applyViewZoomCore).
-  function phoneSheetFit() {
-    // Upright only. Sideways the panel stands beside the chart, and the
-    // width fit already shows what the narrower pane can hold.
-    return PHONE && NARROW_OPEN === "inspector" && appWorkspace() === "chart" &&
-      (window.innerHeight || 0) > 480;
-  }
-  function syncPhoneStatus() {
-    var st = document.getElementById("ps-phone-status");
-    if (!st || !PHONE) return;
-    var save = document.getElementById("ps-save-state");
-    var chk = document.getElementById("ps-status-check");
-    var a = save ? save.textContent : "";
-    var hasCheck = !!chk && !chk.hidden && appWorkspace() === "chart";
-    var b = hasCheck ? chk.textContent : "";
-    var text = a + (b ? " · " + b : "");
-    if (st.textContent !== text) st.textContent = text;
-    st.disabled = !hasCheck;
-    if (hasCheck) st.setAttribute("data-state", chk.getAttribute("data-state") || "ok");
-    else st.removeAttribute("data-state");
-    st.setAttribute("aria-label", text + (hasCheck ? ". Open the chart check" : ""));
-  }
-  function syncPhoneFrame() {
-    if (!PHONE) return;
-    var ws = appWorkspace(), c = workspaceDocument(ws);
-    var keep = document.getElementById("ps-phone-keep");
-    var exp = document.getElementById("ps-phone-export");
-    var real = document.getElementById("ps-export");
-    var setup = document.getElementById("ps-phone-setup");
-    if (keep) keep.style.display =
-      (ws === "chart" && c && !isLayoutTab(c)) ? "" : "none";
-    if (exp && real) {
-      exp.disabled = real.disabled;
-      exp.setAttribute("aria-label", real.textContent || "Export");
-    }
-    // The tabs carry their own attribute, not data-ps-workspace: there is
-    // one of those per workspace in the document, and code that looks one
-    // up by name must keep finding exactly one.
-    var tabs = document.querySelectorAll("#ps-phone-nav [data-ps-phone-ws]");
-    for (var ti = 0; ti < tabs.length; ti++) {
-      if (tabs[ti].getAttribute("data-ps-phone-ws") === ws)
-        tabs[ti].setAttribute("aria-current", "page");
-      else tabs[ti].removeAttribute("aria-current");
-    }
-    if (setup) {
-      setup.textContent = ws === "pinboard" ? "Details"
-        : ws === "layout" ? "Properties" : "Setup";
-      setup.setAttribute("aria-expanded", NARROW_OPEN === "inspector" ? "true" : "false");
-    }
-    syncPhoneStatus();
-  }
-  function phoneMoreNode() {
-    if (!PHONE_MORE_NODE) {
-      var b = document.createElement("button");
-      b.type = "button"; b.id = "ps-phone-more"; b.textContent = "More";
-      b.setAttribute("aria-haspopup", "dialog");
-      b.setAttribute("aria-expanded", "false");
-      b.addEventListener("click", function (e) {
-        e.stopPropagation(); phoneSheetOpen();
-      });
-      PHONE_MORE_NODE = b;
-    }
-    return PHONE_MORE_NODE;
-  }
-  // The engine rebuilds its toolbar on every render; the same hook that
-  // puts the Zoom group back puts More back.
-  function phoneDockMore(bar) {
-    if (PHONE && bar) {
-      var m = phoneMoreNode();
-      if (m.parentNode !== bar) bar.appendChild(m);
-    } else if (PHONE_MORE_NODE && PHONE_MORE_NODE.parentNode) {
-      PHONE_MORE_NODE.parentNode.removeChild(PHONE_MORE_NODE);
-    }
-  }
-  function phoneSheetOpen() {
-    var sh = document.getElementById("ps-phone-sheet");
-    var sc = document.getElementById("ps-phone-sheet-scrim");
-    if (!sh || !sc) return;
-    // The zoom choices are the real control's own, copied at the moment of
-    // opening so the two can never list different sizes.
-    var mine = document.getElementById("ps-phone-zoom");
-    var ct = chartZoomNode();
-    var real = ct && ct.querySelector ? ct.querySelector("select") : null;
-    if (mine && real) {
-      mine.innerHTML = real.innerHTML;
-      mine.value = real.value;
-    }
-    PHONE_SHEET_FOCUS = document.activeElement;
-    sh.classList.add("ps-open"); sc.classList.add("ps-open");
-    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "true");
-    window.setTimeout(function () {
-      var first = sh.querySelector(".ps-phone-row");
-      try { if (first) first.focus({ preventScroll: true }); } catch (e) {}
-    }, 0);
-  }
-  function phoneSheetClose(restore) {
-    var sh = document.getElementById("ps-phone-sheet");
-    var share = document.getElementById("ps-phone-share");
-    var sc = document.getElementById("ps-phone-sheet-scrim");
-    var wasOpen = (sh && sh.classList.contains("ps-open")) ||
-      (share && share.classList.contains("ps-open"));
-    if (!wasOpen) return;
-    if (sh) sh.classList.remove("ps-open");
-    if (share) share.classList.remove("ps-open");
-    // A picture still being drawn for a sheet that has gone is dropped.
-    PHONE_SHARE_SEQ++; PHONE_SHARE = null;
-    if (sc) sc.classList.remove("ps-open");
-    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "false");
-    var back = PHONE_SHEET_FOCUS; PHONE_SHEET_FOCUS = null;
-    if (restore !== false && back && back.isConnected) {
-      try { back.focus({ preventScroll: true }); } catch (e) {}
-    }
-  }
-  // ---- Sharing (the sharing pass, Nov 2026). On a phone the way to get a
-  // chart to someone is the share sheet: Messages, Mail, AirDrop, Save
-  // Image. The app only knew how to download a file, which on an iPhone
-  // means a browser prompt, the Files app, and a search for the file. So on
-  // a phone Export offers Share first and Save a file second.
-  //
-  // The picture is drawn when the sheet OPENS, not when Share is tapped:
-  // the share sheet may only be raised from inside a tap, and a browser
-  // gives that permission up if anything slow happens first. By the time
-  // Share can be tapped the file exists, and the tap hands it straight
-  // over. "Shared" is said when the phone reports the hand-over done, and
-  // a share sheet the person dismissed says nothing was shared.
-  var PHONE_SHARE = null, PHONE_SHARE_SEQ = 0;
-  function phoneShareSupported() {
-    try {
-      return PHONE && typeof navigator.share === "function" &&
-        typeof navigator.canShare === "function" && typeof File === "function";
-    } catch (e) { return false; }
-  }
-  function phoneExportTap() {
-    var ws = appWorkspace(), c = workspaceDocument(ws);
-    if ((ws === "chart" || ws === "layout") && c && phoneShareSupported()) {
-      phoneShareOpen();
-      return;
-    }
-    // Data and the Notebook keep their own flows (a sheet of numbers and a
-    // set of pages are not one picture), and so does a phone whose browser
-    // cannot share a file.
-    var b = document.getElementById("ps-export");
-    if (b) b.click();
-  }
-  function phoneShareOpen() {
-    var sh = document.getElementById("ps-phone-share");
-    var sc = document.getElementById("ps-phone-sheet-scrim");
-    var go = document.getElementById("ps-phone-share-go");
-    var sub = document.getElementById("ps-phone-share-sub");
-    var st = document.getElementById("ps-phone-share-status");
-    if (!sh || !sc || !go || !sub) return;
-    var layout = isLayoutTab(activeChart());
-    var what = layout ? "layout" : "chart";
-    document.getElementById("ps-phone-share-title").textContent = "Export " + what;
-    go.disabled = true;
-    sub.textContent = "Preparing the picture";
-    if (st) st.textContent = "";
-    PHONE_SHARE = null;
-    var token = ++PHONE_SHARE_SEQ;
-    PHONE_SHEET_FOCUS = document.activeElement;
-    sh.classList.add("ps-open"); sc.classList.add("ps-open");
-    window.setTimeout(function () {
-      try { document.getElementById("ps-phone-share-save").focus({ preventScroll: true }); } catch (e) {}
-    }, 0);
-    var prefs = exportPrefs();
-    var name = defaultExportBase() + ".png";
-    // A shared picture always has a background, the chart's own or white:
-    // a transparent PNG dropped into a dark message thread is black text
-    // on black.
-    var bg = (prefs.background === "white" ||
-              !effectiveExportBackground("shown", layout)) ? "white" : "shown";
-    collectExportSource(bg)
-      .then(function (source) { return exportBlobFor("png", source, prefs.dpi); })
-      .then(function (blob) {
-        if (token !== PHONE_SHARE_SEQ) return;
-        var file = new File([blob], name, { type: "image/png" });
-        var ok = false;
-        try { ok = navigator.canShare({ files: [file] }); } catch (e) {}
-        if (!ok) throw new Error("This browser cannot share a picture.");
-        PHONE_SHARE = { file: file, name: name };
-        go.disabled = false;
-        sub.textContent = "Send the picture to another app, or save it to your photos";
-      })
-      .catch(function (e) {
-        if (token !== PHONE_SHARE_SEQ) return;
-        go.disabled = true;
-        sub.textContent = "Not available for this " + what + ". Use Save a file.";
-        if (st) st.textContent = String((e && e.message) || "");
-      });
-  }
-  function phoneShareGo() {
-    var s = PHONE_SHARE;
-    var st = document.getElementById("ps-phone-share-status");
-    if (!s) return;
-    var p;
-    // Straight from the tap, with nothing awaited before it.
-    try { p = navigator.share({ files: [s.file] }); }
-    catch (e) { p = Promise.reject(e); }
-    Promise.resolve(p).then(function () {
-      phoneSheetClose(false);
-      showToast("Shared " + s.name);
-    }, function (e) {
-      if (e && e.name === "AbortError") {
-        if (st) st.textContent = "Not shared.";
-        return;
-      }
-      if (st) st.textContent = "Sharing did not work here. Use Save a file.";
-    });
-  }
-  // A panel opened from the sheet has no tapped part for the reveal to keep
-  // in view: bring the panel itself up, as far as its own top allows.
-  function phoneRevealPanel() {
-    var tries = 0, lastH = -1, still = 0;
-    (function watch() {
-      if (++tries > 40) return;
-      var host = hostEl();
-      var panel = host ? host.querySelector(".gb2-panel") : null;
-      var h = panel ? panel.getBoundingClientRect().height : 0;
-      if (panel && h > 40 && Math.abs(h - lastH) < 1) still++; else still = 0;
-      lastH = h;
-      if (still < 3) { window.setTimeout(watch, 40); return; }
-      var pane = document.getElementById("ps-main-workspace");
-      if (!pane) return;
-      var pr = panel.getBoundingClientRect(), sr = pane.getBoundingClientRect();
-      var bottom = Math.min(sr.bottom, window.innerHeight || sr.bottom);
-      var by = Math.min(Math.ceil(pr.bottom - bottom) + 10,
-                        Math.floor(pr.top - sr.top - 8));
-      if (by > 4) {
-        try { pane.scrollBy({ top: by, behavior: "auto" }); }
-        catch (e) { pane.scrollTop += by; }
-      }
-    })();
-  }
-  var PHONE_MORE_BUTTONS = {
-    hide: 'button[aria-label$="hide elements"]',
-    settings: 'button[aria-label="Chart settings"]',
-    find: '[data-role="setting-search-trigger"]',
-    add: 'button[aria-label="Add to chart"]'
-  };
-  function phoneMoreRun(which) {
-    var host = hostEl();
-    var bar = host ? host.querySelector('[data-role="chart-toolbar"]') : null;
-    var btn = bar && PHONE_MORE_BUTTONS[which]
-      ? bar.querySelector(PHONE_MORE_BUTTONS[which]) : null;
-    phoneSheetClose(false);
-    if (!btn) return;
-    window.setTimeout(function () {
-      try { btn.click(); } catch (e) {}
-      if (which === "hide" || which === "settings") phoneRevealPanel();
-    }, 30);
-  }
-  function phoneRefresh() {
-    if (!phoneSync()) return;
-    try { phoneSheetClose(false); } catch (e) {}
-    try { if (NARROW_OPEN) narrowSet(null, true); } catch (e2) {}
-    try { syncAppShell(); } catch (e3) {}
-    try { render(); } catch (e4) {}
-  }
-  function wirePhoneFrame() {
-    phoneSync();
-    var on = function (id, fn) {
-      var n = document.getElementById(id);
-      if (n) n.addEventListener("click", fn);
-    };
-    on("ps-phone-open", function () {
-      narrowSet(null, true);
-      var b = document.getElementById("ps-load"); if (b) b.click();
-    });
-    on("ps-phone-save", function () {
-      narrowSet(null, true);
-      var b = document.getElementById("ps-save"); if (b) b.click();
-    });
-    on("ps-phone-docs", function (e) { e.stopPropagation(); narrowSet("nav"); });
-    on("ps-phone-setup", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
-    on("ps-phone-setup-data", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
-    on("ps-phone-setup-done", function (e) { e.stopPropagation(); narrowSet(null); });
-    on("ps-phone-keep", function (e) {
-      e.stopPropagation();
-      // One section: keep, as the mockup did. Several: the same list of
-      // sections the chart's own menu offers, under the button.
-      if (pinBoards().length <= 1) { pinChartToPinboard(null); return; }
-      var r = this.getBoundingClientRect();
-      showKeepToNotebookMenu(Math.round(r.left), Math.round(r.bottom + 4));
-    });
-    on("ps-phone-export", function (e) { e.stopPropagation(); phoneExportTap(); });
-    on("ps-phone-share-go", function () { phoneShareGo(); });
-    on("ps-phone-share-save", function () {
-      phoneSheetClose(false);
-      exportCurrentWorkspace();
-    });
-    on("ps-phone-share-done", function () { phoneSheetClose(); });
-    on("ps-phone-status", function () {
-      var b = document.getElementById("ps-status-check");
-      if (b && !b.hidden) b.click();
-    });
-    var nav = document.getElementById("ps-phone-nav");
-    if (nav) nav.addEventListener("click", function (e) {
-      var b = e.target.closest ? e.target.closest("[data-ps-phone-ws]") : null;
-      if (b) setAppWorkspace(b.getAttribute("data-ps-phone-ws"));
-    });
-    on("ps-phone-sheet-done", function () { phoneSheetClose(); });
-    on("ps-phone-sheet-scrim", function () { phoneSheetClose(); });
-    var sheet = document.getElementById("ps-phone-sheet");
-    var sheetKeys = function (e) {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); phoneSheetClose(); return; }
-      if (e.key !== "Tab") return;
-      var list = this.querySelectorAll("button:not([disabled]), select");
-      if (!list.length) return;
-      var first = list[0], last = list[list.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    if (sheet) {
-      sheet.addEventListener("click", function (e) {
-        var row = e.target.closest ? e.target.closest("[data-phone-more]") : null;
-        if (row) phoneMoreRun(row.getAttribute("data-phone-more"));
-      });
-      sheet.addEventListener("keydown", sheetKeys);
-    }
-    var shareSheet = document.getElementById("ps-phone-share");
-    if (shareSheet) shareSheet.addEventListener("keydown", sheetKeys);
-    var zoom = document.getElementById("ps-phone-zoom");
-    if (zoom) zoom.addEventListener("change", function () {
-      setViewZoom(this.value); phoneSheetClose();
-    });
-    // The state line repeats two things written elsewhere, at their own
-    // times (the chart check runs on a timer): follow them.
-    if (typeof MutationObserver === "function") {
-      var mo = new MutationObserver(function () { try { syncPhoneStatus(); } catch (e) {} });
-      ["ps-save-state", "ps-status-check"].forEach(function (id) {
-        var n = document.getElementById(id);
-        if (n) mo.observe(n, { childList: true, characterData: true, subtree: true,
-                               attributes: true, attributeFilter: ["hidden", "data-state"] });
-      });
-    }
-    try {
-      var mq = window.matchMedia("(max-width: 760px)");
-      if (mq.addEventListener) mq.addEventListener("change", phoneRefresh);
-      else if (mq.addListener) mq.addListener(phoneRefresh);
-    } catch (eMq) {}
-    window.addEventListener("orientationchange", function () {
-      window.setTimeout(phoneRefresh, 120);
-    });
   }
   function wireNarrowChrome() {
     var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
@@ -37894,8 +37491,6 @@
     wireLayoutImagePaste();
     wireNarrowChrome();
     wireBypassLinks();
-    wireTouch();
-    wirePhoneFrame();
     wireCoach();
     wireTooltips();
     wireFitToPane();
@@ -38756,6 +38351,8 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    layoutContentBounds: layContentBounds,
+    fitLayoutPageToContent: layFitPageToContent,
     // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
     notebookHistory: function () {
       return { undo: NB_UNDO.map(function (s) { return s.label; }),
