@@ -343,6 +343,17 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                                     (kk / (kk - 1)) * (1 - vi / vt)),
                                 k = as.integer(kk),
                                 n = as.integer(nrow(m2)))
+                            # Each item against the sum of the others, on
+                            # the same scored rows (Nov 2026): a negative
+                            # value marks an item that runs against the
+                            # rest, usually one worded in reverse and not
+                            # yet reverse-scored. jamovi flags the same.
+                            likert_alpha$itemRest <- lapply(seq_len(kk), function(j) {
+                                rj <- suppressWarnings(stats::cor(
+                                    m2[, j], rowSums(m2[, -j, drop = FALSE])))
+                                if (is.finite(rj)) list(item = items[[j]], r = as.numeric(rj))
+                                else list(item = items[[j]])
+                            })
                         }
                     }
                 }

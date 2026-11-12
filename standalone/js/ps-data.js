@@ -1231,6 +1231,20 @@ window.PSData = (function () {
           var kk = items.length;
           alpha = { alpha: S.sigR((kk / (kk - 1)) * (1 - vi / vt)),
                     k: kk, n: rowsM.length };
+          // Each item against the sum of the others, on the same scored
+          // rows: a negative value marks an item that runs against the
+          // rest. Mirrors R/likertplotbuilder.b.R.
+          alpha.itemRest = items.map(function (itName, j) {
+            var xs = rowsM.map(function (row) { return row[j]; });
+            var rs = rowsM.map(function (row, ri) { return sums[ri] - row[j]; });
+            var mxI = S.mean(xs), mrI = S.mean(rs), sxx = 0, srr = 0, sxr = 0;
+            for (var ri2 = 0; ri2 < xs.length; ri2++) {
+              var dxI = xs[ri2] - mxI, drI = rs[ri2] - mrI;
+              sxx += dxI * dxI; srr += drI * drI; sxr += dxI * drI;
+            }
+            var rI = (sxx > 0 && srr > 0) ? sxr / Math.sqrt(sxx * srr) : NaN;
+            return isFinite(rI) ? { item: itName, r: S.sigR(rI) } : { item: itName };
+          });
         }
       }
     }

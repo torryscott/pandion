@@ -54148,6 +54148,23 @@
                     out.push({ id: "likertn", sev: "warn", title: "Some items have very few responses", why: "The item with the fewest answers has n = " + _loItem + ", so a single person moves its percentages by about " + Math.round(100 / _loItem) + " points. Read those rows as sketches, not measurements.", fixGt: null });
                 if (gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 && data.likertLevels.length <= 4)
                     out.push({ id: "likshort", sev: "tip", title: "Means on a short rating scale", why: "A mean on a " + data.likertLevels.length + "-point scale treats the steps as evenly spaced, and it can hide a split: half strongly agree plus half strongly disagree averages to the middle. The diverging view shows the actual response mix.", fixGt: choiceHas("likertdiverging") ? "likertdiverging" : null });
+                // An item that runs against the rest (Nov 2026, the
+                // statistical review: alpha .33 from an item never reverse-
+                // scored read "Looks good"; jamovi flags such an item).
+                var _aiBad = [];
+                if (data.likertAlpha && Array.isArray(data.likertAlpha.itemRest)) {
+                    for (var _ai = 0; _ai < data.likertAlpha.itemRest.length; _ai++) {
+                        var _aiE = data.likertAlpha.itemRest[_ai];
+                        if (_aiE && typeof _aiE.r === "number" && _aiE.r < 0)
+                            _aiBad.push(String(_aiE.item) + " (r = " + (Math.round(_aiE.r * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.") + ")");
+                    }
+                }
+                if (_aiBad.length)
+                    out.push({ id: "alphaitem", sev: "warn",
+                        title: (_aiBad.length === 1 ? "An item runs" : "Some items run") + " against the others",
+                        why: _aiBad.join(", ") + (_aiBad.length === 1 ? " correlates" : " correlate") +
+                            " negatively with the sum of the other items. An item worded in the opposite direction has to be reverse-scored before items are averaged or alpha is read: click its label on the chart and turn on reverse scoring. If its wording is not reversed, it may not belong with the others.",
+                        fixGt: null });
             }
             // --- Tier-1 additions (Jul 2026): decodable colors, clipped
             // ranges, hidden-data disclosure, error-bar captioning, and
@@ -54570,13 +54587,33 @@
                 // pushed every point off-chart, the skew is NOT visible
                 // and the tip should fire again.
                 if (q('[data-role="data-point"]').length > 0) return;
-                var worst = null;
+                var worst = null, outer = null;
                 for (var sb = 0; sb < bars.length; sb++) {
                     var bb3 = bars[sb]; if (!bb3 || !Array.isArray(bb3.values)) continue;
                     var vv3 = []; for (var sv = 0; sv < bb3.values.length; sv++) { var v3 = bb3.values[sv]; if (typeof v3 === "number" && isFinite(v3)) vv3.push(v3); }
-                    var n3 = vv3.length; if (n3 < 25) continue;
+                    // From 8 values (Nov 2026, the statistical review: the
+                    // rule needed 25, so one outlier dragging a mean of 12
+                    // values to 59.7 beside a median of 27.1 read "Looks
+                    // good", and small groups are where a mean is most
+                    // fragile). Skewness is judged from 10 values; from 8, a
+                    // mean lying outside the middle half of its own group.
+                    var n3 = vv3.length; if (n3 < 8) continue;
                     _skApp = true;
                     var m3 = 0; for (var sm = 0; sm < n3; sm++) m3 += vv3[sm]; m3 /= n3;
+                    var so3 = vv3.slice().sort(function (a, b) { return a - b; });
+                    var qAt3 = function (pp) {
+                        var h3 = (n3 - 1) * pp, l3 = Math.floor(h3), u3 = Math.ceil(h3);
+                        return so3[l3] + (h3 - l3) * (so3[u3] - so3[l3]);
+                    };
+                    var q1v = qAt3(0.25), q3v = qAt3(0.75);
+                    if (q3v > q1v && (m3 > q3v || m3 < q1v)) {
+                        var far3 = (m3 > q3v ? m3 - q3v : q1v - m3) / (q3v - q1v);
+                        if (!outer || far3 > outer.far) {
+                            var _co3 = String(bb3.x || "");
+                            if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _co3 += " / " + bb3.group;
+                            outer = { far: far3, cell: _co3, mean: m3, above: m3 > q3v, qv: (m3 > q3v ? q3v : q1v), med: qAt3(0.5) };
+                        }
+                    }
                     var s2 = 0, s3 = 0;
                     for (var sk = 0; sk < n3; sk++) { var d3 = vv3[sk] - m3; s2 += d3 * d3; s3 += d3 * d3 * d3; }
                     if (!(s2 > 0)) continue;
@@ -54585,14 +54622,126 @@
                     // quote one number for one cell.
                     var g1 = (Math.sqrt(n3 * (n3 - 1)) / (n3 - 2)) *
                              (Math.sqrt(n3) * s3 / Math.pow(s2, 1.5));
-                    if (Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
+                    if (n3 >= 10 && Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
                         var _cl3 = String(bb3.x || "");
                         if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _cl3 += " / " + bb3.group;
                         worst = { g1: g1, cell: _cl3 };
                     }
                 }
+                if (!worst && outer) {
+                    var _r3 = function (v) { return String(Math.round(v * 100) / 100); };
+                    out.push({ id: "skewmean", sev: "tip", title: "The mean sits outside the middle of its group",
+                        why: "In '" + outer.cell + "' the mean (" + _r3(outer.mean) + ") lies " + (outer.above ? "above" : "below") +
+                            " three quarters of the values (the " + (outer.above ? "upper" : "lower") + " quartile is " + _r3(outer.qv) +
+                            "): one or two extreme values are pulling it. The median (" + _r3(outer.med) +
+                            ") describes a typical value better here. Try the median (Summary, in the panel), or a box or raincloud that shows the shape.",
+                        fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+                }
                 if (worst)
                     out.push({ id: "skewmean", sev: "tip", title: "A skewed group is summarized by its mean", why: "The values behind '" + worst.cell + "' are strongly skewed (skewness = " + (Math.round(worst.g1 * 10) / 10) + "), so the mean is pulled toward the tail and a bar or dot at the mean represents a typical value poorly. Try the median (Summary Function in the panel), or a box or raincloud that shows the shape.", fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+            })();
+            // --- Very small groups under a mean and an error bar (Nov 2026,
+            // the statistical review: groups of 2, 3 and 1 drawn as bars
+            // with error bars read "Looks good"). Quiet when the values
+            // themselves are on the chart.
+            var _tgApp = (_mk === "cg" || _mk === "rm") && isBarType && !(data && data.freqMode === true);
+            (function () {
+                if (!_tgApp) return;
+                if (q('[data-role="data-point"]').length > 0) return;
+                var minN = Infinity;
+                for (var tb = 0; tb < bars.length; tb++) {
+                    var tbb = bars[tb]; if (!tbb || !Array.isArray(tbb.values)) continue;
+                    var tn = 0;
+                    for (var tv = 0; tv < tbb.values.length; tv++) if (typeof tbb.values[tv] === "number" && isFinite(tbb.values[tv])) tn++;
+                    if (tn > 0 && tn < minN) minN = tn;
+                }
+                if (minN < 5)
+                    out.push({ id: "tinygroups", sev: "tip", title: "Very small groups",
+                        why: "The smallest group here has " + (minN === 1 ? "a single value, so it has no error bar at all" : "only " + minN + " values") +
+                            ". A mean and an error bar say little about so few values, and they hide the few there are. Show every value instead: turn on Data points from the + menu.",
+                        fixGt: null });
+            })();
+            // --- One point doing the work, and a curved pattern (Nov 2026,
+            // the statistical review): r = .89 made by a single point (-.21
+            // without it) and a clean U shape at r = .01 both read "Looks
+            // good". Judged per plotted cell (group within panel), from 5
+            // points for the first and 8 for the second; the curve check
+            // stands aside when one point already explains the pattern.
+            var _xiApp = false, _xcApp = false;
+            (function () {
+                if (gt !== "scatter") return;
+                if (typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none") return;
+                var ptsI = Array.isArray(data.xyPoints) ? data.xyPoints : [];
+                var cellsI = {}, orderI = [], sepI = String.fromCharCode(31);
+                for (var pI = 0; pI < ptsI.length; pI++) {
+                    var qI = ptsI[pI];
+                    if (!qI || typeof qI.x !== "number" || typeof qI.y !== "number" || !isFinite(qI.x) || !isFinite(qI.y)) continue;
+                    var kI = ((qI.facet === undefined || qI.facet === null) ? "" : String(qI.facet)) + sepI +
+                             ((qI.group === undefined || qI.group === null) ? "" : String(qI.group));
+                    if (!cellsI[kI]) { cellsI[kI] = []; orderI.push(kI); }
+                    cellsI[kI].push(qI);
+                }
+                var fR = function (v) { return (Math.round(v * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1"); };
+                var fN = function (v) { return String(Math.round(v * 100) / 100); };
+                var nameI = function (key) {
+                    var parts = key.split(sepI).filter(function (s) { return s.length; });
+                    return parts.length ? " in " + parts.join(", ") : "";
+                };
+                var worstI = null, worstC = null;
+                for (var oI = 0; oI < orderI.length; oI++) {
+                    var cI = cellsI[orderI[oI]], nI = cI.length, iI;
+                    if (nI < 5 || nI > 5000) continue;
+                    var mx = 0, my = 0;
+                    for (iI = 0; iI < nI; iI++) { mx += cI[iI].x; my += cI[iI].y; }
+                    mx /= nI; my /= nI;
+                    var sxx = 0, syy = 0, sxy = 0;
+                    for (iI = 0; iI < nI; iI++) {
+                        var dx = cI[iI].x - mx, dy = cI[iI].y - my;
+                        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                    }
+                    if (!(sxx > 0) || !(syy > 0)) continue;
+                    var rAll = sxy / Math.sqrt(sxx * syy);
+                    _xiApp = true;
+                    for (iI = 0; iI < nI; iI++) {
+                        // leave point i out: the centered sums lose its
+                        // share, rescaled for the shifted means
+                        var ex = cI[iI].x - mx, ey = cI[iI].y - my, fI = nI / (nI - 1);
+                        var lxx = sxx - fI * ex * ex, lyy = syy - fI * ey * ey, lxy = sxy - fI * ex * ey;
+                        if (!(lxx > 0) || !(lyy > 0)) continue;
+                        var rLoo = lxy / Math.sqrt(lxx * lyy);
+                        var dI = Math.abs(rAll - rLoo);
+                        if (dI >= 0.2 && (!worstI || dI > worstI.d))
+                            worstI = { d: dI, rAll: rAll, rLoo: rLoo, x: cI[iI].x, y: cI[iI].y, cell: orderI[oI] };
+                    }
+                    if (nI >= 8) {
+                        _xcApp = true;
+                        // a quadratic in x against the straight line
+                        var m2 = sxx / nI, s22 = 0, s12 = 0, s2y = 0;
+                        for (iI = 0; iI < nI; iI++) {
+                            var cx = cI[iI].x - mx, z2 = cx * cx - m2;
+                            s22 += z2 * z2; s12 += cx * z2; s2y += z2 * (cI[iI].y - my);
+                        }
+                        var det = sxx * s22 - s12 * s12;
+                        if (det > 1e-12 * sxx * s22) {
+                            var b1 = (sxy * s22 - s2y * s12) / det, b2 = (s2y * sxx - sxy * s12) / det;
+                            var r2q = (b1 * sxy + b2 * s2y) / syy, r2l = rAll * rAll;
+                            if (isFinite(r2q) && r2q - r2l >= 0.25 && (!worstC || r2q - r2l > worstC.gain))
+                                worstC = { gain: r2q - r2l, r2q: Math.min(1, r2q), r2l: r2l, cell: orderI[oI] };
+                        }
+                    }
+                }
+                if (worstI)
+                    out.push({ id: "xyinfluence", sev: "warn", title: "One point is doing a lot of the work",
+                        why: "Leaving out the single point at (" + fN(worstI.x) + ", " + fN(worstI.y) + ")" + nameI(worstI.cell) +
+                            " changes r from " + fR(worstI.rAll) + " to " + fR(worstI.rLoo) +
+                            ". A correlation that depends on one observation says more about that observation than about the rest. Check it for a data-entry error, compare Spearman's rho (Method, in the Statistics panel), and report the result with and without it.",
+                        fixGt: null });
+                else if (worstC)
+                    out.push({ id: "xycurve", sev: "tip", title: "The pattern may be curved",
+                        why: "A straight line accounts for about " + Math.round(worstC.r2l * 100) + " percent of the variation" + nameI(worstC.cell) +
+                            "; a simple curve accounts for about " + Math.round(worstC.r2q * 100) +
+                            " percent. r and a straight fit line describe straight-line patterns only, so they understate this one. Look at the points, try the LOESS fit line, and describe the shape in words.",
+                        fixGt: null });
             })();
             var _lgXOn = (gt === "scatter" && _xyLogX());
             var _lgYOn = (gt === "scatter" && _xyLogY());
@@ -54865,6 +55014,7 @@
                 { id: "shapen", name: "Enough data for the shape", tip: "Box and violin shapes need a reasonable sample in every group (about n of 10 or more); a raincloud is exempt because it shows every raw point.", applies: (gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null },
                 { id: "violinn", name: "Violin sample size", tip: "A violin's smooth outline is trustworthy from about n = 20 per group.", applies: gt === "violin" && minN !== null && minN >= 10 },
                 { id: "errbars", name: "Uncertainty shown", tip: "Summary charts should show error bars (SE, SD, or a CI) so precision is visible. Not applicable to a median summary, which draws no error bars by design.", applies: isBarType && (_mk === "cg" || _mk === "rm") && bars.length > 0 && data.summaryFunc !== "median" },
+                { id: "tinygroups", name: "Enough values behind each mean", tip: "A mean and an error bar say little about fewer than 5 values; show the values themselves.", applies: _tgApp },
                 { id: "unequaln", name: "Comparable group sizes", tip: "Cells with very different ns should not look interchangeable; show or report the ns.", applies: _unApp },
                 { id: "skewmean", name: "Mean fits the data", tip: "A strongly skewed cell is poorly summarized by its mean; median or box views tell it straighter.", applies: _skApp },
                 { id: "ebnote", name: "Error bars explained", tip: "When a figure note is used, it should say whether error bars are SE, SD, or a confidence interval.", applies: _ebnApp },
@@ -54881,6 +55031,8 @@
                 { id: "overplot", name: "Overplotting", tip: "With very many points, dots pile up and hide where the data are densest.", applies: gt === "scatter" && !_hmOn },
                 { id: "xydupes", name: "Each observation visible", tip: "Points sharing an exact position stack invisibly; jitter (ordinal axes), point opacity, or a heatmap shows how many observations sit there.", applies: gt === "scatter" && !_hmOn },
                 { id: "fitfew", name: "Enough points for a fit line", tip: "A regression line on fewer than about 10 points is fragile.", applies: _ffApp },
+                { id: "xyinfluence", name: "No single point drives r", tip: "A correlation that changes a lot when one point is left out rests on that point.", applies: _xiApp },
+                { id: "xycurve", name: "A straight line fits the pattern", tip: "r and a straight fit line understate a curved relationship.", applies: _xcApp },
                 { id: "catcode", name: "Fits use meaningful positions", tip: "A fit line or correlation across three or more unordered categories is computed on arbitrary category positions.", applies: _ccApp },
                 { id: "logscale", name: "Log axis flagged", tip: "A logarithmic axis should be named in the axis title or the caption.", applies: _lgApp },
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
@@ -54896,6 +55048,7 @@
                 { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
                 { id: "bracketcorr", name: "Multiple-comparisons handling", tip: "Several significance brackets call for a correction, or a stated caveat.", applies: _abCount >= 1 },
                 { id: "likertn", name: "Responses per item", tip: "Items answered by very few people have unstable percentages.", applies: gt.indexOf("likert") === 0 },
+                { id: "alphaitem", name: "Items point the same way", tip: "An item that correlates negatively with the rest is usually reverse-worded and needs reverse scoring.", applies: !!(gt.indexOf("likert") === 0 && data.likertAlpha && Array.isArray(data.likertAlpha.itemRest) && data.likertAlpha.itemRest.length >= 2) },
                 { id: "likshort", name: "Means on a short scale", tip: "Averaging a very short rating scale hides the response mix behind one number.", applies: gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 },
                 { id: "ytitle", name: "Value-axis title", tip: "The value axis should say what was measured, and in what units.", applies: _axApp },
                 { id: "xtitle", name: "X-axis title", tip: "The X axis should say what the categories or values represent.", applies: _axApp && !_axDistCat },
@@ -59477,12 +59630,28 @@
                         (la.alpha < 0
                             ? "A negative value means the summed score has less variance than the item variances imply; inspect scoring direction and the covariance structure."
                             : "Evaluate this sample-specific coefficient against the intended score use and a defensible measurement model; there is no universal .70 pass mark.");
+                    // Say whether any item is reflected (the footnote said
+                    // "reverse-scored item codes" with none marked), and
+                    // flag an item that runs against the rest (Nov 2026).
+                    var _laAnyRev = Array.isArray(data.likertReverseItems) && data.likertReverseItems.length > 0;
+                    var _laRev = _laAnyRev ? ", with the items marked (R) reflected." : " (no item is marked reverse-scored).";
+                    var _laBad = [], _laIR = Array.isArray(la.itemRest) ? la.itemRest : [];
+                    for (var _lq = 0; _lq < _laIR.length; _lq++)
+                        if (_laIR[_lq] && typeof _laIR[_lq].r === "number" && _laIR[_lq].r < 0) _laBad.push(_laIR[_lq]);
+                    var _laNeg = _laBad.length
+                        ? '<div data-role="st-alpha-neg" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">Heads up: ' +
+                          _laBad.map(function (bq) { return _stEsc(String(bq.item)) + " (r = " + _stStrip0(bq.r) + ")"; }).join(", ") +
+                          (_laBad.length === 1 ? " runs" : " run") + " against the other items: its correlation with the sum of the rest is negative. If " +
+                          (_laBad.length === 1 ? "it was" : "they were") + " worded in the opposite direction, reverse-score " +
+                          (_laBad.length === 1 ? "it" : "them") + " (click the item's label on the chart and turn on reverse scoring) before reading alpha.</div>"
+                        : "";
                     lkAlphaCard = _stCard("",
                         _stTable([
                             { html: '<span style="text-transform:none;">' + _stTerm("Cronbach\u2019s \u03b1", "cronbachAlpha") + '</span>' },
                             "Items", "Complete N"],
                             [[_stCellTerm(_stStrip0(la.alpha), "cronbachAlpha", _laHere), String(la.k), String(la.n)]], null, true) +
-                        _stFoot("Raw Cronbach's α is computed from listwise-complete, reverse-scored item codes. It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
+                        _laNeg +
+                        _stFoot("Raw Cronbach's α is computed from listwise-complete item codes" + _laRev + " It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
 
                 } else {
                     lkAlphaCard = _stCard("",
