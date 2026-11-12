@@ -133,9 +133,17 @@ wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = N
 # Compare Groups half covers Bonferroni, Holm and FDR too - jamovi's post
 # hoc table runs every correction on the model's error term - and d
 # divides by the model's pooled SD. Same data, Bonferroni persisted.
+# Since Nov 2026 Bonferroni, Holm and FDR pool only while Test is left on
+# Auto, so this fixture's brackets are on Auto (Tukey above pools whatever
+# the test); D3 is the same chart with Welch's t picked by hand, where
+# each pair keeps its own test.
+ann2auto <- gsub('"autoPTest":"welch"', '"autoPTest":"auto"', ann2, fixed = TRUE)
+wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
+               chartSpec = cspec(autoPCorrection = "bonferroni"), annotationsJson = ann2auto),
+   "d2_cg_bonf")
 wr(plotbuilder(data = cg3, xvar = "x", yvar = "y", groupVar = NULL, facetVar = NULL, graphType = "bar",
                chartSpec = cspec(autoPCorrection = "bonferroni"), annotationsJson = ann2),
-   "d2_cg_bonf")
+   "d3_cg_bonf_welch")
 
 # ---- Expected values, computed independently in R --------------------
 fmtP <- function(p) {
@@ -195,16 +203,24 @@ vA <- var(cg3$y[cg3$x == "A"]); vB <- var(cg3$y[cg3$x == "B"])
 dABpair <- (m["A"] - m["B"]) / sqrt(((n["A"] - 1) * vA + (n["B"] - 1) * vB) / (n["A"] + n["B"] - 2))
 fmtD <- function(d) sprintf("d = %.2f", d)
 stopifnot(fmtD(dABpool) != fmtD(dABpair))
+# D3: Welch's t picked by hand under Bonferroni is each pair's own test.
+wAB <- t.test(cg3$y[cg3$x == "A"], cg3$y[cg3$x == "B"])
+wAC <- t.test(cg3$y[cg3$x == "A"], cg3$y[cg3$x == "C"])
+pABwBonf2 <- min(1, 2 * wAB$p.value); pACwBonf2 <- min(1, 2 * wAC$p.value)
+dABavg <- (m["A"] - m["B"]) / sqrt((vA + vB) / 2)
+stopifnot(fmtP(pABwBonf2) != fmtP(pABbonf2))
 exp_json <- sprintf(paste0(
     '{"pairedDf":"t(%d)","pairedT":"%s","pAB":"%s","pAC":"%s",',
     '"pRM12":"%s","pRM13":"%s","pRM12raw":"%s","rmDfE":%d,"rmN":%d,"rmTkT12":"%s","tkTAB":"%s",',
     '"pRM12rawLW":"%s","pRMholm12":"%s","pRMholm13":"%s","pRMholm23":"%s","pABraw":"%s",',
-    '"pABbonf2":"%s","pACbonf2":"%s","pABbonf3":"%s","dABpool":"%s","dABpair":"%s"}'),
+    '"pABbonf2":"%s","pACbonf2":"%s","pABbonf3":"%s","dABpool":"%s","dABpair":"%s",',
+    '"pABwBonf2":"%s","pACwBonf2":"%s","pABwRaw":"%s","dABavg":"%s"}'),
     pt$parameter, formatC(pt$statistic, format = "f", digits = 2),
     fmtP(pAB), fmtP(pAC), fmtP(pRM12), fmtP(pRM13), fmtP(pRM12raw), as.integer(rmDfE),
     as.integer(rmN), rmTkT12, tkTAB,
     fmtP(pRM12rawLW), fmtP(rmHolm[1]), fmtP(rmHolm[2]), fmtP(rmHolm[3]), fmtP(pABraw),
-    fmtP(pABbonf2), fmtP(pACbonf2), fmtP(pABbonf3), fmtD(dABpool), fmtD(dABpair))
+    fmtP(pABbonf2), fmtP(pACbonf2), fmtP(pABbonf3), fmtD(dABpool), fmtD(dABpair),
+    fmtP(pABwBonf2), fmtP(pACwBonf2), fmtP(wAB$p.value), fmtD(dABavg))
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp_json, con, useBytes = TRUE)
 close(con)

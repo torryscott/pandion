@@ -1256,9 +1256,11 @@ window.PSData = (function () {
       likertMeans: means,
       likertAlpha: alpha,
       likertContinuous: continuous,
+      // always written (null when the responses are not numbers), so a
+      // value from the template can never stand in for a text battery
+      likertCodes: numericCodes ? lvCodes : null,
       missingNote: missingNote
     };
-    if (numericCodes) ch.likertCodes = lvCodes;
     if (continuous) {
       // The continuous branch FORCES the means-only type (b.R parity).
       ch.graphType = "likertmeans";

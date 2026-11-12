@@ -382,6 +382,29 @@ async function openLint(page) {
     await ctx.close();
 }
 
+// case D3 (Nov 2026): Welch's t picked by hand under Bonferroni is each
+// pair's own test - the correction only rescales its p.
+{
+    const { ctx, page, errs } = await openPage('d3_cg_bonf_welch.html');
+    console.log("case D3 (CG Bonferroni with Welch's t picked by hand):");
+    check('no page errors', errs.length === 0, errs.join(' | '));
+    const labels = await bracketLabels(page);
+    check('A-B label = 2 x its own Welch p ' + EXP.pABwBonf2, labels.includes(EXP.pABwBonf2),
+          'labels=' + JSON.stringify(labels));
+    check('A-C label = 2 x its own Welch p ' + EXP.pACwBonf2, labels.includes(EXP.pACwBonf2),
+          'labels=' + JSON.stringify(labels));
+    const p = await openPanel(page, 0);
+    check("readout: Welch's t with its own raw p " + EXP.pABwRaw + ', no pooled line',
+          !!p.readout && p.readout.includes("Welch's t") &&
+          p.readout.includes(EXP.pABwRaw + '  (raw)') &&
+          !p.readout.includes('pooled t'),
+          'readout=' + JSON.stringify(p.readout));
+    check("readout: the pair's own d " + EXP.dABavg + ', not the model d ' + EXP.dABpool,
+          !!p.readout && p.readout.includes(EXP.dABavg) && !p.readout.includes(EXP.dABpool),
+          'readout=' + JSON.stringify(p.readout));
+    await ctx.close();
+}
+
 // ---- Case G: one x-category -> omnibus options hidden ---------------
 {
     const { ctx, page, errs } = await openPage('g_cg_onecat.html');
