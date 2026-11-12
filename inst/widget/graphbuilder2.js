@@ -16336,6 +16336,23 @@
             if (testKind === "studentT") {
                 res = _gb2Stats.studentT(lv, rv, _tail);
                 testFamily = "t";
+                // A group with a single value (or a pair with no spread of
+                // its own) has no two-group t, but the pooled model compares
+                // its mean all the same, and jamovi's post hoc lists those
+                // pairs (Nov 2026, the statistical review: with groups of 2,
+                // 3 and 1 the pair that drove the omnibus was not listed).
+                // Borrow the model's error term; the pair's own SDs stay
+                // whatever they are.
+                if (!res && _poolModel) {
+                    var _l1 = (lv || []).filter(isFinite), _r1 = (rv || []).filter(isFinite);
+                    if (_l1.length >= 1 && _r1.length >= 1) {
+                        var _lm1 = _gb2Stats.mean(_l1), _rm1 = _gb2Stats.mean(_r1);
+                        res = { t: NaN, df: NaN, p: NaN, m1: _lm1, m2: _rm1,
+                                sd1: (_l1.length > 1) ? _gb2Stats.sd(_l1, _lm1) : NaN,
+                                sd2: (_r1.length > 1) ? _gb2Stats.sd(_r1, _rm1) : NaN,
+                                n1: _l1.length, n2: _r1.length };
+                    }
+                }
                 if (res && _poolModel) {
                     var _seP = Math.sqrt(_poolModel.mse * (1 / res.n1 + 1 / res.n2));
                     if (isFinite(_seP) && _seP > 0) {
@@ -55903,6 +55920,28 @@
                 if (m && m[ks[ti]] && isFinite(m[ks[ti]].ss)) tot += m[ks[ti]].ss;
             return tot;
         }
+        // Every subject with at least one visible value on a repeated-
+        // measures chart (hidden cells and hidden points left out, as the
+        // ANOVA routines leave them out). The Omnibus footnote sets it
+        // beside the number of complete subjects the model used.
+        function _stRmSubjectsAll() {
+            var seenS = {}, nS = 0;
+            if (!Array.isArray(bars)) return 0;
+            for (var ri = 0; ri < bars.length; ri++) {
+                var rb = bars[ri];
+                if (!rb) continue;
+                var rvals = Array.isArray(rb._origValues) ? rb._origValues
+                          : (Array.isArray(rb.values) ? rb.values : null);
+                if (!rvals || !Array.isArray(rb.rowIds) || rb.rowIds.length !== rvals.length) continue;
+                if (_isBarHidden((typeof rb.x === "string") ? rb.x : "", (rb.group == null) ? "" : String(rb.group))) continue;
+                var rhs = _hiddenSetForBar(rb);
+                for (var rv2 = 0; rv2 < rvals.length; rv2++) {
+                    if (rhs && rhs[rv2]) continue;
+                    if (isFinite(rvals[rv2]) && !seenS[rb.rowIds[rv2]]) { seenS[rb.rowIds[rv2]] = 1; nS++; }
+                }
+            }
+            return nS;
+        }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
             var v, sym;
@@ -56050,6 +56089,7 @@
                     try { mx2 = _computeMixedAnova2Raw(); } catch (_eM2) {}
                     if (mx2 && mx2.ok) {
                         var m2 = mx2.res;
+                        oLines.subjUsed = m2.n;
                         var gg2 = (m2.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(m2.eps) + ")"
                             : "";
@@ -56091,6 +56131,7 @@
                     } catch (_eMx) {}
                     if (mxR && mxR.ok) {
                         var mr = mxR.res;
+                        oLines.subjUsed = mr.n;
                         var ggTail = (mr.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(mr.eps) + ")"
                             : "";
@@ -56123,6 +56164,7 @@
                 } catch (_eR) {}
                 if (rawR && rawR.ok) {
                     var rr = rawR.res;
+                    oLines.subjUsed = rr.n;
                     var line = "Main effect of " + _stOccName() + ": F(" +
                         dfF(rr.df1) + ", " + dfF(rr.df2) + ") = " +
                         rr.F.toFixed(2) + ", " + _stP(rr.p) + ", " +
@@ -57708,6 +57750,34 @@
                             return _stFoot(txt);
                         })()) +
                         ((function () {
+                            // A cell with one value has no t test of its
+                            // own: say which one is missing from the list.
+                            if (cmpIsRM || mk !== "cg" || cmpTest === "mannWhitneyU") return "";
+                            var listed = {}, lone = [], nmOf = function (c) {
+                                return _stCatOf(c.cat) + (c.group ? " (" + c.group + ")" : "");
+                            };
+                            for (var li5 = 0; li5 < cmpPairs.length; li5++) {
+                                var lp5 = cmpPairs[li5];
+                                if (lp5 && lp5.left) listed[lp5.left.cat + "|" + lp5.left.group] = 1;
+                                if (lp5 && lp5.right) listed[lp5.right.cat + "|" + lp5.right.group] = 1;
+                            }
+                            var allC = [];
+                            try { allC = _cmpVisibleCells(); } catch (_eLc) { allC = []; }
+                            for (var lc5 = 0; lc5 < allC.length; lc5++) {
+                                var cc5 = allC[lc5], nf5 = 0;
+                                var cv5 = (cc5 && cc5.b && Array.isArray(cc5.b.values)) ? cc5.b.values : [];
+                                for (var lv5 = 0; lv5 < cv5.length; lv5++) if (isFinite(cv5[lv5])) nf5++;
+                                if (nf5 === 1 && !listed[cc5.cat + "|" + cc5.group]) lone.push(nmOf(cc5));
+                            }
+                            if (!lone.length) return "";
+                            return _stFoot(lone.join(", ") + (lone.length === 1 ? " has" : " have") +
+                                " a single value, so " + (lone.length === 1 ? "it has" : "they have") +
+                                " no two-group test of " + (lone.length === 1 ? "its" : "their") +
+                                " own and " + (lone.length === 1 ? "is" : "are") +
+                                " not listed. With Tukey or Dunnett, or with Bonferroni, Holm or FDR and Test on Auto, the pooled error term covers " +
+                                (lone.length === 1 ? "it" : "them") + " and the pairs appear.");
+                        })()) +
+                        ((function () {
                             if (cmpIsRM || mk !== "cg") return "";
                             var sp = null;
                             try { sp = _stSpreadNote(); } catch (_eSp) {}
@@ -58059,6 +58129,19 @@
                         omniFoot = omniFaceted
                             ? "Two-way ANOVA with interaction (Type III sums of squares) over the visible chart; the panels variable joins the model as a factor."
                             : "One-way ANOVA over the visible chart, the same math as the bracket omnibus.";
+                    }
+                    // A repeated-measures ANOVA needs every occasion from a
+                    // subject; anyone missing one drops out of the whole
+                    // test. The chart's means and Descriptives keep them, so
+                    // say how many the test used (Nov 2026).
+                    if (mk === "rm" && typeof oLines.subjUsed === "number" && isFinite(oLines.subjUsed)) {
+                        var _suAll = 0;
+                        try { _suAll = _stRmSubjectsAll(); } catch (_eSu) { _suAll = 0; }
+                        if (_suAll > oLines.subjUsed)
+                            omniFoot += " This test uses the " + oLines.subjUsed + " of " + _suAll +
+                                " subjects who have a value at every occasion; " + (_suAll - oLines.subjUsed) +
+                                " with a missing occasion " + ((_suAll - oLines.subjUsed) === 1 ? "is" : "are") +
+                                " left out, though the chart's means and the Descriptives table still include them.";
                     }
                     // Parse the self-produced sentence format into the
                     // shared table look (Torry: the readout box read as

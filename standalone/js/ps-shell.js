@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
+      label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
     { id: "anova-effect-size-table-total", since: "3.2.1",
       label: "eta squared and omega squared on two-way and three-way Compare Groups designs with unequal cell sizes match jamovi's ANOVA table" },
     { id: "freq-pairwise-two-category-once", since: "3.2.1",

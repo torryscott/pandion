@@ -30,6 +30,25 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**A group with a single value joins the pooled comparisons, as in jamovi's post hoc.** <!-- ledger: cg-single-value-group-pooled-pairs -->
+On Compare Groups, a pooled correction (Tukey, Dunnett, or Bonferroni,
+Holm or FDR with Test on Auto) runs each pair on the one-way ANOVA's
+error term, which needs only the two means. The engine still required
+the pair's own two-group t first, so a group holding one value (or a
+pair with no spread of its own) had no row, although jamovi's post hoc
+lists it. With groups of 2, 3 and 1 only one of three comparisons
+appeared, and because the family was that one row, its adjusted p was
+too small: .076 under Bonferroni and Holm where jamovi's table of three
+gives .228 and .091. Those pairs are now computed on the pooled term and
+listed, and the family counts them. With no correction, or under
+Games-Howell, such a group still has no test of its own, and the
+Compare pairs footnote now names it. Checked against jamovi's ANOVA post
+hoc (`stats-judgment-check`; the rendered fuzzer's pooled reference
+covers one-observation groups). Affects: brackets and Compare pairs
+under a pooled correction on Compare Groups, both hosts, only when a
+group has a single value or two compared groups have no spread.
+Implemented 2026-11-11. Not yet live on the web app.
+
 **Eta squared and omega squared on factorial designs divide by the ANOVA table's own total, as jamovi's do.** <!-- ledger: anova-effect-size-table-total -->
 On the Omnibus tab of a Compare Groups chart with two or three factors,
 eta squared and omega squared divided each term's sum of squares by the

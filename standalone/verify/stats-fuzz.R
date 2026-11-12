@@ -233,12 +233,14 @@ dataset_refs <- function(groups) {
         key <- paste0(ks[[i]], "|", ks[[j]])
         pr <- pair_refs(groups[[i]], groups[[j]])
         pairs[[key]] <- pr
-        # The engine runs the pair's Student t first and pools only when
-        # that exists (a one-observation group has no row at all, pooled
-        # term or not); without a usable fit it keeps the pair's Welch p.
+        # With a usable fit every pair of groups that each hold a value is
+        # compared on the pooled term, a one-observation group included
+        # (Nov 2026: jamovi's post hoc lists those pairs; the engine used to
+        # require the pair's own Student t first). Without a usable fit the
+        # pair keeps its Welch p.
         fam_p <- NULL
         if (is.null(pool)) fam_p <- pr$welch$p
-        else if (!is.null(pr$student$p)) fam_p <- pooled_p(groups[[i]], groups[[j]])
+        else fam_p <- pooled_p(groups[[i]], groups[[j]])
         if (!is.null(fam_p)) { raw_p <- c(raw_p, fam_p); pair_keys <- c(pair_keys, key) }
     }
     adj <- list()
