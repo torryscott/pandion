@@ -882,6 +882,7 @@ graphbuilder2_html <- function(bars,
                                likert_cells = NULL,
                                likert_means = NULL,
                                likert_alpha = NULL,
+                               likert_codes = NULL,
                                dist_normality = NULL,
                                likert_continuous = FALSE,
                                likert_center_boundary = -1,
@@ -2320,6 +2321,12 @@ graphbuilder2_html <- function(bars,
         payload$distNormality <- dist_normality
     if (!is.null(likert_alpha))
         payload$likertAlpha <- likert_alpha
+    # The responses' own numbers, in level order, when every level is a
+    # number (Nov 2026): the engine then reflects reverse-scored items and
+    # places mean dots by these, not by positions 1..k. Absent otherwise, so
+    # text batteries and every other module stay byte-stable.
+    if (!is.null(likert_codes))
+        payload$likertCodes <- as.numeric(likert_codes)
     # User guide (Jul 2026): the illustrated guide ships inside the
     # installed module (inst/docs/user-guide.html - the build scripts copy
     # it there from docs/, the canonical copy). The key is GATED on the

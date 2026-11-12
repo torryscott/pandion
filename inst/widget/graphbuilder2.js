@@ -45150,6 +45150,29 @@
                 var levels = Array.isArray(data.likertLevels)
                     ? data.likertLevels.map(String) : [];
                 var k = levels.length;
+                // Numeric response codes (Nov 2026, the statistical review):
+                // when the responses are numbers the payload ships their
+                // values (likertCodes, ascending, in level order) and the
+                // item means, intervals and alpha arrive on those numbers,
+                // not on positions 1..k. Reverse scoring then reflects
+                // around the two ends of the scale, and a mean is placed on
+                // the means axis (whose ticks sit at positions 1..k) by
+                // interpolating between the codes either side of it.
+                var _lkCodes = (Array.isArray(data.likertCodes) && k >= 2 &&
+                    data.likertCodes.length === k) ? data.likertCodes : null;
+                if (_lkCodes) {
+                    for (var _lc0 = 0; _lc0 < k; _lc0++) {
+                        if (typeof _lkCodes[_lc0] !== "number" || !isFinite(_lkCodes[_lc0]) ||
+                            (_lc0 > 0 && !(_lkCodes[_lc0] > _lkCodes[_lc0 - 1]))) { _lkCodes = null; break; }
+                    }
+                }
+                var _lkReflSum = _lkCodes ? (_lkCodes[0] + _lkCodes[k - 1]) : (k + 1);
+                function _lkPos(v) {
+                    if (!_lkCodes || typeof v !== "number" || !isFinite(v)) return v;
+                    var pi = 0;
+                    while (pi < k - 2 && v > _lkCodes[pi + 1]) pi++;
+                    return (pi + 1) + (v - _lkCodes[pi]) / (_lkCodes[pi + 1] - _lkCodes[pi]);
+                }
                 var allItems = Array.isArray(data.likertItems)
                     ? data.likertItems.map(String) : [];
                 // A continuous battery legitimately ships ZERO levels
@@ -45198,9 +45221,9 @@
                     var m = meanMap[it];
                     if (!m || !_lkIsRev(it)) return m;
                     var out = { item: m.item, n: m.n, mean: m.mean, se: m.se };
-                    if (typeof m.mean === "number") out.mean = k + 1 - m.mean;
-                    if (typeof m.hi === "number") out.lo = k + 1 - m.hi;
-                    if (typeof m.lo === "number") out.hi = k + 1 - m.lo;
+                    if (typeof m.mean === "number") out.mean = _lkReflSum - m.mean;
+                    if (typeof m.hi === "number") out.lo = _lkReflSum - m.hi;
+                    if (typeof m.lo === "number") out.hi = _lkReflSum - m.lo;
                     return out;
                 }
                 function pctOf(it, lv) {
@@ -45748,8 +45771,8 @@
                         var _ciEls = [];
                         if (hasCI) {
                             var _ciLine = svgEl("line", {
-                                x1: toX(Math.max(xmin, loV)), y1: cyD,
-                                x2: toX(Math.min(xmax, hiV)), y2: cyD,
+                                x1: toX(Math.max(xmin, _lkPos(loV))), y1: cyD,
+                                x2: toX(Math.min(xmax, _lkPos(hiV))), y2: cyD,
                                 stroke: _ciC, "stroke-width": ciW,
                                 "stroke-opacity": 0.85, "stroke-linecap": "round",
                                 "data-role": "likert-ci", "data-item": it
@@ -45760,7 +45783,7 @@
                             [loV, hiV].forEach(function (b2) {
                                 if (b2 < xmin || b2 > xmax) return;
                                 var _cap = svgEl("line", {
-                                    x1: toX(b2), y1: cyD - 4, x2: toX(b2), y2: cyD + 4,
+                                    x1: toX(_lkPos(b2)), y1: cyD - 4, x2: toX(_lkPos(b2)), y2: cyD + 4,
                                     stroke: _ciC, "stroke-width": ciW,
                                     "stroke-opacity": 0.85,
                                     "data-role": "likert-ci-cap", "data-item": it
@@ -45772,7 +45795,7 @@
                             // treatment (the interval thickens) + tooltip +
                             // click to open the means panel; the row stays
                             // drag-to-reorder.
-                            var _ciHX1 = toX(Math.max(xmin, loV)), _ciHX2 = toX(Math.min(xmax, hiV));
+                            var _ciHX1 = toX(Math.max(xmin, _lkPos(loV))), _ciHX2 = toX(Math.min(xmax, _lkPos(hiV)));
                             var _ciHit = svgEl("rect", {
                                 x: Math.min(_ciHX1, _ciHX2), y: cyD - 6,
                                 width: Math.abs(_ciHX2 - _ciHX1), height: 12,
@@ -45811,7 +45834,7 @@
                         var _lkDotShape = (typeof data.likertDotShape === "string" && data.likertDotShape.length) ? data.likertDotShape : "circle";
                         var _lkOutlineC = (typeof data.likertDotOutlineColor === "string" && data.likertDotOutlineColor.length) ? data.likertDotOutlineColor : "#ffffff";
                         var _lkOutlineW = (typeof data.likertDotOutlineWidth === "number" && data.likertDotOutlineWidth >= 0) ? data.likertDotOutlineWidth : 1;
-                        var dot = pointShapeEl(_lkDotShape, toX(md2.mean), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
+                        var dot = pointShapeEl(_lkDotShape, toX(_lkPos(md2.mean)), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
                         dot.setAttribute("data-role", "likert-dot");
                         dot.setAttribute("data-item", it);
                         dot.style.pointerEvents = "none";
@@ -45822,7 +45845,7 @@
                         // + click open the means panel; the row stays
                         // drag-to-reorder.
                         var _dotHalo = svgEl("circle", {
-                            cx: toX(md2.mean), cy: cyD, r: Math.max(dotR + 5, 9),
+                            cx: toX(_lkPos(md2.mean)), cy: cyD, r: Math.max(dotR + 5, 9),
                             fill: "transparent", stroke: "none",
                             style: "cursor:pointer;",
                             "data-role": "likert-dot-hit", "data-item": it
@@ -51810,7 +51833,7 @@
             cohensDz: { name: "Cohen's dz (paired)", sym: "dz", body: "For paired or repeated measurements, Cohen's dz is the sample mean of the pairwise differences divided by the sample SD of those differences. It expresses the average difference in difference-score SD units.", read: "Larger absolute values mean that the mean difference is large relative to the variation among the pairwise differences. Its denominator differs from independent-group d, so the values are not directly interchangeable." },
             hedgesG: { name: "Hedges' g", sym: "g", body: "Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.", read: "Read it exactly like d, as a mean difference in standard deviation units, nudged a little toward zero in small samples." },
             rankBiserialR: { name: "Rank-biserial r", sym: "r", body: "A signed rank-based effect size from -1 to +1. For Mann-Whitney it summarizes pairwise ordering between groups; for Wilcoxon it compares the total positive and negative signed ranks. Pandion Plots follows jamovi's sign convention, which can point opposite to Cohen's d for the same independent-group ordering.", read: "Values near -1 or +1 mean that nearly all pairwise comparisons or signed ranks point in one direction; values near 0 mean little net rank dominance. It is not Pearson correlation and does not by itself describe a median difference." },
-            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
+            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
             varPair: { name: "Pair", sym: "", body: "The two variables whose correlation this row reports. Correlation is symmetric, so the order of the two names does not matter.", read: "" },
             surveyItem: { name: "Item", sym: "", body: "One question or statement from the survey battery. Each row summarizes every response to that one item.", read: "An (R) marker means the item was reverse-scored before these numbers were computed, so it reads in the same direction as the rest of the scale." },
             itemCount: { name: "Items", sym: "k", body: "How many survey items feed the reliability estimate. With the same average agreement among items, a longer scale pushes alpha higher, so compare alphas with the item count in mind.", read: "" }
@@ -53336,7 +53359,7 @@
             {g:7,n:"Slope",y:"b",m:["Scatter"],s:["slope","regression","b","beta","rise over run"],b:"The regression slope is how much the y variable is predicted to change for each one-unit increase in the x variable, drawn as the tilt of the best-fit line. Its size depends on the units of your variables, so a slope of 2 means something different for dollars than for millimeters.",r:"Read it as: for every 1 unit more of x, the predicted y rises (or falls, if negative) by this many units; the sign matches the direction of the correlation.",w:"A large slope is not the same as a strong relationship, since slope depends on measurement units while strength is carried by r and R-squared."},
             {g:7,n:"Strongest pair",y:"",m:["Corr"],s:["strongest","largest correlation","biggest relationship"],b:"The pair with the largest absolute value of the currently selected matrix coefficient: Pearson r, Spearman rho, or Kendall tau-b. It is chosen only from pairs with computable coefficients in the displayed variable set.",r:"Check the selected method and sign. 'Strongest' is a relative ranking within this matrix, not a claim of significance, practical importance, stability, or causation.",w:"Because the app searches across several pairs and highlights the largest sample coefficient, that winner will often look stronger than it would in new data. Treat it as a lead to investigate, not a confirmed result."},
             {g:7,n:"Cronbach's alpha",y:"alpha",m:["Likert"],s:["cronbach","alpha","reliability","internal consistency","scale"],b:"Cronbach's alpha summarizes how a set of scored items hangs together in this sample. It is calculated from the item variances, their covariances, and the number of items. Pandion Plots uses respondents with complete data on all items after any reverse scoring.",r:"Report alpha with the number of items, sample size, scoring decisions, and missing-data handling. Interpreting alpha as reliability also assumes, among other things, that items contribute equally to the common score and that their errors are uncorrelated.",w:"There is no universal .70 pass mark, and alpha can be negative. Alpha does not by itself show that a scale is one-dimensional, valid, stable over time, or equally reliable for every subgroup or score level."},
-            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
+            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
             {g:7,n:"Internal consistency",y:"",m:["Likert"],s:["internal consistency","reliability","items agree"],b:"Internal consistency describes how responses to items intended for one combined score relate to one another in a sample. Cronbach's alpha is one common summary. Consistency does not mean that people answer every item identically, and it becomes a reliability claim only under a suitable measurement model.",r:"Before interpreting one coefficient, check the item content, scoring direction, dimensionality, and pattern of relationships among the items.",w:"Strong item relationships can come from redundancy, shared wording, method effects, or several correlated dimensions. They do not by themselves prove one dimension or construct validity."},
             {g:8,n:"Silverman's rule of thumb (bandwidth)",y:"",m:["Compare", "RM", "Dist"],s:["bandwidth", "silverman", "smoothing", "kde bandwidth", "smooth the curve"],b:"Bandwidth controls how much a density curve is smoothed. Pandion Plots first chooses an automatic width using Silverman's rule of thumb: h = 0.9 times min(SD, IQR/1.34) times n^(-1/5). If IQR is 0 it uses SD, and if there is no usable spread it uses width 1. The Bandwidth control multiplies this automatic value.",r:"Below 1 reduces smoothing and above 1 increases it. Inspect whether important features persist across reasonable nearby settings.",w:"The slider value is not the bandwidth in data units, and this rule is not optimal for every distribution, especially multimodal, bounded, or very small samples."},
             {g:8,n:"Kernel (kernel density estimate)",y:"",m:["Dist"],s:["kernel", "kde", "kernel density", "density estimate", "bump shape"],b:"A kernel density estimate places a small smooth bump at every observation and adds the bumps together. The Kernel setting chooses the bump's shape, while Bandwidth controls its width. Bandwidth usually changes the visible curve more.",r:"Try reasonable nearby bandwidths and, when useful, different kernels. Features that remain visible across those choices are more stable than bumps that appear under only one setting.",w:"The curve is an estimate, not a uniquely determined outline of the population. Near a hard boundary such as zero, it can spill into impossible values, and small samples can produce unstable bumps."},
@@ -59130,10 +59153,15 @@
                     var revd = !isCont && revSet.indexOf(le.item) >= 0;
                     var mVal = le.mean, loV = le.lo, hiV = le.hi;
                     if (revd && typeof mVal === "number" && kLv > 0) {
-                        mVal = (kLv + 1) - mVal;
+                        // around the two ends of the scale: its own codes
+                        // when the responses are numbers, else 1 and k
+                        var lkCd = (Array.isArray(data.likertCodes) && kLv >= 2 &&
+                            data.likertCodes.length === kLv) ? data.likertCodes : null;
+                        var lkRf = lkCd ? (lkCd[0] + lkCd[kLv - 1]) : (kLv + 1);
+                        mVal = lkRf - mVal;
                         var t2 = loV;
-                        loV = (typeof hiV === "number") ? (kLv + 1) - hiV : undefined;
-                        hiV = (typeof t2 === "number") ? (kLv + 1) - t2 : undefined;
+                        loV = (typeof hiV === "number") ? lkRf - hiV : undefined;
+                        hiV = (typeof t2 === "number") ? lkRf - t2 : undefined;
                     }
                     var lrow = [_stEsc(le.item) + (revd ? " " + _stCellTerm("(R)", "reverseScored", "") : ""), String(le.n)];
                     if (lShowPct) {
@@ -59168,6 +59196,10 @@
                     _stBtnRow(_stBtn("copymeans", "Copy table", false)) +
                     _stFoot(isCont
                         ? "Means with t-based confidence intervals from the raw values."
+                        : (Array.isArray(data.likertCodes) && kLv >= 2 && data.likertCodes.length === kLv)
+                        ? "Means \u00b1 CI on the items' own codes (" + data.likertCodes[0] + " to " + data.likertCodes[kLv - 1] +
+                          "); per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected around " +
+                          data.likertCodes[0] + " and " + data.likertCodes[kLv - 1] + ")."
                         : "Means ± CI on the 1–" + kLv +
                           " coding; per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected)."));
                 var lkAlphaCard = "";

@@ -24,13 +24,13 @@
     "channels": ["corrCells", "corrRaw", "corrVars", "missingNote"]
   },
   "likertplotbuilder": {
-    "keys": 573,
-    "channels": ["likertAlpha", "likertCells", "likertItems", "likertLevels", "likertMeans", "missingNote"]
+    "keys": 574,
+    "channels": ["likertAlpha", "likertCells", "likertCodes", "likertItems", "likertLevels", "likertMeans", "missingNote"]
   },
   "__stamp": {
-    "marshalMd5": "c0e8a5480017b7428add25ff2c559dfc",
+    "marshalMd5": "c0490760fb5873db343bfbc7fbfd6a88",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
-    "engineMd5": "08e6ccb663f8979215f330ed3b2cf9d6",
-    "generated": "2026-10-28"
+    "engineMd5": "38f25ef1135585c1ea21b90b58fa57b1",
+    "generated": "2026-11-11"
   }
 }

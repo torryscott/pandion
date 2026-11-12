@@ -1123,6 +1123,19 @@ window.PSData = (function () {
       continuous = true;
     }
 
+    // Numeric response codes (Nov 2026, the statistical review): when every
+    // response level is a number, in ascending order, item means, their
+    // intervals and alpha are computed on those numbers, not on positions
+    // 1..k (items coded 0 to 4 printed every mean one too high). Text levels
+    // keep the 1..k coding. Mirrors R/likertplotbuilder.b.R.
+    var lvCodes = lvAll.map(function (s) {
+      return String(s).trim() === "" ? NaN : Number(s);
+    });
+    var numericCodes = !continuous && lvCodes.length >= 2;
+    for (i = 0; numericCodes && i < lvCodes.length; i++)
+      if (!isFinite(lvCodes[i]) || (i > 0 && !(lvCodes[i] > lvCodes[i - 1])))
+        numericCodes = false;
+
     var cells = [], means = [];
     for (var q3 = 0; q3 < items.length; q3++) {
       it = items[q3];
@@ -1160,7 +1173,10 @@ window.PSData = (function () {
       }
       var m2 = { item: it, n: nIt };
       if (nIt >= 1) {
-        var code = obs.map(function (o) { return lvAll.indexOf(o) + 1; });
+        var code = obs.map(function (o) {
+          var pos = lvAll.indexOf(o) + 1;
+          return numericCodes ? lvCodes[pos - 1] : pos;
+        });
         var mv2 = S.mean(code);
         m2.mean = S.sigR(mv2);
         if (nIt >= 2) {
@@ -1185,6 +1201,7 @@ window.PSData = (function () {
         revSet = Array.isArray(rv) ? rv.map(String) : [String(rv)];
       }
       var kLv = lvAll.length;
+      var reflSum = numericCodes ? lvCodes[0] + lvCodes[kLv - 1] : kLv + 1;
       var rowsM = [];
       for (i = 0; i < nTotal; i++) {
         var row = [], okRow = true;
@@ -1195,7 +1212,8 @@ window.PSData = (function () {
           else {
             var o2 = cols[it][i];
             val = o2 == null ? NaN : lvAll.indexOf(o2) + 1;
-            if (revSet.indexOf(it) !== -1 && isFinite(val)) val = (kLv + 1) - val;
+            if (numericCodes && isFinite(val)) val = lvCodes[val - 1];
+            if (revSet.indexOf(it) !== -1 && isFinite(val)) val = reflSum - val;
           }
           if (!isFinite(val)) { okRow = false; break; }
           row.push(val);
@@ -1226,6 +1244,7 @@ window.PSData = (function () {
       likertContinuous: continuous,
       missingNote: missingNote
     };
+    if (numericCodes) ch.likertCodes = lvCodes;
     if (continuous) {
       // The continuous branch FORCES the means-only type (b.R parity).
       ch.graphType = "likertmeans";

@@ -30,6 +30,27 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Survey item means, their intervals and alpha use the responses' own numbers.** <!-- ledger: likert-means-own-codes -->
+On a Likert / Survey chart whose responses are numbers, item means,
+their t intervals and Cronbach's alpha were computed on each response's
+position among the values that occur (1, 2, 3, ...), not on the number
+itself. Items coded 0 to 4 printed every mean exactly one too high
+(3.03 where the data's mean is 2.03), and a level nobody chose
+compressed the scale: items coded 1 to 5 with no 3 chosen printed 2.57
+where the mean is 3.05, could change the order of two items, and moved
+alpha (.68 where it is .66). Reverse scoring reflected around 1 and the
+number of levels; it now reflects around the lowest and highest
+response value. A battery of number columns also reads in ascending
+order in jamovi even when the first item never used one of the values.
+Responses stored as text have no numbers of their own and keep the
+1, 2, 3 coding, unchanged. Checked against jamovi's Descriptives and
+Reliability Analysis on the same data (`stats-judgment-check`); the R
+side and the app's own data code are held equal by the parity check.
+Affects: the Item means tab, the means chart's dots and intervals, mean
+sorting, and Reliability, in both hosts, for numeric responses that are
+not coded 1 to k with every level used. Implemented 2026-11-11. Not yet
+live on the web app.
+
 **Bonferroni, Holm and FDR keep a test picked by hand as each pair's own test.** <!-- ledger: corrections-follow-test-menu -->
 Since 3.2.0 every correction but Games-Howell ran each Compare Groups
 pair on the one-way ANOVA's pooled error term, to match jamovi's ANOVA
