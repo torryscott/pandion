@@ -30,6 +30,25 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Eta squared and omega squared on factorial designs divide by the ANOVA table's own total, as jamovi's do.** <!-- ledger: anova-effect-size-table-total -->
+On the Omnibus tab of a Compare Groups chart with two or three factors,
+eta squared and omega squared divided each term's sum of squares by the
+data's total sum of squares. jamovi's ANOVA divides by the sum of the
+table's own rows (every term's Type III sum of squares plus the
+residual). The two are the same number on a one-way design and on any
+design with equal cell sizes; with unequal cell sizes Type III rows do
+not add up to the total and the values differed: a 2 x 3 design with
+cells of 3 to 12 showed eta squared .22, .01 and .06 where jamovi's
+table shows .29, .01 and .08, and omega squared .19 and .04 where
+jamovi shows .25 and .05. Both now use the table's total. F, df, p and
+partial eta squared are unchanged, as are one-way and repeated-measures
+tables. Checked against jamovi's ANOVA on the same data
+(`stats-judgment-check`; the statistics probe's unbalanced two-way
+reference uses the same total). Affects: the eta squared and omega
+squared columns of the Omnibus tab on Compare Groups with a Group By or
+a Panels variable, both hosts, unequal cell sizes only. Implemented
+2026-11-11. Not yet live on the web app.
+
 **Frequencies Pairwise counts a two-category outcome once, so Holm no longer doubles its p.** <!-- ledger: freq-pairwise-two-category-once -->
 On a grouped Frequencies bar chart whose outcome has exactly two
 categories, the Pairwise tab listed each pair of groups twice ("Improved:

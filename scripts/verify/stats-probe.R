@@ -576,7 +576,10 @@ mse <- rssFull / dfe
 ssA <- rssFor(c(0, 2, 3)) - rssFull
 ssB <- rssFor(c(0, 1, 3)) - rssFull
 ssAB <- rssFor(c(0, 1, 2)) - rssFull
-ssTot <- sum((cgw$y - mean(cgw$y))^2)
+# jamovi's ANOVA table divides eta squared and omega squared by the sum of
+# its own rows (every term's Type III SS plus the residual), not by the
+# data's total SS; with unequal cells the two differ (Nov 2026).
+ssTot <- ssA + ssB + ssAB + rssFull
 twA <- sprintf("F(2, %d) = %.2f", dfe, (ssA / 2) / mse)
 twB <- sprintf("F(1, %d) = %.2f", dfe, (ssB / 1) / mse)
 twAB <- sprintf("F(2, %d) = %.2f", dfe, (ssAB / 2) / mse)

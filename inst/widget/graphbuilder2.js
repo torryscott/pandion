@@ -51830,7 +51830,7 @@
             omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor on its own; an interaction means one factor's effect depends on the level of the other." },
             mainEffect: { name: "Main effect", sym: "", body: "One factor's overall effect: whether its levels differ on the outcome when you average over the other factor(s) in the design.", read: "A small p is evidence this factor's levels differ on average. When an interaction is significant, read a main effect with care: the factor's effect is not the same at every level of the other factor." },
             interactionEffect: { name: "Interaction", sym: "", body: "An interaction means that the pattern for one factor changes across the levels of another. In ANOVA terms, the factors are not simply additive on the outcome scale being analyzed.", read: "A small interaction p is evidence that the modeled difference is not the same at every level of the other factor. Examine the cell means or simple effects instead of relying only on overall main effects." },
-            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the total corrected sum of squares.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA, the terms are adjusted and can overlap, so their eta-squared values do not have to add to 1." },
+            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA with unequal cell sizes the table's rows no longer add up to the data's total variation, so the share is of the table's own total." },
             etaSqP: { name: "Partial eta-squared", sym: "η²p", body: "Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.", read: "It runs from 0 to 1, but it is not a share of all outcome variation. Values for different terms do not add to 1 and can change with the design and error denominator." },
             omegaSq: { name: "Omega-squared", sym: "ω²", body: "Like eta-squared, omega-squared estimates how much population variation is associated with an ANOVA effect, but it corrects some of eta-squared's upward bias. It is often a little smaller.", read: "The estimate can be zero or negative. Read a small negative value as an effect near zero, not as negative variance." },
             shapiroW: { name: "Shapiro-Wilk W", sym: "W", body: "The Shapiro-Wilk test compares the ordered sample with the pattern expected from a normal distribution. W is generally nearer 1 when the sample is more compatible with normality, but W is not a percentage or a stand-alone closeness score; its p value also depends on sample size.", read: "A small p flags evidence against normality under the test. A larger p means no departure was detected, not that normality was proved." },
@@ -53333,7 +53333,7 @@
             {g:1,n:"Cohen's dz (paired)",y:"dz",m:["RM"],s:["dz","paired d","effect size paired"],b:"For paired or repeated measurements, Cohen's dz is the mean of the paired differences divided by the SD of those differences.",r:"The sign shows the direction of the mean difference. A larger absolute value means the mean difference is larger relative to how much the paired differences vary.",w:"It does not describe a typical person's change and is not directly interchangeable with independent-group d. Fixed small/medium/large labels are context-dependent."},
             {g:1,n:"Hedges' g",y:"g",m:["Compare","RM"],s:["g","corrected d","effect size"],b:"Hedges' g is Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.",r:"Read it exactly like d, as a mean difference in standard deviation units, with values in small samples pulled a little toward zero compared to d.",w:"Several Hedges-g conventions and correction formulas exist. Report the software and denominator convention when exact cross-study comparability matters."},
             {g:1,n:"rank-biserial r",y:"r",m:["Compare","RM"],s:["rank biserial","effect size rank","nonparametric effect size"],b:"A rank-based effect size from -1 to +1. For Mann-Whitney, it summarizes whether observations from one independent group tend to outrank those from the other. For Wilcoxon, it compares the positive and negative ranked paired differences.",r:"Values near 0 show little overall rank advantage; values nearer -1 or +1 show that the ranked evidence falls mostly in one direction. Check group order before interpreting the sign: Pandion Plots follows jamovi's convention, which can point opposite to Cohen's d.",w:"It is not Pearson correlation, and it does not by itself estimate a difference in means or medians."},
-            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the total corrected sum of squares. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the total corrected sum of squares under this ANOVA calculation.",w:"In a factorial Type III ANOVA, adjusted terms can overlap, so their eta-squared values do not have to add to 1. Eta-squared also tends to overestimate the corresponding population effect."},
+            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the table's total under this ANOVA calculation.",w:"In a factorial Type III ANOVA with unequal cell sizes, the table's rows do not add up to the data's total variation, so eta-squared is a share of the table's own total, not of all the variation in the data. Eta-squared also tends to overestimate the corresponding population effect."},
             {g:1,n:"Partial eta-squared",y:"partial eta2",m:["Compare","RM"],s:["partial eta squared","eta p","effect size anova"],b:"Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.",r:"It runs from 0 to 1. Read it as the term's variation divided by that variation plus its own error,not as a share of all outcome variation.",w:"Values across terms do not add to 1 and depend on the design and error denominator. Do not compare them as though they were slices of one common whole."},
             {g:1,n:"Omega-squared",y:"omega2",m:["Compare","RM"],s:["omega squared","effect size anova","less biased"],b:"Omega-squared estimates the share of population variance associated with an ANOVA effect while correcting some of eta-squared's upward bias. It is often smaller than eta-squared, and an estimate can be zero or negative.",r:"Treat a small negative value as an estimate near zero, not as negative variance. Formula conventions differ across designs, so report the software or method when comparing studies.",w:"Bias correction does not make omega-squared assumption-free; it inherits the ANOVA model and design assumptions."},
             {g:1,n:"R-squared",y:"R2",m:["Scatter"],s:["r squared","variance explained","fit","goodness of fit regression"],b:"R-squared is the proportion of the variation in the outcome that the fitted line or model accounts for. It runs from 0 to 1, where 0 explains none of the spread and 1 explains all of it.",r:"Read it as the fraction of the outcome's variation captured by the fit: 0.25 means the model accounts for about 25 percent of the spread.",w:"A high R-squared means the model fits the spread of these data well, not that the relationship is causal or that predictions will be accurate for new cases."},
@@ -55890,6 +55890,19 @@
             if (qCats.length !== 2 || qGrps.length !== 2) return null;
             return [qCnt[0][0], qCnt[0][1], qCnt[1][0], qCnt[1][1]];
         }
+        // jamovi's ANOVA table divides eta squared and omega squared by the
+        // sum of the table's own rows (every term's Type III SS plus the
+        // residual), not by the data's total SS. The two agree on a one-way
+        // or a balanced design; with unequal cell sizes Type III SS do not
+        // add up to the total, and the review's 2 x 3 design showed .22
+        // here where jamovi's table shows .29 (Nov 2026).
+        function _stTblTotal(m) {
+            var tot = (m && isFinite(m.sse)) ? m.sse : NaN;
+            var ks = ["A", "B", "C", "AB", "AC", "BC", "ABC"];
+            for (var ti = 0; ti < ks.length; ti++)
+                if (m && m[ks[ti]] && isFinite(m[ks[ti]].ss)) tot += m[ks[ti]].ss;
+            return tot;
+        }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
             var v, sym;
@@ -55961,9 +55974,9 @@
                 var tw = null;
                 try { tw = _gb2Stats.twoWayANOVA(obs2, fa.k, fb.k); } catch (_e2) {}
                 if (tw && !tw.emptyCells && tw.A) {
-                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
+                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
                 } else {
                     out.push("Two-way ANOVA: " + ((tw && tw.emptyCells)
                         ? ("needs every " + fa.name + " × " + fb.name + " combination observed (some cells are empty).")
@@ -55976,7 +55989,7 @@
             var thw = null;
             try { thw = _gb2Stats.threeWayANOVA(obs3, g1.k, g2.k, g3.k); } catch (_e3) {}
             if (thw && !thw.emptyCells && thw.A) {
-                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, thw.ssTotal, thw.mse); };
+                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, _stTblTotal(thw), thw.mse); };
                 out.push(L("Main effect of " + g1.name, thw.A));
                 out.push(L("Main effect of " + g2.name, thw.B));
                 out.push(L("Main effect of " + g3.name, thw.C));
@@ -56172,7 +56185,7 @@
                     var mkLine = function (nm, t) {
                         return nm + ": F(" + t.df + ", " + tw.dfe + ") = " +
                             t.F.toFixed(2) + ", " + _stP(t.p) + ", " +
-                            _stOmniEffFmt(t.ss, t.df, tw.sse, tw.ssTotal, tw.mse);
+                            _stOmniEffFmt(t.ss, t.df, tw.sse, _stTblTotal(tw), tw.mse);
                     };
                     oLines.push(mkLine("Main effect of " + aName, tw.A));
                     oLines.push(mkLine("Main effect of " + bName, tw.B));
