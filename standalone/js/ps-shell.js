@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "histogram-auto-bins-top-edge", since: "3.2.1",
+      label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
     { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
       label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
     { id: "anova-effect-size-table-total", since: "3.2.1",

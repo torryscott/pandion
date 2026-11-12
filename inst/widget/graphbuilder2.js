@@ -3674,10 +3674,15 @@
                 // value - one more and the histogram would carry an
                 // empty bin off its right end.
                 var k = 0;
+                // Stop at the first edge that reaches the maximum (Nov
+                // 2026). The test was "past the maximum", and on non-integer
+                // data the last of the target edges lands ON the maximum,
+                // so one more bin was added to hold only the largest value.
+                var aTol = Math.abs(ai.w) * 1e-9;
                 while (k < 2000) {
                     var ax = aStart + k * ai.w;
+                    if (k > 0 && ax >= ai.max - aTol) { edges.push(Math.max(ax, ai.max)); break; }
                     edges.push(ax);
-                    if (ax > ai.max + 1e-9) break;
                     k++;
                 }
                 if (edges.length >= 2) return edges;
@@ -11810,7 +11815,13 @@
                     ci95c: "difference-adjusted 95 percent intervals, read by whether one group\u2019s mean falls inside the other group\u2019s interval",
                     ci: "confidence intervals"
                 }[String(d.errorBarType || "").toLowerCase()];
-                if (_ebName) {
+                // Only where error bars are drawn (Nov 2026): the sentence
+                // was spoken for histograms, box plots and median charts,
+                // which draw none.
+                var _ebGt = String(d.graphType || "");
+                var _ebDrawn = (_ebGt === "bar" || _ebGt === "line" || _ebGt === "dot") &&
+                    d.freqMode !== true && d.summaryFunc !== "median";
+                if (_ebName && _ebDrawn) {
                     // Repeated measures draws within-subject bars by default
                     // (Nov 2026, the statistical review): say so, and on a
                     // chart with groups say what they cannot be used for.
@@ -16810,8 +16821,13 @@
                                 applied[ai] = false;
                                 return r.res.p;
                             }
-                            corrStat[ai] = { t: tObs[ai], df: dfD,
-                                             basis: "pooled" };
+                            // the row reads left minus right; Dunnett's own
+                            // statistic is treatment minus control, so give
+                            // it the row's sign (it read +3.02 beside d = -1.35)
+                            corrStat[ai] = { t: (r.res && isFinite(r.res.t) && r.res.t < 0)
+                                                    ? -Math.abs(tObs[ai])
+                                                    : ((r.res && isFinite(r.res.t) && r.res.t > 0) ? Math.abs(tObs[ai]) : tObs[ai]),
+                                             df: dfD, basis: "pooled" };
                             var pd = 1 - _gb2Stats.dunnettCdf(
                                 qD, lambdas, dfD);
                             return Math.max(0, Math.min(1, pd));
@@ -55307,7 +55323,7 @@
         }
         function _stStrip0(v, d) {
             return (typeof v === "number" && isFinite(v))
-                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.")
+                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1")
                 : "—";
         }
         function _stP(p) {
@@ -59004,8 +59020,10 @@
                         _rHere = "Here r = " + _stStrip0(rP) + " for " + cellL + ": a " +
                             _xyMagW(Math.abs(rP)) + (rP >= 0 ? " positive" : " negative") +
                             " straight-line relationship by the usual rough guide (r runs from -1 to +1). " +
-                            (rP >= 0 ? "The two variables tend to rise together."
-                                : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall.");
+                            (Math.abs(rP) < 0.1
+                                ? "At this size there is no straight-line tendency to speak of in either direction."
+                                : (rP >= 0 ? "The two variables tend to rise together."
+                                    : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall."));
                     }
                     if (typeof xe.rho === "number" && isFinite(xe.rho)) {
                         _rhoHere = "Here rho = " + _stStrip0(xe.rho) + " for " + cellL +
@@ -59195,7 +59213,8 @@
                 var _coefHereFor = function (ce4, rTxt4) {
                     var mag = Math.abs(ce4.r);
                     var stren = mag >= 0.7 ? "strong" : mag >= 0.4 ? "moderate" : mag >= 0.2 ? "weak" : "very weak";
-                    var dirw = ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
+                    var dirw = mag < 0.1 ? "no consistent tendency for one to rise or fall with the other"
+                        : ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
                         : ce4.r < 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go down")
                         : "no consistent direction";
                     return "Here " + coefWord + " = " + rTxt4 + " between " + ce4.a + " and " + ce4.b +
@@ -59309,7 +59328,7 @@
                         (isFinite(nMin) ? ", pairwise n from " + nMin + " to " + nMax : "") +
                         (_aMS
                             ? ". p values are " + _corrPAdjLabel() + "-adjusted across the full set of pairs."
-                            : ". With this many tests some small p values are expected by chance alone - the Check-graph tab's many-tests caveat applies here too.")));
+                            : ". With this many tests some small p values are expected by chance alone; the Adjust p menu above allows for that.")));
                 // ---- All pairs: the full per-pair listing the Summary
                 // table shows (each off-diagonal pair once).
                 var _pairRows = [];

@@ -30,6 +30,23 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Automatic histogram bins no longer add a last bin for the largest value alone.** <!-- ledger: histogram-auto-bins-top-edge -->
+With automatic bins on data that is not all whole numbers, the bin
+width is the range divided by the target number of bins, and edges were
+laid down until one passed the maximum. The last target edge lands
+exactly on the maximum, so one more bin was added, holding only the
+largest value (or values tied at it): eight values drew seven bins, the
+top one a lone bar, and the axis ran one bin past the data. The edges
+now stop at the maximum, which belongs to the bin below it. The
+histogram shows the target number of bins, and the Frequency table's
+top two intervals become one whose count is their sum; every other
+interval, count and percent is unchanged. Whole-number data and a bin
+count or width set by hand were never affected. Checked by counting
+bins and values on the review's eight-value sample
+(`stats-judgment-check`). Affects: histograms and the Frequency table
+tab on Distribution, both hosts, automatic bins on non-integer data.
+Implemented 2026-11-11. Not yet live on the web app.
+
 **A group with a single value joins the pooled comparisons, as in jamovi's post hoc.** <!-- ledger: cg-single-value-group-pooled-pairs -->
 On Compare Groups, a pooled correction (Tukey, Dunnett, or Bonferroni,
 Holm or FDR with Test on Auto) runs each pair on the one-way ANOVA's
