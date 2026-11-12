@@ -2317,6 +2317,41 @@
                      msb: msb, msw: msw,
                      etaSq: etaSq, k: k, N: N };
         },
+        // Welch's one-way ANOVA (Welch 1951): each group weighted by its
+        // own precision n / s^2, so no common spread is assumed. Needs at
+        // least two values and a positive variance in every group. The
+        // second df is estimated and is rarely whole. Matches R's
+        // oneway.test(var.equal = FALSE) and jamovi's One-Way ANOVA.
+        welchANOVA: function (levels) {
+            if (!levels || levels.length < 2) return null;
+            var gs = [], W = 0, i;
+            for (i = 0; i < levels.length; i++) {
+                var v = (levels[i] || []).filter(isFinite);
+                if (v.length < 1) continue;
+                if (v.length < 2) return null;
+                var m = this.mean(v), s2 = this.variance(v, m);
+                if (!(s2 > 0) || !isFinite(s2)) return null;
+                var w = v.length / s2;
+                gs.push({ n: v.length, m: m, w: w });
+                W += w;
+            }
+            var k = gs.length;
+            if (k < 2 || !(W > 0)) return null;
+            var mw = 0;
+            for (i = 0; i < k; i++) mw += gs[i].w * gs[i].m;
+            mw /= W;
+            var num = 0, lam = 0;
+            for (i = 0; i < k; i++) {
+                num += gs[i].w * (gs[i].m - mw) * (gs[i].m - mw);
+                var q = 1 - gs[i].w / W;
+                lam += q * q / (gs[i].n - 1);
+            }
+            var df1 = k - 1;
+            var F = (num / df1) / (1 + 2 * (k - 2) / (k * k - 1) * lam);
+            var df2 = (k * k - 1) / (3 * lam);
+            if (!isFinite(F) || !isFinite(df2) || !(df2 > 0)) return null;
+            return { F: F, df1: df1, df2: df2, p: this.fSurvival(F, df1, df2), k: k };
+        },
         // Gaussian elimination with partial pivoting for the small
         // normal-equations systems below (p <= ~a*b). Returns the
         // solution vector or null when singular.
@@ -51732,6 +51767,7 @@
             mode: { name: "Mode", sym: "Mo", body: "The value that occurs most often in the sample. When several values share the highest count, the smallest of them is reported and the cell carries an asterisk; when every value occurs exactly once there is no mode and the cell shows a dash.", read: "For measurements with many distinct values the mode says little; it is most useful for counts, ratings and other data with a small set of repeated values. Compare it with the mean and median to see where the bulk of the observations sits." },
             sd: { name: "SD (standard deviation)", sym: "SD", body: "How spread out individual values are around their mean, in the same units as the data. A larger SD means the values are more spread out.", read: "SD describes the spread of the observations, not the precision of the estimated mean; do not confuse it with SE." },
             se: { name: "SE (standard error)", sym: "SE", body: "How much the cell's mean would wobble from sample to sample. For an ordinary independent cell it is the SD divided by the square root of n. Repeated Measures instead uses the selected within-subject or between-subject method; the table footnote names which one.", read: "A smaller SE (a shorter error bar) means the mean is estimated more precisely. In a repeated-measures chart, interpret it using the method named below the table." },
+            welchF: { name: "Welch's F", sym: "F", body: "A one-way ANOVA that does not assume the groups share one spread. Each group counts by its own precision, and the second degrees of freedom are estimated from the data, so they are rarely a whole number.", read: "Read it like the F above it: it asks whether the group means differ anywhere. When the groups' spreads differ a lot it is the safer of the two rows; when the spreads are similar the two rows nearly agree." },
             fStat: { name: "F statistic", sym: "F", body: "A ratio of effect-related variation to error variation. Larger F means the group or condition differences are large relative to the noise used for that test.", read: "A big F signals detectability, not importance; use an effect size to judge how large the difference is." },
             df: { name: "degrees of freedom", sym: "df", body: "How many values in the calculation are free to vary: depending on the test it tracks your sample size, the number of groups, or the size of the table. It sets the shape of the distribution the test uses.", read: "This is bookkeeping for the test, not a finding on its own." },
             omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor on its own; an interaction means one factor's effect depends on the level of the other." },
@@ -57977,12 +58013,40 @@
                             _stEsc(mLn[7])
                         ]);
                     }
+                    // Welch's F (Nov 2026, the statistical review): the
+                    // classic F assumes one spread while the default pair
+                    // test (Welch's t) does not, and jamovi's One-Way ANOVA
+                    // prints both. One-way designs only; no effect size, as
+                    // in jamovi.
+                    var omniWelch = null;
+                    if (mk === "cg" && !data.hasGroups && !omniFaceted && omniRows.length === 1) {
+                        try { omniWelch = _gb2Stats.welchANOVA(_facetCells("").levels); }
+                        catch (_eWf) { omniWelch = null; }
+                    }
+                    if (omniWelch) {
+                        var wPs = _stP(omniWelch.p);
+                        var wSig = omniWelch.p < stAlpha;
+                        var wPd = _stEsc(wPs.replace(/^p = /, "").replace(/^p /, ""));
+                        omniRows.push([
+                            _stCellTerm("Welch's F (spreads may differ)", "welchF",
+                                "This row asks the same question as the row above, do the means differ anywhere, without assuming the groups share one spread. Here " +
+                                wPs + (wSig ? " is below your " : " is not below your ") + stAlphaLbl +
+                                " cutoff. When the groups' spreads differ a lot, this is the row to lean on."),
+                            omniWelch.F.toFixed(2),
+                            String(omniWelch.df1) + ", " + omniWelch.df2.toFixed(2),
+                            (wSig ? omniChip(wPd) : wPd),
+                            _stNum(NaN)
+                        ]);
+                    }
                     var omniSpread = "";
                     if (mk === "cg") {
                         var _osp = null;
                         try { _osp = _stSpreadNote(); } catch (_eOs) {}
                         if (_osp) omniSpread = " The groups' spreads differ a lot (SD from " + _stNum(_osp.lo) +
-                            " to " + _stNum(_osp.hi) + "): these F tests assume the groups share one spread, so read them with that in mind.";
+                            " to " + _stNum(_osp.hi) + "): " +
+                            (omniWelch
+                                ? "the classic F assumes the groups share one spread; Welch's F does not."
+                                : "these F tests assume the groups share one spread, so read them with that in mind.");
                     }
                     omniCardHtml = _stCard("",
                         effSel +
