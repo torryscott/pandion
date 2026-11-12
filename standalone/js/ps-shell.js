@@ -1343,6 +1343,12 @@
   // Tuned against five real laptop geometries (panel-dock-check): a
   // 1366x768 laptop at 125% or 100% scaling goes beside; a 1080p laptop at
   // 125% and a MacBook Air stay below.
+  // In touch mode the same Bar panel is 358px (measured on an iPad: 40px
+  // tabs, 44px chips, a taller picker), so the panel is taken as 350
+  // there. With 280 a sideways iPad sat inside the hysteresis band and
+  // stayed below, and a tap on a bar scrolled the top third of the chart
+  // off the screen; with 350 it goes beside, an upright iPad and a 13 inch
+  // iPad held sideways stay below.
   function dockAutoBeside(cur) {
     var pane = document.querySelector(".ps-main-workspace");
     if (!pane) return cur;
@@ -1350,7 +1356,7 @@
     var lw = chartLogicalWidthPx(), lh = chartLogicalHeightPx();
     if (!(paneH > 0 && paneW > 0 && lw > 0 && lh > 0)) return cur;
     var chartH = lh * Math.min(1, (paneW - 4) / lw) + 64;
-    var frac = (paneH - 280) / chartH;
+    var frac = (paneH - (TOUCH_MODE ? 350 : 280)) / chartH;
     if (frac < 0.55) return true;
     if (frac > 0.65) return false;
     return cur;
@@ -5786,6 +5792,16 @@
   function saveProjectDownload(text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, projectFileName(), "application/json").then(flashSaved, function (e) {
+          if (e && e.name === "AbortError") {
+            showToast("Save cancelled \u00b7 your work is still autosaved here");
+            return;
+          }
+          showToast(String((e && e.message) || "Could not save the project file."), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = projectFileName();
@@ -8697,8 +8713,77 @@
   // (Safari: "Do you want to download...?"), and the notice was already on
   // screen saying Exported while that question stood unanswered. There the
   // app says only what it knows: the file is ready and the browser has it.
+  // ---- Files out of an installed app (the iPad pass, Nov 2026). On an
+  // iPhone or iPad, a page opened from the home screen has no downloads: a
+  // download link on a blob REPLACES THE APP with "Safari can't open the
+  // page" (WebKitBlobResource error 1, measured on iPadOS 27), and the work
+  // on screen is gone with it. The one way out for a file there is the
+  // share sheet (Save to Files, Save Image, AirDrop, Mail), and the share
+  // sheet may only be raised from inside a tap. So there the file is made
+  // first and a small dialog offers it; the tap on its button hands the
+  // file straight over. Closing the dialog is a cancelled save, exactly
+  // like closing the browser's own Save dialog. navigator.standalone is
+  // Safari's own word for "opened from the home screen"; an installed app
+  // on Android or a computer still has downloads and never comes here.
+  var HANDOVER = null;
+  function installedNoDownloads() {
+    try {
+      return window.navigator.standalone === true &&
+        typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" && typeof File === "function";
+    } catch (e) { return false; }
+  }
+  function handOverAbort() {
+    var e = new Error("The file was not saved."); e.name = "AbortError"; return e;
+  }
+  function handOverFile(blob, name, mime) {
+    return new Promise(function (resolve, reject) {
+      var file = null, ok = false;
+      try {
+        file = new File([blob], name, { type: mime || blob.type || "application/octet-stream" });
+        ok = navigator.canShare({ files: [file] });
+      } catch (e) {}
+      if (!ok) {
+        reject(new Error("An app on the home screen cannot hand over this " +
+          "kind of file. Open Pandion Plots in Safari to save " + name + "."));
+        return;
+      }
+      if (HANDOVER) { try { HANDOVER.reject(handOverAbort()); } catch (e2) {} }
+      HANDOVER = { file: file, name: name, resolve: resolve, reject: reject };
+      try {
+        el("ps-handover-name").textContent = name;
+        el("ps-handover-status").textContent = "";
+      } catch (e3) {}
+      openShellDialog("ps-handover-dialog");
+    });
+  }
+  function handOverGo() {
+    var h = HANDOVER;
+    if (!h) return;
+    var p;
+    // Straight from the tap, with nothing awaited before it.
+    try { p = navigator.share({ files: [h.file] }); }
+    catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function () {
+      if (HANDOVER === h) HANDOVER = null;
+      closeShellDialog("ps-handover-dialog");
+      h.resolve("shared");
+    }, function (e) {
+      var st = el("ps-handover-status");
+      if (!st) return;
+      st.textContent = (e && e.name === "AbortError")
+        ? "Not saved yet. The file is still here."
+        : "The share sheet did not open. Try again, or open Pandion Plots in Safari to save this file.";
+    });
+  }
+  function handOverClose() {
+    var h = HANDOVER; HANDOVER = null;
+    closeShellDialog("ps-handover-dialog");
+    if (h) h.reject(handOverAbort());
+  }
   var EXPORT_LAST_HOW = "";
   function exportedNotice(filename, tail) {
+    if (EXPORT_LAST_HOW === "shared") return "Shared " + filename + (tail || "");
     if (EXPORT_LAST_HOW === "downloaded" && touchModeOn())
       return filename + " is ready. If your browser asks, choose Download." +
         (tail || "");
@@ -8721,6 +8806,10 @@
         });
       }).then(function () { EXPORT_LAST_HOW = "saved"; return "saved"; });
     }
+    if (installedNoDownloads())
+      return handOverFile(blob, filename, exportMime(ext)).then(function () {
+        EXPORT_LAST_HOW = "shared"; return "shared";
+      });
     return new Promise(function (resolve, reject) {
       try {
         var url = URL.createObjectURL(blob);
@@ -33108,6 +33197,13 @@
   }
   function shareDownloadText(name, text) {
     var blob = new Blob([text], { type: "text/plain" });
+    if (installedNoDownloads()) {
+      handOverFile(blob, name, "text/plain").then(function () {}, function (e) {
+        if (e && e.name === "AbortError") return;
+        showToast(String((e && e.message) || "Could not save the file."), true);
+      });
+      return;
+    }
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -34210,6 +34306,15 @@
   function saveSetupDownload(name, text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, name, "application/json").then(function () {
+          showToast("Chart setup shared as " + name);
+        }, function (e) {
+          if (e && e.name === "AbortError") return;
+          showToast(String((e && e.message) || "Could not save the chart setup"), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -35186,6 +35291,18 @@
       el("ps-update-close").addEventListener("click", function () {
         closeShellDialog("ps-update-dialog");
       });
+    if (el("ps-handover-dialog")) {
+      el("ps-handover-go").addEventListener("click", handOverGo);
+      el("ps-handover-close").addEventListener("click", handOverClose);
+      // The backdrop and Escape close every dialog (the loop below); for
+      // this one a close is also a cancelled save.
+      el("ps-handover-dialog").addEventListener("pointerdown", function (e) {
+        if (e.target === this) handOverClose();
+      });
+      el("ps-handover-dialog").addEventListener("keydown", function (e) {
+        if (e.key === "Escape") handOverClose();
+      });
+    }
     if (el("ps-update-open"))
       el("ps-update-open").addEventListener("click", function () {
         var target = psUpdatePageUrl(psUpdateState());
@@ -37084,10 +37201,12 @@
   // Key hints beside menu rows ("Cmd/Ctrl+S"). A phone has no keys to press,
   // so in touch mode a row says only what it does. A tablet may have a
   // keyboard, and nothing reports one, so a keyboard is believed when it
-  // shows itself: a modifier, Escape, Tab, an arrow or a function key, none
-  // of which an on-screen keyboard sends. From then on the hints are back
-  // for the rest of the visit. The Keyboard shortcuts sheet lists every key
-  // either way.
+  // shows itself: a modifier, Escape, an arrow or a function key, none of
+  // which an on-screen keyboard sends. Tab is NOT in that list: an iPad's
+  // on-screen keyboard has a Tab key and it sends a trusted keydown
+  // (measured in the simulator, where it also moves the cell editor on).
+  // From then on the hints are back for the rest of the visit. The
+  // Keyboard shortcuts sheet lists every key either way.
   var KEYS_SEEN = false;
   function keyHintsOn() { return !TOUCH_MODE || KEYS_SEEN; }
   function wireKeysSeen() {
@@ -37095,7 +37214,7 @@
       if (KEYS_SEEN || !e || e.isTrusted === false) return;
       var k = String(e.key || "");
       if (e.metaKey || e.ctrlKey || e.altKey || k === "Escape" ||
-          k === "Tab" || k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
+          k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
         KEYS_SEEN = true;
     }, true);
   }
@@ -37174,8 +37293,11 @@
     if (had === on) return false;
     document.body.classList.toggle("ps-touch", on);
     try { touchGridWords(); } catch (eW) {}
+    try { touchStaticWords(); } catch (eSw) {}
     try { touchTipRoom(); } catch (eTr) {}
     try { touchPanelSoon(); } catch (eTp) {}
+    // The dock rule takes a taller panel in touch mode (dockAutoBeside).
+    try { dockResizeCheck(); } catch (eDk) {}
     return true;
   }
   // The chart SURFACE: the drawing and the engine's handles laid over it.
@@ -37386,11 +37508,35 @@
     }
     return null;
   }
+  // A tip or a hint written for a mouse, said for a finger. The same four
+  // swaps the tours make (touchWords in ps-tours.js); nothing else in a
+  // sentence changes.
+  function touchSay(text) {
+    if (!text || !TOUCH_MODE) return text;
+    return String(text)
+      .replace(/\bRight-click\b/g, "Touch and hold").replace(/\bright-click\b/g, "touch and hold")
+      .replace(/\bDouble-click\b/g, "Double-tap").replace(/\bdouble-click\b/g, "double-tap")
+      .replace(/\bClicking\b/g, "Tapping").replace(/\bclicking\b/g, "tapping")
+      .replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
+  }
+  // Static hints in the page that name the mouse are marked
+  // data-ps-touchwords; their own words are kept on the element and put
+  // back when touch mode goes off. Only marked elements are touched, so
+  // nothing a person typed can ever be reworded.
+  function touchStaticWords() {
+    var els = document.querySelectorAll("[data-ps-touchwords]");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.__psWords == null) e.__psWords = e.textContent;
+      var want = touchSay(e.__psWords);
+      if (e.textContent !== want) e.textContent = want;
+    }
+  }
   function touchTipFire(tp, t) {
     var hit = null;
     try { hit = touchTipText(t); } catch (e) {}
     if (!hit) return;
-    showTipFor(hit.node, hit.text);
+    showTipFor(hit.node, touchSay(hit.text));
     if (TIP_FOR !== hit.node) return;      // nothing was shown
     TIP_HELD = true;
     // The lift is the end of a question, not a press of the control.
@@ -38623,6 +38769,14 @@
       // Resource load failures (img, script) also land here and carry no
       // message; they are not what this is for.
       if (!e || !e.message) return;
+      // "Script error." with no file, no line and no error object is how a
+      // browser reports a failure in a script that is not the page's: an
+      // extension, or the browser's own. Safari raises one in the page the
+      // first time its Share button is tapped (measured on iPadOS 27), so
+      // the way to Add to Home Screen began with a red "Something went
+      // wrong". Nothing of the app's can produce it: every script here is
+      // the page's own and reports its real message.
+      if (e.message === "Script error." && !e.filename && !e.lineno && !e.error) return;
       reportGlobalError("error", e.message);
     });
     window.addEventListener("unhandledrejection", function (e) {

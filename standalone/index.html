@@ -3,6 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Opened from an iPhone or iPad home screen, the page reaches the bottom
+     edge of the screen, under the home indicator, and reports no safe area
+     unless the viewport asks to cover the screen. Asked only there
+     (navigator.standalone is Safari's word for it), before the first
+     layout, so a browser tab keeps the viewport it always had. The phone
+     frame's bottom tabs and sheets already pad by the safe area. -->
+<script>
+if (window.navigator.standalone === true) {
+  document.querySelector('meta[name="viewport"]').setAttribute("content",
+    "width=device-width, initial-scale=1, viewport-fit=cover");
+  document.documentElement.setAttribute("data-ps-installed", "");
+}
+</script>
 <!-- Build stamp: EMPTY on this dev page, filled by standalone/build-dist.sh
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
@@ -17,7 +30,7 @@
      bar runs continuously into the chrome below it. -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#192E49">
-<link rel="apple-touch-icon" href="icons/pandion-192.png">
+<link rel="apple-touch-icon" href="icons/pandion-180.png">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEzIDkgMTMxIDEzMSI+PHN0eWxlPkBtZWRpYShwcmVmZXJzLWNvbG9yLXNjaGVtZTpkYXJrKXsud2luZy11cHBlcntmaWxsOiNmZmZmZmZ9LndpbmctdW5kZXJ7ZmlsbDojNmI5ZGU4fX08L3N0eWxlPjxwYXRoIGNsYXNzPSJ3aW5nLXVwcGVyIiBkPSJNMTA1LjksNzYuODFjMCwuMjguNDcuMDguNi4wMywxLjI5LS40OSwzLjE5LTEuNzMsNC40MS0yLjQ4LDkuNzYtNiwxOC4yMy0xNC4wMiwyNi4zOC0yMS45OGwuNjMtLjJjLjI5LDEuMjctLjIsMi43MS0uNTcsMy45Ni02LjExLDIwLjM5LTI3LjQ5LDM4Ljg0LTQ3LjA4LDQ1LjgxLTEwLjc3LDMuODMtMTkuNiw0LjE2LTMwLjc1LDUuMzYtMTUuNjgsMS42OS0zMC40LDYuMjYtMzguNjIsMjAuNzEtLjM2LjYzLTIuMjEsNC42Mi0yLjQ3LDQuNjgtLjQ0LjEtLjYzLTEuNjYtLjY4LTEuOTktMi4xNC0xNC44NSwyLjM5LTMxLjk0LDExLjczLTQzLjYyLDE0LjAyLTE3LjUzLDM0LjEtMjAuMzksNTIuNjUtMzAuNTQsMTIuNTQtNi44NiwyMy41OC0xNS44NiwzMi45Mi0yNi42NmguNDFjLjQyLjI3LS4yNywyLjkxLS40MSwzLjQ1LS43LDIuODUtMS45Miw1LjkyLTMuMTcsOC41Ny0yLjc4LDUuOS02LjYzLDExLjItMTAuODYsMTYuMTJsLS40Ny4xNy4zNS4wM2MxMy45NS05LjMyLDI2LjExLTIxLjQ4LDM1LjI1LTM1LjU2Ljk3LTEuNDksMi4xNC0zLjk3LDMuMjEtNS4yMS4xMi0uMTQuMi0uMzYuNDItLjM0LjE4LjA0LjMxLjk5LjMxLDEuMi4wMywzLjYtMS41NCw5LjA2LTIuNjMsMTIuNTUtNS4zNCwxNy4xNi0xNS42LDMyLjI3LTI5LjA2LDQ0LjA1LS43Ni42Ny0xLjYzLDEuMzgtMi40OCwxLjkyWiIgZmlsbD0iIzE1MmQ1ZSIvPjxwYXRoIGNsYXNzPSJ3aW5nLXVuZGVyIiBkPSJNMTMwLjQsODIuOTRjLjI4LjI4LTEuMjYsMi45Ni0xLjUxLDMuNC04LjYzLDE1LjI3LTI0Ljk1LDI4LjU3LTQxLjc3LDMzLjYzLTE4LjMzLDUuNTEtMzcuMTMuNzctNTUuNSw3LjUzLTEuNjEuNTktMy42OSwxLjc5LTUuMiwyLjItLjIyLjA2LS40Mi4wOC0uNjQuMDYtLjMyLS4zLDEuOTctMy4wMiwyLjI5LTMuMzgsNS43OS02LjQyLDE0LjU5LTEwLjQ1LDIyLjk1LTEyLjI3LDEwLjE0LTIuMjEsMjAuNS0xLjU4LDMwLjY3LTMuNCwxNy4wNy0zLjA1LDMwLjY2LTExLjc5LDQzLjM2LTIzLjEyLDEuNDctMS4zMSwyLjk1LTMuMDEsNC40Ni00LjIxLjI2LS4yMS41NC0uNDguODktLjQ0WiIgZmlsbD0iIzFhNTNjZiIvPjwvc3ZnPg==">
 <style>
   /* ------------------------------------------------------------------ tokens
@@ -5345,6 +5358,41 @@
   body.ps-touch #psroot .gb2-panel [data-gb2-promoted-tabbar="1"] {
     flex-wrap: wrap !important; height: auto !important;
   }
+  /* The 32px floor above replaces a flex item's automatic minimum, which
+     is the width of its own words, so a tab row wider than its panel no
+     longer ran off the end: it SQUEEZED every tab under its label instead
+     (an upright iPad, panel 327px: "Bars", "Border", "Error bars", "Gap"
+     and "Order" printed over each other's edges, "Order" cut). A tab keeps
+     the width of its words and its row wraps, in any panel, whether or
+     not the engine moved the row above the panel body. */
+  body.ps-touch .gb2-panel :is([data-xytab], [data-bs-tab], [data-gs-tab],
+      [data-ya-tab], [data-xa-tab], [data-dp-tab], [data-st-tab], [data-ps-tab],
+      [data-ls-tab], [data-bse-tab], [data-theme-tab]) {
+    flex-shrink: 0;
+  }
+  body.ps-touch .gb2-panel div:has(> :is([data-xytab], [data-bs-tab], [data-gs-tab],
+      [data-ya-tab], [data-xa-tab], [data-dp-tab], [data-st-tab], [data-ps-tab],
+      [data-ls-tab], [data-bse-tab], [data-theme-tab])) {
+    flex-wrap: wrap !important; height: auto !important;
+  }
+  /* A finger can move a column divider. It is 5px wide with a mouse-sized
+     catch area, and the browser took a sideways drag on it for a pan, so
+     on a tablet the three columns were whatever they started as. */
+  body.ps-touch .ps-splitter { touch-action: none; }
+  body.ps-touch .ps-splitter::after { left: -10px; right: -10px; }
+  /* The start cards say all of their second line. It is one line with an
+     ellipsis for a mouse; the touch text size cut it mid-word in the
+     two-column dialog ("A .pand project, .omv, CSV, TSV, or ..."). */
+  body.ps-touch .ps-launch-copy span {
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+  /* Page width and height keep room for their digits. With 16px fields
+     and touch-sized in and cm buttons on the same row, a 295px settings
+     column left the width field 40px and "10.5" read "10.". The unit
+     buttons take a line of their own when the three do not fit. */
+  body.ps-touch .ps-lpage-pair { flex-wrap: wrap; row-gap: 6px; }
+  body.ps-touch .ps-lpage-pair .ps-linsp-inline { flex: 1 1 112px; }
+  body.ps-touch .ps-lpage-pair .ps-lunit-seg { margin-left: auto; }
   /* The panel's title bar is one row drawn for a 700px panel: what is
      being edited on the left, the Applies to switch and the eye on the
      right. In a narrow panel the switch took the room and the title was
@@ -5834,7 +5882,7 @@
                       placeholder="Notes about this section - saved with the project"></textarea>
           </label>
         </div>
-        <div id="ps-pininsp-empty" class="ps-pininsp-hint">Click a page to
+        <div id="ps-pininsp-empty" class="ps-pininsp-hint" data-ps-touchwords>Click a page to
           see when it was kept, where it came from, and your notes on
           it.</div>
         <div id="ps-pininsp-sel" style="display:none;">
@@ -6559,7 +6607,7 @@
       </div>
       <div>
         <h1 id="ps-welcome-title">Welcome to Pandion Plots</h1>
-        <p>Create clear, customizable statistical figures without code.
+        <p data-ps-touchwords>Create clear, customizable statistical figures without code.
            Every part of a chart is editable by clicking it.</p>
         <p class="ps-welcome-privacy">No accounts and no uploads. Your data
            stays on this machine.</p>
@@ -7344,6 +7392,29 @@
         <button type="button" class="ps-btn ps-primary" id="ps-update-open"
                 hidden>Open the download page</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="ps-handover-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-handover-title">
+  <div class="ps-dialog-card" style="max-width:460px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-handover-title">Your file is ready</h2>
+        <p>An app opened from the home screen saves through the share
+           sheet. Choose Save to Files there, or send the file to another
+           app.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-handover-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <p id="ps-handover-name" style="margin:0 0 12px;font-weight:600;overflow-wrap:anywhere;"></p>
+      <div class="ps-inspector-actions">
+        <button type="button" class="ps-btn ps-primary" id="ps-handover-go">Save or share</button>
+      </div>
+      <p id="ps-handover-status" role="status" aria-live="polite" style="margin:10px 0 0;"></p>
     </div>
   </div>
 </div>

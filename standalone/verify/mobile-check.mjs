@@ -1389,6 +1389,8 @@ async function runDevice(browser, dev) {
     {
         const L = result.touch;
         L.panelTitleWhole = false; L.longReadoutInsideScreen = false; L.menuRowsHideKeys = false; L.menuRowsShowKeysOnceSeen = false;
+        L.panelLabelsWhole = false; L.startCardsSayAll = false;
+        let dbgTabs = 'not measured', dbgCards = 'not measured';
         const why = []; let dbgTitle = '', dbgReadout = '', dbgKeys = '';
         const ctx2 = await browser.newContext({ ...profile });
         const p2 = await ctx2.newPage();
@@ -1396,6 +1398,9 @@ async function runDevice(browser, dev) {
         try {
             await p2.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
             await p2.goto(pageUrl); await p2.waitForTimeout(900);
+            const cardsCut = await p2.evaluate(() => [...document.querySelectorAll('.ps-launch-copy span')]
+                .filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.textContent.trim().slice(0, 24)));
+            L.startCardsSayAll = cardsCut.length === 0; dbgCards = cardsCut.length ? cardsCut.length + ' cut (' + cardsCut[0] + '...)' : 'none cut';
             await p2.locator('#ps-welcome-sample').tap(); await p2.waitForTimeout(2400);
 
             // a. the panel title, with the Applies to switch in the bar. A
@@ -1428,7 +1433,9 @@ async function runDevice(browser, dev) {
                         return { panelW: pn ? Math.round(pn.getBoundingClientRect().width) : 0,
                             texts: spans.map(x => x.textContent), cut: spans.filter(x => x.scrollWidth > x.clientWidth + 1).length,
                             scopeW: sr ? Math.round(sr.width) : 0, inside: !!sr && sr.left >= tr.left - 1 && sr.right <= tr.right + 1,
-                            ownLine: !!sr && sr.top >= bottom - 1, rows: Math.round(tr.height) }; });
+                            ownLine: !!sr && sr.top >= bottom - 1, rows: Math.round(tr.height),
+                            squeezed: pn ? [...pn.querySelectorAll('button')].filter(b => b.offsetParent && b.scrollWidth > b.clientWidth + 1 &&
+                                getComputedStyle(b).overflowX === 'visible').map(b => b.textContent.trim().slice(0, 12)) : ['no panel'] }; });
                     if (!ti) why.push('no title bar on the bar panel');
                     else {
                         dbgTitle = '"' + ti.texts.join(' / ') + '", ' + ti.cut + ' cut short, the switch ' + ti.scopeW + ' px wide' + (ti.ownLine ? ' on a line of its own' : ' beside it') + ' in a panel ' + ti.panelW + ' px wide';
@@ -1438,6 +1445,11 @@ async function runDevice(browser, dev) {
                         // in the bar.
                         L.panelTitleWhole = ti.texts.length >= 2 && ti.cut === 0 && ti.scopeW > 60 && ti.inside &&
                             (ti.panelW >= 560 || ti.ownLine);
+                        // No button in the panel is narrower than its own
+                        // words (the touch size floor let a tab shrink
+                        // under its label in a narrow panel).
+                        L.panelLabelsWhole = ti.squeezed.length === 0;
+                        dbgTabs = ti.squeezed.length ? ti.squeezed.length + ' squeezed (' + ti.squeezed.slice(0, 3).join(', ') + ')' : 'none squeezed';
                     }
                 }
             }
@@ -1482,6 +1494,9 @@ async function runDevice(browser, dev) {
                     return [...m.querySelectorAll('button')].map(b => ({ label: ((b.firstElementChild || b).textContent || '').trim(), key: ((b.querySelector('.ps-menu-shortcut') || {}).textContent || '').trim() })); });
             };
             const isKey = k => /Cmd|Ctrl|Shift|Alt|^F\d/.test(k);
+            // Tab is not a keyboard showing itself: an iPad's on-screen
+            // keyboard has a Tab key. The hints must still be off after it.
+            await p2.keyboard.press('Tab'); await p2.waitForTimeout(150);
             const r0 = await fileRows();
             if (!r0) why.push('the File menu did not open');
             else {
@@ -1501,7 +1516,9 @@ async function runDevice(browser, dev) {
         check(dev.id + '/left/title', L.panelTitleWhole, tag + 'the panel title is whole with the Applies to switch in the bar (' + dbgTitle + ')' + note14);
         check(dev.id + '/left/readout', L.longReadoutInsideScreen, tag + 'a readout with a sentence for a name wraps inside the screen (' + dbgReadout + ')' + note14);
         check(dev.id + '/left/keys', L.menuRowsHideKeys && L.menuRowsShowKeysOnceSeen,
-            tag + 'menu rows carry no key hints until a keyboard shows itself (' + dbgKeys + ')' + note14);
+            tag + 'menu rows carry no key hints until a keyboard shows itself, and Tab is not one (' + dbgKeys + ')' + note14);
+        check(dev.id + '/ipad/labels', L.panelLabelsWhole, tag + 'no button in the editing panel is narrower than its own words (' + dbgTabs + ')' + note14);
+        check(dev.id + '/ipad/cards', L.startCardsSayAll, tag + 'the start cards say all of their second line (' + dbgCards + ')' + note14);
     }
 
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
@@ -1576,6 +1593,114 @@ async function runDesktop(browser) {
         'desktop: Save project keeps its key hint, a readout is still one line, and no readout width is set (' + dl.key + ', ' + dl.ws + ', "' + dl.room + '")');
     check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
+}
+
+// ------------------------------------------------ a wide tablet, an installed app
+// Found in real Safari on the iPad and iPhone simulators (the iPad pass,
+// Nov 2026) and pinned here in Chromium: a tablet held sideways, a column
+// divider under a finger, the page size fields, the error a browser raises
+// for a script that is not the page's, and an app opened from the home
+// screen, which has no downloads.
+async function runTabletExtras(browser) {
+    const base = devices['iPad Mini landscape'];
+    const ctx = await browser.newContext({ ...base, viewport: { width: 1180, height: 734 } });
+    const page = await ctx.newPage();
+    const errors = []; page.on('pageerror', e => errors.push(String(e).slice(0, 160)));
+    await page.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+    await page.goto(pageUrl); await page.waitForTimeout(900);
+    await page.locator('#ps-welcome-sample').tap(); await page.waitForTimeout(2600);
+    const client = await ctx.newCDPSession(page);
+    const bar = await page.evaluate(() => { const n = [...document.querySelectorAll('.graphbuilder2-host svg [data-bar-cat]')].filter(e => e.tagName !== 'text' && e.getBoundingClientRect().height > 20)[0];
+        if (!n) return null; const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.6 }; });
+    if (bar) { await page.touchscreen.tap(bar.x, bar.y); await page.waitForTimeout(1400); }
+    const dk = await page.evaluate(() => { const pane = document.querySelector('.ps-main-workspace'), svg = document.querySelector('svg[data-role="gb2-chart-svg"]');
+        const p = document.querySelector('.gb2-panel'); const pr = pane.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+        return { touch: document.body.classList.contains('ps-touch'), beside: document.body.classList.contains('ps-dock-beside'),
+            panel: !!p && p.getBoundingClientRect().height > 40, hiddenTop: Math.round(pr.top - sr.top), hiddenBottom: Math.round(sr.bottom - pr.bottom) }; });
+    check('ipad/dock', !!bar && dk.touch && dk.panel && dk.beside && dk.hiddenTop <= 1 && dk.hiddenBottom <= 1,
+        'a tablet held sideways: a tap on a bar opens the editor beside the chart and the whole chart stays in view (beside ' + dk.beside + ', ' + Math.max(0, dk.hiddenTop) + ' px of the chart above the pane)');
+    // a finger drags the column divider
+    const sp = await page.evaluate(() => { const s = document.querySelector('[data-splitter="rail"]'), r = s.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height * 0.75, w: parseFloat(getComputedStyle(document.querySelector('.ps-app-body')).getPropertyValue('--ps-rail-w')), ta: getComputedStyle(s).touchAction }; });
+    await touchDrag(client, page, sp.x + 7, sp.y, -44, 0); await page.waitForTimeout(500);
+    const w1 = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.ps-app-body')).getPropertyValue('--ps-rail-w')));
+    check('ipad/divider', sp.ta === 'none' && w1 < sp.w - 20,
+        'a finger drags a column divider, from a few pixels beside it (the navigator went from ' + sp.w + ' to ' + w1 + ' px, touch-action ' + sp.ta + ')');
+    // the error a browser raises for a script that is not the page's
+    const er = await page.evaluate(async () => { const txt = () => { const t = document.getElementById('ps-toast'); return t ? t.textContent : ''; };
+        window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }));
+        await new Promise(r => setTimeout(r, 300)); const quiet = !/Something went wrong/.test(txt());
+        window.dispatchEvent(new ErrorEvent('error', { message: 'a real failure', filename: 'x.js', lineno: 3 }));
+        await new Promise(r => setTimeout(r, 300)); return { quiet, loud: /Something went wrong: a real failure/.test(txt()) }; });
+    check('errors/opaque', er.quiet && er.loud,
+        'the empty "Script error." a browser raises for its own scripts shows no notice, and a real failure still does (quiet ' + er.quiet + ', real one shown ' + er.loud + ')');
+    await ctx.close();
+
+    // an upright tablet's settings column: the page size fields
+    const ctxP = await browser.newContext({ ...devices['iPad Mini'], viewport: { width: 820, height: 1094 } });
+    const pp = await ctxP.newPage();
+    await pp.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+    await pp.goto(pageUrl); await pp.waitForTimeout(900);
+    await pp.locator('#ps-welcome-sample').tap(); await pp.waitForTimeout(2400);
+    await pp.evaluate(() => { window.PS_SHELL.addLayout(); }); await pp.waitForTimeout(1500);
+    const lw = await pp.evaluate(() => { const i = document.getElementById('ps-lpage-w'); if (!i || !i.offsetParent) return null;
+        const c = document.createElement('canvas').getContext('2d'); const cs = getComputedStyle(i); c.font = cs.fontSize + ' ' + cs.fontFamily;
+        const need = c.measureText(i.value).width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+        return { value: i.value, need: Math.round(need), has: i.clientWidth }; });
+    check('ipad/pagefield', !!lw && lw.has >= lw.need,
+        'an upright tablet: the page width field has room for its digits (' + (lw ? '"' + lw.value + '" needs ' + lw.need + ' px, the field has ' + lw.has : 'no field') + ')');
+    await ctxP.close();
+
+    // an app opened from the home screen
+    const ctxI = await browser.newContext({ ...devices['iPhone 13'] });
+    const pi = await ctxI.newPage();
+    pi.on('pageerror', e => errors.push('installed: ' + String(e).slice(0, 140)));
+    await pi.addInitScript(() => {
+        try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {}
+        try { Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }); } catch (e) {}
+        try { Object.defineProperty(navigator, 'standalone', { configurable: true, get: () => true }); } catch (e) {}
+        window.__shared = []; window.__downloads = 0;
+        navigator.canShare = () => true;
+        navigator.share = d => { const f = d && d.files && d.files[0]; window.__shared.push(f ? { name: f.name, type: f.type, size: f.size } : null); return Promise.resolve(); };
+        const click = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () { if (this.hasAttribute('download')) { window.__downloads++; return; } return click.call(this); };
+    });
+    await pi.goto(pageUrl); await pi.waitForTimeout(900);
+    const vp = await pi.evaluate(() => ({ vp: document.querySelector('meta[name="viewport"]').content, mark: document.documentElement.hasAttribute('data-ps-installed'),
+        icon: (document.querySelector('link[rel="apple-touch-icon"]') || { getAttribute() { return ''; } }).getAttribute('href') }));
+    check('installed/viewport', /viewport-fit=cover/.test(vp.vp) && vp.mark && /pandion-180\.png$/.test(vp.icon),
+        'installed: the page covers the screen so the bottom tabs clear the home indicator, and the home screen icon is the opaque one (' + vp.vp + ', ' + vp.icon + ')');
+    await pi.locator('#ps-welcome-sample').tap(); await pi.waitForTimeout(2400);
+    await pi.evaluate(() => { document.getElementById('ps-export').click(); }); await pi.waitForTimeout(700);
+    await pi.evaluate(() => { document.getElementById('ps-export-go').click(); });
+    await pi.waitForFunction(() => { const d = document.getElementById('ps-handover-dialog'); return (d && d.style.display === 'flex') || window.__downloads > 0; }, null, { timeout: 15000 }).catch(() => {});
+    const h1 = await pi.evaluate(() => { const d = document.getElementById('ps-handover-dialog');
+        return { open: !!d && d.style.display === 'flex', name: d ? document.getElementById('ps-handover-name').textContent : '', dl: window.__downloads }; });
+    if (h1.open) { await pi.locator('#ps-handover-go').tap(); await pi.waitForTimeout(900); }
+    const h2 = await pi.evaluate(() => { const d = document.getElementById('ps-handover-dialog'), t = document.getElementById('ps-toast');
+        return { open: !!d && d.style.display === 'flex', shared: window.__shared.slice(), dl: window.__downloads, toast: t ? t.textContent : '',
+            exporter: document.getElementById('ps-exporter').style.display }; });
+    check('installed/export', h1.open && /\.(png|svg)$/.test(h1.name) && h2.dl === 0 && h2.shared.length === 1 && !!h2.shared[0] && h2.shared[0].name === h1.name &&
+            h2.shared[0].size > 500 && !h2.open && h2.exporter !== 'flex' && /Shared /.test(h2.toast),
+        'installed: an export is offered in a dialog and handed to the share sheet from the tap, with no download link (' + (h1.name || 'no dialog') + ', ' + h2.shared.length + ' shared, ' + h2.dl + ' download links)');
+    await pi.evaluate(() => { window.PS_SHELL.runCommand('save'); });
+    await pi.waitForFunction(() => { const d = document.getElementById('ps-handover-dialog'); return (d && d.style.display === 'flex') || window.__downloads > 0; }, null, { timeout: 8000 }).catch(() => {});
+    const h3 = await pi.evaluate(() => { const d = document.getElementById('ps-handover-dialog');
+        return { open: !!d && d.style.display === 'flex', name: d ? document.getElementById('ps-handover-name').textContent : '' }; });
+    if (h3.open) { await pi.locator('#ps-handover-go').tap(); await pi.waitForTimeout(700); }
+    const h4 = await pi.evaluate(() => ({ shared: window.__shared.slice(), dl: window.__downloads }));
+    check('installed/project', h3.open && /\.pand$/.test(h3.name) && h4.dl === 0 && h4.shared.length === 2 && h4.shared[1].name === h3.name && h4.shared[1].size > 200,
+        'installed: Save project goes the same way (' + (h3.name || 'no dialog') + ', ' + h4.dl + ' download links)');
+    // closing the dialog is a cancelled save, and the app says so
+    await pi.evaluate(() => { window.PS_SHELL.runCommand('save'); }); await pi.waitForTimeout(700);
+    const c1 = await pi.evaluate(() => { const d = document.getElementById('ps-handover-dialog'); const open = !!d && d.style.display === 'flex';
+        if (open) document.getElementById('ps-handover-close').click(); return open; });
+    await pi.waitForTimeout(500);
+    const c2 = await pi.evaluate(() => ({ open: document.getElementById('ps-handover-dialog').style.display === 'flex', n: window.__shared.length, toast: (document.getElementById('ps-toast') || {}).textContent || '' }));
+    check('installed/cancel', c1 && !c2.open && c2.n === 2 && /Save cancelled/.test(c2.toast),
+        'installed: closing the dialog shares nothing and says the save was cancelled');
+    check('extras/errors', errors.length === 0, 'tablet and installed extras: no page errors ' + errors.slice(0, 2).join(' | '));
+    await ctxI.close();
 }
 
 // ------------------------------------------------------------ the ratchet
@@ -1689,9 +1814,13 @@ for (const dev of DEVICES) {
         }
     }
 }
-if (!CONTROL && !CONTROL_TH && !want.length) {
+// PS_MOBILE_EXTRAS=1 runs the once-only parts beside a narrowed device list
+// (a control against an older page does not need all five profiles).
+if (!CONTROL && !CONTROL_TH && (!want.length || process.env.PS_MOBILE_EXTRAS)) {
     console.log('== desktop (1280 x 800, a mouse)');
     await runDesktop(browser);
+    console.log('== a wide tablet and an installed app');
+    await runTabletExtras(browser);
 }
 await browser.close();
 

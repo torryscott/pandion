@@ -53,10 +53,10 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 28,
+     "targets": 21,
      "under24": [],
      "under24Spaced": 0,
-     "under44": 14,
+     "under44": 7,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -170,7 +170,9 @@
     "panelTitleWhole": true,
     "longReadoutInsideScreen": true,
     "menuRowsHideKeys": true,
-    "menuRowsShowKeysOnceSeen": true
+    "menuRowsShowKeysOnceSeen": true,
+    "panelLabelsWhole": true,
+    "startCardsSayAll": true
    }
   },
   "phone-landscape": {
@@ -336,7 +338,9 @@
     "panelTitleWhole": true,
     "longReadoutInsideScreen": true,
     "menuRowsHideKeys": true,
-    "menuRowsShowKeysOnceSeen": true
+    "menuRowsShowKeysOnceSeen": true,
+    "panelLabelsWhole": true,
+    "startCardsSayAll": true
    }
   },
   "android": {
@@ -389,10 +393,10 @@
      "vh": 839,
      "scrollW": 412,
      "overflowX": false,
-     "targets": 44,
+     "targets": 43,
      "under24": [],
      "under24Spaced": 0,
-     "under44": 27,
+     "under44": 26,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -502,7 +506,9 @@
     "panelTitleWhole": true,
     "longReadoutInsideScreen": true,
     "menuRowsHideKeys": true,
-    "menuRowsShowKeysOnceSeen": true
+    "menuRowsShowKeysOnceSeen": true,
+    "panelLabelsWhole": true,
+    "startCardsSayAll": true
    }
   },
   "tablet": {
@@ -532,10 +538,10 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 38,
+     "targets": 37,
      "under24": [],
      "under24Spaced": 5,
-     "under44": 21,
+     "under44": 20,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -557,10 +563,10 @@
      "vh": 1024,
      "scrollW": 768,
      "overflowX": false,
-     "targets": 64,
+     "targets": 61,
      "under24": [],
      "under24Spaced": 5,
-     "under44": 41,
+     "under44": 38,
      "tinyText": 0,
      "minText": 13,
      "zoomInputs": [],
@@ -637,7 +643,7 @@
      "overflowX": false,
      "targets": 49,
      "under24": [],
-     "under24Spaced": 6,
+     "under24Spaced": 4,
      "under44": 26,
      "tinyText": 1,
      "minText": 10,
@@ -682,7 +688,9 @@
     "panelTitleWhole": true,
     "longReadoutInsideScreen": true,
     "menuRowsHideKeys": true,
-    "menuRowsShowKeysOnceSeen": true
+    "menuRowsShowKeysOnceSeen": true,
+    "panelLabelsWhole": true,
+    "startCardsSayAll": true
    }
   },
   "tablet-landscape": {
@@ -858,7 +866,9 @@
     "panelTitleWhole": true,
     "longReadoutInsideScreen": true,
     "menuRowsHideKeys": true,
-    "menuRowsShowKeysOnceSeen": true
+    "menuRowsShowKeysOnceSeen": true,
+    "panelLabelsWhole": true,
+    "startCardsSayAll": true
    }
   }
  }
