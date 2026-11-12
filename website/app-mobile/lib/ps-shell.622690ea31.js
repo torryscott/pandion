@@ -1343,6 +1343,12 @@
   // Tuned against five real laptop geometries (panel-dock-check): a
   // 1366x768 laptop at 125% or 100% scaling goes beside; a 1080p laptop at
   // 125% and a MacBook Air stay below.
+  // In touch mode the same Bar panel is 358px (measured on an iPad: 40px
+  // tabs, 44px chips, a taller picker), so the panel is taken as 350
+  // there. With 280 a sideways iPad sat inside the hysteresis band and
+  // stayed below, and a tap on a bar scrolled the top third of the chart
+  // off the screen; with 350 it goes beside, an upright iPad and a 13 inch
+  // iPad held sideways stay below.
   function dockAutoBeside(cur) {
     var pane = document.querySelector(".ps-main-workspace");
     if (!pane) return cur;
@@ -1350,7 +1356,7 @@
     var lw = chartLogicalWidthPx(), lh = chartLogicalHeightPx();
     if (!(paneH > 0 && paneW > 0 && lw > 0 && lh > 0)) return cur;
     var chartH = lh * Math.min(1, (paneW - 4) / lw) + 64;
-    var frac = (paneH - 280) / chartH;
+    var frac = (paneH - (TOUCH_MODE ? 350 : 280)) / chartH;
     if (frac < 0.55) return true;
     if (frac > 0.65) return false;
     return cur;
@@ -1377,12 +1383,36 @@
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
     return changed;
   }
-  function dockColumnIsDrawer() {
+  // The drawer frame's one condition, word for word the stylesheet's media
+  // query, so script and styles can never disagree: a window under 760px,
+  // OR a finger on a screen held upright. The second half is the upright
+  // tablet (Torry, Nov 11 2026: "give every upright tablet the phone
+  // frame"): at 820px an upright iPad had the three-column frame with the
+  // chart at 45% in a 345px column, while an upright iPad mini, a few
+  // pixels under the breakpoint, had the phone frame and a full-size
+  // chart. A tablet held sideways keeps the three columns, and so does a
+  // mouse at any width above 760.
+  // The last two clauses are the LARGE PHONE HELD SIDEWAYS (Torry, the
+  // same day: "Fix the large phone held sideways too"). An iPhone Pro Max
+  // is 814 by 380 that way and a Pixel 7 is 863 by 360: wider than 760, so
+  // they had three columns with the chart 252px wide in a pane about 330
+  // by 230, while an iPhone 13 (750 wide) had the phone frame. A phone is
+  // told from a tablet by its SCREEN, not by the window: the screen's
+  // short side is under 480 on every phone and over 600 on every tablet.
+  // The screen is asked rather than the window's height because an
+  // on-screen keyboard shrinks the window in some browsers, and a tablet
+  // held sideways must not turn into a phone while someone types. Two
+  // clauses because iOS reports the screen as held upright whichever way
+  // it is turned (the short side is the device WIDTH) and Android reports
+  // it as it is held (sideways, the short side is the device HEIGHT).
+  var NARROW_MQ = "(max-width: 760px), (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-device-width: 480px), (pointer: coarse) and (max-device-height: 480px)";
+  function narrowFrame() {
     try {
-      return !!(window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches);
-    } catch (e) { return false; }
+      if (window.matchMedia) return !!window.matchMedia(NARROW_MQ).matches;
+    } catch (e) {}
+    return window.innerWidth <= 760;
   }
+  function dockColumnIsDrawer() { return narrowFrame(); }
   function panelDockWanted() { return DOCK_BESIDE; }
   function dockSlot() { return el("ps-engine-dock-slot"); }
   // A panel showing under the chart right now (the engine keeps one
@@ -5786,6 +5816,16 @@
   function saveProjectDownload(text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, projectFileName(), "application/json").then(flashSaved, function (e) {
+          if (e && e.name === "AbortError") {
+            showToast("Save cancelled \u00b7 your work is still autosaved here");
+            return;
+          }
+          showToast(String((e && e.message) || "Could not save the project file."), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = projectFileName();
@@ -8697,8 +8737,77 @@
   // (Safari: "Do you want to download...?"), and the notice was already on
   // screen saying Exported while that question stood unanswered. There the
   // app says only what it knows: the file is ready and the browser has it.
+  // ---- Files out of an installed app (the iPad pass, Nov 2026). On an
+  // iPhone or iPad, a page opened from the home screen has no downloads: a
+  // download link on a blob REPLACES THE APP with "Safari can't open the
+  // page" (WebKitBlobResource error 1, measured on iPadOS 27), and the work
+  // on screen is gone with it. The one way out for a file there is the
+  // share sheet (Save to Files, Save Image, AirDrop, Mail), and the share
+  // sheet may only be raised from inside a tap. So there the file is made
+  // first and a small dialog offers it; the tap on its button hands the
+  // file straight over. Closing the dialog is a cancelled save, exactly
+  // like closing the browser's own Save dialog. navigator.standalone is
+  // Safari's own word for "opened from the home screen"; an installed app
+  // on Android or a computer still has downloads and never comes here.
+  var HANDOVER = null;
+  function installedNoDownloads() {
+    try {
+      return window.navigator.standalone === true &&
+        typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" && typeof File === "function";
+    } catch (e) { return false; }
+  }
+  function handOverAbort() {
+    var e = new Error("The file was not saved."); e.name = "AbortError"; return e;
+  }
+  function handOverFile(blob, name, mime) {
+    return new Promise(function (resolve, reject) {
+      var file = null, ok = false;
+      try {
+        file = new File([blob], name, { type: mime || blob.type || "application/octet-stream" });
+        ok = navigator.canShare({ files: [file] });
+      } catch (e) {}
+      if (!ok) {
+        reject(new Error("An app on the home screen cannot hand over this " +
+          "kind of file. Open Pandion Plots in Safari to save " + name + "."));
+        return;
+      }
+      if (HANDOVER) { try { HANDOVER.reject(handOverAbort()); } catch (e2) {} }
+      HANDOVER = { file: file, name: name, resolve: resolve, reject: reject };
+      try {
+        el("ps-handover-name").textContent = name;
+        el("ps-handover-status").textContent = "";
+      } catch (e3) {}
+      openShellDialog("ps-handover-dialog");
+    });
+  }
+  function handOverGo() {
+    var h = HANDOVER;
+    if (!h) return;
+    var p;
+    // Straight from the tap, with nothing awaited before it.
+    try { p = navigator.share({ files: [h.file] }); }
+    catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function () {
+      if (HANDOVER === h) HANDOVER = null;
+      closeShellDialog("ps-handover-dialog");
+      h.resolve("shared");
+    }, function (e) {
+      var st = el("ps-handover-status");
+      if (!st) return;
+      st.textContent = (e && e.name === "AbortError")
+        ? "Not saved yet. The file is still here."
+        : "The share sheet did not open. Try again, or open Pandion Plots in Safari to save this file.";
+    });
+  }
+  function handOverClose() {
+    var h = HANDOVER; HANDOVER = null;
+    closeShellDialog("ps-handover-dialog");
+    if (h) h.reject(handOverAbort());
+  }
   var EXPORT_LAST_HOW = "";
   function exportedNotice(filename, tail) {
+    if (EXPORT_LAST_HOW === "shared") return "Shared " + filename + (tail || "");
     if (EXPORT_LAST_HOW === "downloaded" && touchModeOn())
       return filename + " is ready. If your browser asks, choose Download." +
         (tail || "");
@@ -8721,6 +8830,10 @@
         });
       }).then(function () { EXPORT_LAST_HOW = "saved"; return "saved"; });
     }
+    if (installedNoDownloads())
+      return handOverFile(blob, filename, exportMime(ext)).then(function () {
+        EXPORT_LAST_HOW = "shared"; return "shared";
+      });
     return new Promise(function (resolve, reject) {
       try {
         var url = URL.createObjectURL(blob);
@@ -9620,7 +9733,7 @@
     // Narrow layout first: the inspector is display:none behind a drawer
     // there, so the old code decorated a 0x0 element. skipFocus, because
     // the focus target below is ours, not the drawer's first tabbable.
-    if (window.innerWidth <= 760) narrowSet("inspector", true);
+    if (narrowFrame()) narrowSet("inspector", true);
     var miss = firstUnsatisfiedRole();
     var def = miss && miss.def;
     if (!def) {
@@ -26989,7 +27102,7 @@
   }
   function layFocusSelectionInspector() {
     if (!laySelectedIds().length) return;
-    if (window.innerWidth <= 760) narrowSet("inspector");
+    if (narrowFrame()) narrowSet("inspector");
     window.setTimeout(function () {
       var input = el("ps-ctx-lx");
       try { input.focus(); input.select(); } catch (ignore) {}
@@ -32343,6 +32456,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    try { phoneStartSync(); } catch (ePs) {}
     if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
@@ -32415,6 +32529,9 @@
     });
     el("ps-welcome-find").addEventListener("click", function () {
       hideWelcome();
+      // On the phone start centre this card is the search half; pasting
+      // a link has a card of its own.
+      if (PHONE_START && FIND_SOURCE === "link") FIND_SOURCE = "rdatasets";
       openFindData();
     });
     // Punch list 20: three cards, one handler. The first still carries
@@ -32480,10 +32597,19 @@
   // load anything on its own, and the fetched file rides the ordinary
   // import path (formats, size gate, the replaced-project offer).
   function linkRequestFromLocation() {
+    // A page with no address at all (the headless DOM smoke) has no link.
+    try {
+      return linkRequestFromParts(window.location.search, window.location.hash, window.location.href);
+    } catch (e) { return null; }
+  }
+  // The same reading for a link that was PASTED (the phone start centre's
+  // Open a shared link): a link to the app carries what to open in the
+  // same words the address bar would.
+  function linkRequestFromParts(search, hash, base) {
     var params, hashParams;
     try {
-      params = new URLSearchParams(window.location.search || "");
-      hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+      params = new URLSearchParams(search || "");
+      hashParams = new URLSearchParams(String(hash || "").replace(/^#/, ""));
     } catch (e) { return null; }
     // Share a link: #pand=<packed project> carries the whole project after
     // the #, and #key=<key> unlocks a locked ?project= file.
@@ -32505,7 +32631,7 @@
       var raw = params.get(kinds[i]);
       if (!raw) continue;
       var u = null;
-      try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
+      try { u = new URL(raw, base); } catch (e2) { u = null; }
       if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
       var req = { kind: kinds[i], url: u.href };
       if (kinds[i] === "project" && hashParams.get("key")) req.key = hashParams.get("key");
@@ -32744,6 +32870,27 @@
     try { u = new URL(raw); } catch (e) { u = null; }
     if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
       findStatus("Enter a full link that starts with https://", true);
+      return;
+    }
+    // A link to the app itself (Share a link, a course page's link) is
+    // not a file: it says what to open. It goes to the same card a tapped
+    // link gets, which names the host before anything is fetched. Only a
+    // link that plainly is one: a project carried after the #, a chart
+    // setup, a ?project= or ?data= that is itself a full link, or an
+    // example on this app's own address. A data file whose address
+    // happens to have a "data" in it is still a data file.
+    var appReq = null;
+    try {
+      var q = new URLSearchParams(u.search || "");
+      var full = function (v) { return /^https?:\/\//i.test(String(v || "")); };
+      var own = u.host === window.location.host || /(^|\.)pandionplots\.com$/i.test(u.host);
+      if (/[#&](pand|setup)=/.test(u.hash) || q.get("config") || full(q.get("project")) ||
+          full(q.get("data")) || (own && q.get("example")))
+        appReq = linkRequestFromParts(u.search, u.hash, u.href);
+    } catch (eApp) { appReq = null; }
+    if (appReq) {
+      closeShellDialog("ps-finddata-dialog");
+      offerOpenLink(appReq);
       return;
     }
     var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
@@ -33108,6 +33255,13 @@
   }
   function shareDownloadText(name, text) {
     var blob = new Blob([text], { type: "text/plain" });
+    if (installedNoDownloads()) {
+      handOverFile(blob, name, "text/plain").then(function () {}, function (e) {
+        if (e && e.name === "AbortError") return;
+        showToast(String((e && e.message) || "Could not save the file."), true);
+      });
+      return;
+    }
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -34210,6 +34364,15 @@
   function saveSetupDownload(name, text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, name, "application/json").then(function () {
+          showToast("Chart setup shared as " + name);
+        }, function (e) {
+          if (e && e.name === "AbortError") return;
+          showToast(String((e && e.message) || "Could not save the chart setup"), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -35186,6 +35349,18 @@
       el("ps-update-close").addEventListener("click", function () {
         closeShellDialog("ps-update-dialog");
       });
+    if (el("ps-handover-dialog")) {
+      el("ps-handover-go").addEventListener("click", handOverGo);
+      el("ps-handover-close").addEventListener("click", handOverClose);
+      // The backdrop and Escape close every dialog (the loop below); for
+      // this one a close is also a cancelled save.
+      el("ps-handover-dialog").addEventListener("pointerdown", function (e) {
+        if (e.target === this) handOverClose();
+      });
+      el("ps-handover-dialog").addEventListener("keydown", function (e) {
+        if (e.key === "Escape") handOverClose();
+      });
+    }
     if (el("ps-update-open"))
       el("ps-update-open").addEventListener("click", function () {
         var target = psUpdatePageUrl(psUpdateState());
@@ -37084,10 +37259,12 @@
   // Key hints beside menu rows ("Cmd/Ctrl+S"). A phone has no keys to press,
   // so in touch mode a row says only what it does. A tablet may have a
   // keyboard, and nothing reports one, so a keyboard is believed when it
-  // shows itself: a modifier, Escape, Tab, an arrow or a function key, none
-  // of which an on-screen keyboard sends. From then on the hints are back
-  // for the rest of the visit. The Keyboard shortcuts sheet lists every key
-  // either way.
+  // shows itself: a modifier, Escape, an arrow or a function key, none of
+  // which an on-screen keyboard sends. Tab is NOT in that list: an iPad's
+  // on-screen keyboard has a Tab key and it sends a trusted keydown
+  // (measured in the simulator, where it also moves the cell editor on).
+  // From then on the hints are back for the rest of the visit. The
+  // Keyboard shortcuts sheet lists every key either way.
   var KEYS_SEEN = false;
   function keyHintsOn() { return !TOUCH_MODE || KEYS_SEEN; }
   function wireKeysSeen() {
@@ -37095,7 +37272,7 @@
       if (KEYS_SEEN || !e || e.isTrusted === false) return;
       var k = String(e.key || "");
       if (e.metaKey || e.ctrlKey || e.altKey || k === "Escape" ||
-          k === "Tab" || k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
+          k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
         KEYS_SEEN = true;
     }, true);
   }
@@ -37174,8 +37351,12 @@
     if (had === on) return false;
     document.body.classList.toggle("ps-touch", on);
     try { touchGridWords(); } catch (eW) {}
+    try { touchStaticWords(); } catch (eSw) {}
+    try { phoneStartSync(); } catch (ePs) {}
     try { touchTipRoom(); } catch (eTr) {}
     try { touchPanelSoon(); } catch (eTp) {}
+    // The dock rule takes a taller panel in touch mode (dockAutoBeside).
+    try { dockResizeCheck(); } catch (eDk) {}
     return true;
   }
   // The chart SURFACE: the drawing and the engine's handles laid over it.
@@ -37386,11 +37567,35 @@
     }
     return null;
   }
+  // A tip or a hint written for a mouse, said for a finger. The same four
+  // swaps the tours make (touchWords in ps-tours.js); nothing else in a
+  // sentence changes.
+  function touchSay(text) {
+    if (!text || !TOUCH_MODE) return text;
+    return String(text)
+      .replace(/\bRight-click\b/g, "Touch and hold").replace(/\bright-click\b/g, "touch and hold")
+      .replace(/\bDouble-click\b/g, "Double-tap").replace(/\bdouble-click\b/g, "double-tap")
+      .replace(/\bClicking\b/g, "Tapping").replace(/\bclicking\b/g, "tapping")
+      .replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
+  }
+  // Static hints in the page that name the mouse are marked
+  // data-ps-touchwords; their own words are kept on the element and put
+  // back when touch mode goes off. Only marked elements are touched, so
+  // nothing a person typed can ever be reworded.
+  function touchStaticWords() {
+    var els = document.querySelectorAll("[data-ps-touchwords]");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.__psWords == null) e.__psWords = e.textContent;
+      var want = touchSay(e.__psWords);
+      if (e.textContent !== want) e.textContent = want;
+    }
+  }
   function touchTipFire(tp, t) {
     var hit = null;
     try { hit = touchTipText(t); } catch (e) {}
     if (!hit) return;
-    showTipFor(hit.node, hit.text);
+    showTipFor(hit.node, touchSay(hit.text));
     if (TIP_FOR !== hit.node) return;      // nothing was shown
     TIP_HELD = true;
     // The lift is the end of a question, not a press of the control.
@@ -37565,8 +37770,91 @@
     } catch (eZh) {}
     touchFloorSweep(document.body);
   }
+  // ---- The phone start centre (Nov 11 2026, Torry from a mockup: "Build
+  // the phone start centre as drawn ... phones only, with Open a project
+  // file leading on a first visit"). The start centre leads with ways to
+  // build from nothing, and a phone is for viewing, sharing and editing.
+  // On a PHONE SCREEN the same cards are put in another order:
+  //   Continue        the autosaved project, filled (absent on a first visit)
+  //   Open            Open a project file, Open a shared link
+  //   Try an example  the three examples
+  //   Start from scratch   Blank data sheet, Paste data, Search open data
+  // The cards are the SAME buttons, moved, so each keeps its one handler
+  // and its id; the moves are real DOM moves, not a visual order, so a
+  // screen reader and the Tab key meet them in the order they are seen.
+  // One card is new, Open a shared link, which opens Open data from the
+  // web on its paste-a-link tab; the old fourth card keeps the search
+  // half. A phone is told by its SCREEN (the short side under 480), not by
+  // the phone frame: an upright tablet has the phone frame and room to
+  // build from scratch, so it keeps the start centre it had.
+  var PHONE_START = false, PHONE_START_KEEP = null;
+  function phoneScreen() {
+    try {
+      return TOUCH_MODE && !!window.matchMedia &&
+        window.matchMedia("(max-device-width: 480px), (max-device-height: 480px)").matches;
+    } catch (e) { return false; }
+  }
+  function phoneStartSync() {
+    var want = phoneScreen();
+    if (want === PHONE_START) return;
+    var body = document.querySelector(".ps-welcome-body");
+    var open = el("ps-welcome-open"), blank = el("ps-welcome-new"),
+        paste = el("ps-welcome-paste"), find = el("ps-welcome-find");
+    var recent = el("ps-recent-section"), examples = el("ps-examples-section");
+    if (!body || !open || !blank || !paste || !find || !recent || !examples) return;
+    var K = PHONE_START_KEEP;
+    if (!K) {
+      K = PHONE_START_KEEP = { start: open.parentNode.parentNode, acts: open.parentNode, wrap: recent.parentNode };
+      K.sec = document.createElement("section");
+      K.sec.className = "ps-welcome-section"; K.sec.id = "ps-scratch-section";
+      K.sec.innerHTML = "<h2>Start from scratch</h2><div class=\"ps-launch-actions\"></div>";
+      K.list = K.sec.lastChild;
+      K.link = document.createElement("button");
+      K.link.type = "button"; K.link.className = "ps-launch-action"; K.link.id = "ps-welcome-link";
+      K.link.innerHTML = "<span class=\"ps-launch-icon\"><svg class=\"ps-icn\" width=\"17\" height=\"17\" " +
+        "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" " +
+        "stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\"/>" +
+        "<path d=\"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\"/></svg></span>" +
+        "<span class=\"ps-launch-copy\"><strong>Open a shared link</strong><span>Paste a link someone sent you</span></span>";
+      K.link.addEventListener("click", function () {
+        hideWelcome();
+        FIND_SOURCE = "link";
+        openFindData();
+      });
+    }
+    function say(node, sel, text) {
+      var n = node.querySelector(sel);
+      if (!n) return;
+      if (n.__psWas == null) n.__psWas = n.textContent;
+      n.textContent = text == null ? n.__psWas : text;
+    }
+    if (want) {
+      body.insertBefore(recent, K.start);
+      K.acts.insertBefore(K.link, open.nextSibling);
+      body.insertBefore(examples, K.start.nextSibling);
+      K.list.appendChild(blank); K.list.appendChild(paste); K.list.appendChild(find);
+      body.insertBefore(K.sec, examples.nextSibling);
+    } else {
+      K.acts.appendChild(blank); K.acts.appendChild(paste); K.acts.appendChild(find);
+      if (K.link.parentNode) K.link.parentNode.removeChild(K.link);
+      if (K.sec.parentNode) K.sec.parentNode.removeChild(K.sec);
+      K.wrap.appendChild(recent); K.wrap.appendChild(examples);
+    }
+    say(K.start, "h2", want ? "Open" : null);
+    say(recent, "h2", want ? "Continue" : null);
+    say(examples, "h2", want ? "Try an example" : null);
+    say(open, "strong", want ? "Open a project file" : null);
+    say(find, "strong", want ? "Search open data" : null);
+    say(find, ".ps-launch-copy span", want ? "Search teaching datasets or Zenodo" : null);
+    // The wrapper the two sections came out of holds only a comment now;
+    // out of the grid, so it leaves no gap.
+    K.wrap.style.display = want ? "none" : "";
+    PHONE_START = want;
+    document.body.classList.toggle("ps-handheld", want);
+  }
   function wireTouch() {
     touchModeSync();
+    try { phoneStartSync(); } catch (ePs0) {}
     wireTouchFloor();
     wireKeysSeen();
     try { touchTipRoom(); } catch (eTr0) {}
@@ -37756,9 +38044,10 @@
   // The find-your-way pass (Nov 2026). On a phone the three unnamed icons
   // were the only way to the menu, the other workspaces and chart setup, half
   // the chart toolbar sat off the right edge, and nothing on screen kept a
-  // chart to the Notebook. PHONE is touch mode AND a window under the 760px
-  // drawer breakpoint: a narrow desktop window and a tablet keep the frame
-  // they had. Everything here is a second handle on something that already
+  // chart to the Notebook. PHONE is touch mode AND the drawer frame
+  // (narrowFrame: under 760px, or a finger on a screen held upright, which
+  // since Nov 11 2026 takes in every upright tablet). A narrow desktop
+  // window and a tablet held sideways keep the frame they had. Everything here is a second handle on something that already
   // exists (the workspace switch, the drawers, the Export button, the
   // toolbar's own buttons), so there is one behavior behind each and the
   // phone frame cannot drift from the desktop one.
@@ -37767,8 +38056,7 @@
   var PHONE_SHEET_FOCUS = null;
   function phoneWanted() {
     try {
-      return TOUCH_MODE && !!window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches;
+      return TOUCH_MODE && narrowFrame();
     } catch (e) { return false; }
   }
   function phoneOn() { return PHONE; }
@@ -38117,7 +38405,7 @@
       });
     }
     try {
-      var mq = window.matchMedia("(max-width: 760px)");
+      var mq = window.matchMedia(NARROW_MQ);
       if (mq.addEventListener) mq.addEventListener("change", phoneRefresh);
       else if (mq.addListener) mq.addListener(phoneRefresh);
     } catch (eMq) {}
@@ -38153,7 +38441,7 @@
     // Widening the window puts everything back in the grid, so a drawer left
     // open would sit on top of the panel it IS.
     window.addEventListener("resize", function () {
-      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null, true);
+      if (NARROW_OPEN && !narrowFrame()) narrowSet(null, true);
     });
   }
   function wireBypassLinks() {
@@ -38170,7 +38458,7 @@
     if (settingsLink && settings)
       settingsLink.addEventListener("click", function (e) {
         e.preventDefault();
-        if (window.innerWidth <= 760) narrowSet("inspector", true);
+        if (narrowFrame()) narrowSet("inspector", true);
         window.requestAnimationFrame(function () { settings.focus(); });
       });
   }
@@ -38623,6 +38911,14 @@
       // Resource load failures (img, script) also land here and carry no
       // message; they are not what this is for.
       if (!e || !e.message) return;
+      // "Script error." with no file, no line and no error object is how a
+      // browser reports a failure in a script that is not the page's: an
+      // extension, or the browser's own. Safari raises one in the page the
+      // first time its Share button is tapped (measured on iPadOS 27), so
+      // the way to Add to Home Screen began with a red "Something went
+      // wrong". Nothing of the app's can produce it: every script here is
+      // the page's own and reports its real message.
+      if (e.message === "Script error." && !e.filename && !e.lineno && !e.error) return;
       reportGlobalError("error", e.message);
     });
     window.addEventListener("unhandledrejection", function (e) {

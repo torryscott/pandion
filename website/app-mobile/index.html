@@ -3,13 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Opened from an iPhone or iPad home screen, the page reaches the bottom
+     edge of the screen, under the home indicator, and reports no safe area
+     unless the viewport asks to cover the screen. Asked only there
+     (navigator.standalone is Safari's word for it), before the first
+     layout, so a browser tab keeps the viewport it always had. The phone
+     frame's bottom tabs and sheets already pad by the safe area. -->
+<script>
+if (window.navigator.standalone === true) {
+  document.querySelector('meta[name="viewport"]').setAttribute("content",
+    "width=device-width, initial-scale=1, viewport-fit=cover");
+  document.documentElement.setAttribute("data-ps-installed", "");
+}
+</script>
 <!-- Build stamp: EMPTY on this dev page, filled by standalone/build-dist.sh
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-11T21:08Z 78fd7eb">
+<meta name="pandion-build" content="2026-11-12T04:38Z d1e860c">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 78fd7eb: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at d1e860c: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a tap edits, a drag moves a part at once, a swipe
      on empty space scrolls, touch and hold still opens the part's menu; a
@@ -19,7 +32,11 @@
      cell's menu starts with Edit value and a shape's with Duplicate; a
      long value readout wraps inside the screen, the editing panel's title
      is whole with its Applies to switch on a line of its own, and menu rows
-     show no keyboard shortcuts until a keyboard is used), so it
+     show no keyboard shortcuts until a keyboard is used; tablet fixes
+     from the iPad pass, the phone frame on every upright tablet and on a
+     large phone held sideways, files out of the home screen app through
+     the share sheet with an opaque home screen icon, and the phone start
+     centre), so it
      can be tried on a real phone before it ships. It does not carry the next-release queue that
      /app-next/ shows. Not linked from the site, not indexed, refreshed or
      removed as the work moves. The app at /app/ is the released one. -->
@@ -27,7 +44,7 @@
 <style>
   body::after {
     content: "Mobile preview";
-    position: fixed; right: 12px; bottom: 30px; z-index: 2147483000;
+    position: fixed; right: 12px; bottom: calc(74px + env(safe-area-inset-bottom, 0px)); z-index: 2147483000;
     background: #375CA0; color: #fff; font: 600 11px/1 system-ui, sans-serif;
     letter-spacing: .02em; padding: 5px 8px; border-radius: 4px;
     pointer-events: none; opacity: .92;
@@ -42,7 +59,7 @@
      bar runs continuously into the chrome below it. -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#192E49">
-<link rel="apple-touch-icon" href="icons/pandion-192.png">
+<link rel="apple-touch-icon" href="icons/pandion-180.png">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEzIDkgMTMxIDEzMSI+PHN0eWxlPkBtZWRpYShwcmVmZXJzLWNvbG9yLXNjaGVtZTpkYXJrKXsud2luZy11cHBlcntmaWxsOiNmZmZmZmZ9LndpbmctdW5kZXJ7ZmlsbDojNmI5ZGU4fX08L3N0eWxlPjxwYXRoIGNsYXNzPSJ3aW5nLXVwcGVyIiBkPSJNMTA1LjksNzYuODFjMCwuMjguNDcuMDguNi4wMywxLjI5LS40OSwzLjE5LTEuNzMsNC40MS0yLjQ4LDkuNzYtNiwxOC4yMy0xNC4wMiwyNi4zOC0yMS45OGwuNjMtLjJjLjI5LDEuMjctLjIsMi43MS0uNTcsMy45Ni02LjExLDIwLjM5LTI3LjQ5LDM4Ljg0LTQ3LjA4LDQ1LjgxLTEwLjc3LDMuODMtMTkuNiw0LjE2LTMwLjc1LDUuMzYtMTUuNjgsMS42OS0zMC40LDYuMjYtMzguNjIsMjAuNzEtLjM2LjYzLTIuMjEsNC42Mi0yLjQ3LDQuNjgtLjQ0LjEtLjYzLTEuNjYtLjY4LTEuOTktMi4xNC0xNC44NSwyLjM5LTMxLjk0LDExLjczLTQzLjYyLDE0LjAyLTE3LjUzLDM0LjEtMjAuMzksNTIuNjUtMzAuNTQsMTIuNTQtNi44NiwyMy41OC0xNS44NiwzMi45Mi0yNi42NmguNDFjLjQyLjI3LS4yNywyLjkxLS40MSwzLjQ1LS43LDIuODUtMS45Miw1LjkyLTMuMTcsOC41Ny0yLjc4LDUuOS02LjYzLDExLjItMTAuODYsMTYuMTJsLS40Ny4xNy4zNS4wM2MxMy45NS05LjMyLDI2LjExLTIxLjQ4LDM1LjI1LTM1LjU2Ljk3LTEuNDksMi4xNC0zLjk3LDMuMjEtNS4yMS4xMi0uMTQuMi0uMzYuNDItLjM0LjE4LjA0LjMxLjk5LjMxLDEuMi4wMywzLjYtMS41NCw5LjA2LTIuNjMsMTIuNTUtNS4zNCwxNy4xNi0xNS42LDMyLjI3LTI5LjA2LDQ0LjA1LS43Ni42Ny0xLjYzLDEuMzgtMi40OCwxLjkyWiIgZmlsbD0iIzE1MmQ1ZSIvPjxwYXRoIGNsYXNzPSJ3aW5nLXVuZGVyIiBkPSJNMTMwLjQsODIuOTRjLjI4LjI4LTEuMjYsMi45Ni0xLjUxLDMuNC04LjYzLDE1LjI3LTI0Ljk1LDI4LjU3LTQxLjc3LDMzLjYzLTE4LjMzLDUuNTEtMzcuMTMuNzctNTUuNSw3LjUzLTEuNjEuNTktMy42OSwxLjc5LTUuMiwyLjItLjIyLjA2LS40Mi4wOC0uNjQuMDYtLjMyLS4zLDEuOTctMy4wMiwyLjI5LTMuMzgsNS43OS02LjQyLDE0LjU5LTEwLjQ1LDIyLjk1LTEyLjI3LDEwLjE0LTIuMjEsMjAuNS0xLjU4LDMwLjY3LTMuNCwxNy4wNy0zLjA1LDMwLjY2LTExLjc5LDQzLjM2LTIzLjEyLDEuNDctMS4zMSwyLjk1LTMuMDEsNC40Ni00LjIxLjI2LS4yMS41NC0uNDguODktLjQ0WiIgZmlsbD0iIzFhNTNjZiIvPjwvc3ZnPg==">
 <style>
   /* ------------------------------------------------------------------ tokens
@@ -4590,7 +4607,14 @@
     background: rgba(20, 32, 46, 0.42);
   }
   #ps-narrow-scrim[hidden] { display: none; }
-  @media (max-width: 760px) {
+  /* The second clause of this query is the upright tablet (Nov 11 2026): a
+     finger on a screen held upright gets the drawer frame at any width,
+     and with it the phone frame below. The last two are the large phone
+     held sideways, which is wider than 760: a phone is told by its screen
+     (short side under 480), asked as the device's width for iOS and as
+     its height for Android. The shell tests the same words (NARROW_MQ in
+     ps-shell.js); change both or neither. */
+  @media (max-width: 760px), (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-device-width: 480px), (pointer: coarse) and (max-device-height: 480px) {
     /* Let user text spacing grow the chrome instead of overlapping a fixed
        row. Keep each density's usual minimum heights. */
     .ps-page {
@@ -5023,9 +5047,10 @@
 
   /* ------------------------------------------------------------------
      The phone frame (the find-your-way pass, Nov 2026). body.ps-phone is
-     set by the shell when the primary pointer is a finger AND the window
-     is under the 760px drawer breakpoint; a narrow desktop window keeps
-     the frame above, and so does a tablet. Seven things, each ruled on
+     set by the shell when the primary pointer is a finger AND the drawer
+     frame above is on (under 760px, or held upright, which takes in every
+     upright tablet); a narrow desktop window keeps the frame above, and so
+     does a tablet held sideways. Seven things, each ruled on
      from a mockup: the four workspaces as named tabs along the bottom;
      one top row (Menu, the project and its state, Keep, Export) where
      there were two, with Open and Save project inside Menu; a Keep
@@ -5370,6 +5395,49 @@
   body.ps-touch #psroot .gb2-panel [data-gb2-promoted-tabbar="1"] {
     flex-wrap: wrap !important; height: auto !important;
   }
+  /* The 32px floor above replaces a flex item's automatic minimum, which
+     is the width of its own words, so a tab row wider than its panel no
+     longer ran off the end: it SQUEEZED every tab under its label instead
+     (an upright iPad, panel 327px: "Bars", "Border", "Error bars", "Gap"
+     and "Order" printed over each other's edges, "Order" cut). A tab keeps
+     the width of its words and its row wraps, in any panel, whether or
+     not the engine moved the row above the panel body. */
+  body.ps-touch .gb2-panel :is([data-xytab], [data-bs-tab], [data-gs-tab],
+      [data-ya-tab], [data-xa-tab], [data-dp-tab], [data-st-tab], [data-ps-tab],
+      [data-ls-tab], [data-bse-tab], [data-theme-tab]) {
+    flex-shrink: 0;
+  }
+  body.ps-touch .gb2-panel div:has(> :is([data-xytab], [data-bs-tab], [data-gs-tab],
+      [data-ya-tab], [data-xa-tab], [data-dp-tab], [data-st-tab], [data-ps-tab],
+      [data-ls-tab], [data-bse-tab], [data-theme-tab])) {
+    flex-wrap: wrap !important; height: auto !important;
+  }
+  /* A finger can move a column divider. It is 5px wide with a mouse-sized
+     catch area, and the browser took a sideways drag on it for a pan, so
+     on a tablet the three columns were whatever they started as. */
+  body.ps-touch .ps-splitter { touch-action: none; }
+  body.ps-touch .ps-splitter::after { left: -10px; right: -10px; }
+  /* The phone start centre (body.ps-handheld, set by the shell on a phone
+     screen). The cards are moved by the shell; the stylesheet fills the
+     Continue card, since it leads. */
+  body.ps-handheld #ps-welcome-continue {
+    min-height: 56px; color: var(--ps-s0); background: var(--ps-accent); border-color: var(--ps-accent);
+  }
+  body.ps-handheld #ps-welcome-continue .ps-recent-name,
+  body.ps-handheld #ps-welcome-continue .ps-recent-meta { color: var(--ps-s0); }
+  /* The start cards say all of their second line. It is one line with an
+     ellipsis for a mouse; the touch text size cut it mid-word in the
+     two-column dialog ("A .pand project, .omv, CSV, TSV, or ..."). */
+  body.ps-touch .ps-launch-copy span {
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+  /* Page width and height keep room for their digits. With 16px fields
+     and touch-sized in and cm buttons on the same row, a 295px settings
+     column left the width field 40px and "10.5" read "10.". The unit
+     buttons take a line of their own when the three do not fit. */
+  body.ps-touch .ps-lpage-pair { flex-wrap: wrap; row-gap: 6px; }
+  body.ps-touch .ps-lpage-pair .ps-linsp-inline { flex: 1 1 112px; }
+  body.ps-touch .ps-lpage-pair .ps-lunit-seg { margin-left: auto; }
   /* The panel's title bar is one row drawn for a 700px panel: what is
      being edited on the left, the Applies to switch and the eye on the
      right. In a narrow panel the switch took the room and the title was
@@ -5859,7 +5927,7 @@
                       placeholder="Notes about this section - saved with the project"></textarea>
           </label>
         </div>
-        <div id="ps-pininsp-empty" class="ps-pininsp-hint">Click a page to
+        <div id="ps-pininsp-empty" class="ps-pininsp-hint" data-ps-touchwords>Click a page to
           see when it was kept, where it came from, and your notes on
           it.</div>
         <div id="ps-pininsp-sel" style="display:none;">
@@ -6584,7 +6652,7 @@
       </div>
       <div>
         <h1 id="ps-welcome-title">Welcome to Pandion Plots</h1>
-        <p>Create clear, customizable statistical figures without code.
+        <p data-ps-touchwords>Create clear, customizable statistical figures without code.
            Every part of a chart is editable by clicking it.</p>
         <p class="ps-welcome-privacy">No accounts and no uploads. Your data
            stays on this machine.</p>
@@ -7373,6 +7441,29 @@
   </div>
 </div>
 
+<div id="ps-handover-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-handover-title">
+  <div class="ps-dialog-card" style="max-width:460px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-handover-title">Your file is ready</h2>
+        <p>An app opened from the home screen saves through the share
+           sheet. Choose Save to Files there, or send the file to another
+           app.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-handover-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <p id="ps-handover-name" style="margin:0 0 12px;font-weight:600;overflow-wrap:anywhere;"></p>
+      <div class="ps-inspector-actions">
+        <button type="button" class="ps-btn ps-primary" id="ps-handover-go">Save or share</button>
+      </div>
+      <p id="ps-handover-status" role="status" aria-live="polite" style="margin:10px 0 0;"></p>
+    </div>
+  </div>
+</div>
+
 <div id="ps-whatsnew-dialog" class="ps-dialog-overlay" role="dialog"
      aria-modal="true" aria-labelledby="ps-whatsnew-title">
   <div class="ps-dialog-card" style="max-width:560px;">
@@ -7764,6 +7855,6 @@
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.061ded7503.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.9447bf8ca7.js"></script>
+<script src="lib/ps-shell.622690ea31.js"></script>
 </body>
 </html>
