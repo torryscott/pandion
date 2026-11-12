@@ -32456,6 +32456,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    try { phoneStartSync(); } catch (ePs) {}
     if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
@@ -32528,6 +32529,9 @@
     });
     el("ps-welcome-find").addEventListener("click", function () {
       hideWelcome();
+      // On the phone start centre this card is the search half; pasting
+      // a link has a card of its own.
+      if (PHONE_START && FIND_SOURCE === "link") FIND_SOURCE = "rdatasets";
       openFindData();
     });
     // Punch list 20: three cards, one handler. The first still carries
@@ -32593,10 +32597,19 @@
   // load anything on its own, and the fetched file rides the ordinary
   // import path (formats, size gate, the replaced-project offer).
   function linkRequestFromLocation() {
+    // A page with no address at all (the headless DOM smoke) has no link.
+    try {
+      return linkRequestFromParts(window.location.search, window.location.hash, window.location.href);
+    } catch (e) { return null; }
+  }
+  // The same reading for a link that was PASTED (the phone start centre's
+  // Open a shared link): a link to the app carries what to open in the
+  // same words the address bar would.
+  function linkRequestFromParts(search, hash, base) {
     var params, hashParams;
     try {
-      params = new URLSearchParams(window.location.search || "");
-      hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+      params = new URLSearchParams(search || "");
+      hashParams = new URLSearchParams(String(hash || "").replace(/^#/, ""));
     } catch (e) { return null; }
     // Share a link: #pand=<packed project> carries the whole project after
     // the #, and #key=<key> unlocks a locked ?project= file.
@@ -32618,7 +32631,7 @@
       var raw = params.get(kinds[i]);
       if (!raw) continue;
       var u = null;
-      try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
+      try { u = new URL(raw, base); } catch (e2) { u = null; }
       if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
       var req = { kind: kinds[i], url: u.href };
       if (kinds[i] === "project" && hashParams.get("key")) req.key = hashParams.get("key");
@@ -32857,6 +32870,27 @@
     try { u = new URL(raw); } catch (e) { u = null; }
     if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
       findStatus("Enter a full link that starts with https://", true);
+      return;
+    }
+    // A link to the app itself (Share a link, a course page's link) is
+    // not a file: it says what to open. It goes to the same card a tapped
+    // link gets, which names the host before anything is fetched. Only a
+    // link that plainly is one: a project carried after the #, a chart
+    // setup, a ?project= or ?data= that is itself a full link, or an
+    // example on this app's own address. A data file whose address
+    // happens to have a "data" in it is still a data file.
+    var appReq = null;
+    try {
+      var q = new URLSearchParams(u.search || "");
+      var full = function (v) { return /^https?:\/\//i.test(String(v || "")); };
+      var own = u.host === window.location.host || /(^|\.)pandionplots\.com$/i.test(u.host);
+      if (/[#&](pand|setup)=/.test(u.hash) || q.get("config") || full(q.get("project")) ||
+          full(q.get("data")) || (own && q.get("example")))
+        appReq = linkRequestFromParts(u.search, u.hash, u.href);
+    } catch (eApp) { appReq = null; }
+    if (appReq) {
+      closeShellDialog("ps-finddata-dialog");
+      offerOpenLink(appReq);
       return;
     }
     var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
@@ -37318,6 +37352,7 @@
     document.body.classList.toggle("ps-touch", on);
     try { touchGridWords(); } catch (eW) {}
     try { touchStaticWords(); } catch (eSw) {}
+    try { phoneStartSync(); } catch (ePs) {}
     try { touchTipRoom(); } catch (eTr) {}
     try { touchPanelSoon(); } catch (eTp) {}
     // The dock rule takes a taller panel in touch mode (dockAutoBeside).
@@ -37735,8 +37770,91 @@
     } catch (eZh) {}
     touchFloorSweep(document.body);
   }
+  // ---- The phone start centre (Nov 11 2026, Torry from a mockup: "Build
+  // the phone start centre as drawn ... phones only, with Open a project
+  // file leading on a first visit"). The start centre leads with ways to
+  // build from nothing, and a phone is for viewing, sharing and editing.
+  // On a PHONE SCREEN the same cards are put in another order:
+  //   Continue        the autosaved project, filled (absent on a first visit)
+  //   Open            Open a project file, Open a shared link
+  //   Try an example  the three examples
+  //   Start from scratch   Blank data sheet, Paste data, Search open data
+  // The cards are the SAME buttons, moved, so each keeps its one handler
+  // and its id; the moves are real DOM moves, not a visual order, so a
+  // screen reader and the Tab key meet them in the order they are seen.
+  // One card is new, Open a shared link, which opens Open data from the
+  // web on its paste-a-link tab; the old fourth card keeps the search
+  // half. A phone is told by its SCREEN (the short side under 480), not by
+  // the phone frame: an upright tablet has the phone frame and room to
+  // build from scratch, so it keeps the start centre it had.
+  var PHONE_START = false, PHONE_START_KEEP = null;
+  function phoneScreen() {
+    try {
+      return TOUCH_MODE && !!window.matchMedia &&
+        window.matchMedia("(max-device-width: 480px), (max-device-height: 480px)").matches;
+    } catch (e) { return false; }
+  }
+  function phoneStartSync() {
+    var want = phoneScreen();
+    if (want === PHONE_START) return;
+    var body = document.querySelector(".ps-welcome-body");
+    var open = el("ps-welcome-open"), blank = el("ps-welcome-new"),
+        paste = el("ps-welcome-paste"), find = el("ps-welcome-find");
+    var recent = el("ps-recent-section"), examples = el("ps-examples-section");
+    if (!body || !open || !blank || !paste || !find || !recent || !examples) return;
+    var K = PHONE_START_KEEP;
+    if (!K) {
+      K = PHONE_START_KEEP = { start: open.parentNode.parentNode, acts: open.parentNode, wrap: recent.parentNode };
+      K.sec = document.createElement("section");
+      K.sec.className = "ps-welcome-section"; K.sec.id = "ps-scratch-section";
+      K.sec.innerHTML = "<h2>Start from scratch</h2><div class=\"ps-launch-actions\"></div>";
+      K.list = K.sec.lastChild;
+      K.link = document.createElement("button");
+      K.link.type = "button"; K.link.className = "ps-launch-action"; K.link.id = "ps-welcome-link";
+      K.link.innerHTML = "<span class=\"ps-launch-icon\"><svg class=\"ps-icn\" width=\"17\" height=\"17\" " +
+        "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" " +
+        "stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\"/>" +
+        "<path d=\"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\"/></svg></span>" +
+        "<span class=\"ps-launch-copy\"><strong>Open a shared link</strong><span>Paste a link someone sent you</span></span>";
+      K.link.addEventListener("click", function () {
+        hideWelcome();
+        FIND_SOURCE = "link";
+        openFindData();
+      });
+    }
+    function say(node, sel, text) {
+      var n = node.querySelector(sel);
+      if (!n) return;
+      if (n.__psWas == null) n.__psWas = n.textContent;
+      n.textContent = text == null ? n.__psWas : text;
+    }
+    if (want) {
+      body.insertBefore(recent, K.start);
+      K.acts.insertBefore(K.link, open.nextSibling);
+      body.insertBefore(examples, K.start.nextSibling);
+      K.list.appendChild(blank); K.list.appendChild(paste); K.list.appendChild(find);
+      body.insertBefore(K.sec, examples.nextSibling);
+    } else {
+      K.acts.appendChild(blank); K.acts.appendChild(paste); K.acts.appendChild(find);
+      if (K.link.parentNode) K.link.parentNode.removeChild(K.link);
+      if (K.sec.parentNode) K.sec.parentNode.removeChild(K.sec);
+      K.wrap.appendChild(recent); K.wrap.appendChild(examples);
+    }
+    say(K.start, "h2", want ? "Open" : null);
+    say(recent, "h2", want ? "Continue" : null);
+    say(examples, "h2", want ? "Try an example" : null);
+    say(open, "strong", want ? "Open a project file" : null);
+    say(find, "strong", want ? "Search open data" : null);
+    say(find, ".ps-launch-copy span", want ? "Search teaching datasets or Zenodo" : null);
+    // The wrapper the two sections came out of holds only a comment now;
+    // out of the grid, so it leaves no gap.
+    K.wrap.style.display = want ? "none" : "";
+    PHONE_START = want;
+    document.body.classList.toggle("ps-handheld", want);
+  }
   function wireTouch() {
     touchModeSync();
+    try { phoneStartSync(); } catch (ePs0) {}
     wireTouchFloor();
     wireKeysSeen();
     try { touchTipRoom(); } catch (eTr0) {}

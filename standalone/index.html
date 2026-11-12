@@ -5388,6 +5388,14 @@ if (window.navigator.standalone === true) {
      on a tablet the three columns were whatever they started as. */
   body.ps-touch .ps-splitter { touch-action: none; }
   body.ps-touch .ps-splitter::after { left: -10px; right: -10px; }
+  /* The phone start centre (body.ps-handheld, set by the shell on a phone
+     screen). The cards are moved by the shell; the stylesheet fills the
+     Continue card, since it leads. */
+  body.ps-handheld #ps-welcome-continue {
+    min-height: 56px; color: var(--ps-s0); background: var(--ps-accent); border-color: var(--ps-accent);
+  }
+  body.ps-handheld #ps-welcome-continue .ps-recent-name,
+  body.ps-handheld #ps-welcome-continue .ps-recent-meta { color: var(--ps-s0); }
   /* The start cards say all of their second line. It is one line with an
      ellipsis for a mouse; the touch text size cut it mid-word in the
      two-column dialog ("A .pand project, .omv, CSV, TSV, or ..."). */

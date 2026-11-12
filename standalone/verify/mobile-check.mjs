@@ -1391,8 +1391,12 @@ async function runDevice(browser, dev) {
     {
         const L = result.touch;
         L.panelTitleWhole = false; L.longReadoutInsideScreen = false; L.menuRowsHideKeys = false; L.menuRowsShowKeysOnceSeen = false;
-        L.panelLabelsWhole = false; L.startCardsSayAll = false;
-        let dbgTabs = 'not measured', dbgCards = 'not measured';
+        L.panelLabelsWhole = false; L.startCardsSayAll = false; L.startCentreFits = false; L.startContinueLeads = false; L.sharedLinkCardOpens = false;
+        let dbgTabs = 'not measured', dbgCards = 'not measured', dbgStart = 'not measured', dbgLink = 'not measured';
+        const phoneScreen = Math.min(profile.viewport.width, profile.viewport.height) <= 480;
+        const startRead = () => { const b = document.querySelector('.ps-welcome-body'); const vis = e => e.offsetParent !== null;
+            return { handheld: document.body.classList.contains('ps-handheld'), link: !!document.getElementById('ps-welcome-link'),
+                order: [...b.querySelectorAll('h2, button')].filter(vis).map(e => e.tagName === 'H2' ? '[' + e.textContent.trim() + ']' : (e.querySelector('strong, .ps-recent-name') || e).textContent.trim()) }; };
         const why = []; let dbgTitle = '', dbgReadout = '', dbgKeys = '';
         const ctx2 = await browser.newContext({ ...profile });
         const p2 = await ctx2.newPage();
@@ -1403,6 +1407,14 @@ async function runDevice(browser, dev) {
             const cardsCut = await p2.evaluate(() => [...document.querySelectorAll('.ps-launch-copy span')]
                 .filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.textContent.trim().slice(0, 24)));
             L.startCardsSayAll = cardsCut.length === 0; dbgCards = cardsCut.length ? cardsCut.length + ' cut (' + cardsCut[0] + '...)' : 'none cut';
+            // The start centre. A phone SCREEN (short side under 480) gets
+            // the phone order; a tablet, upright or not, keeps the full one.
+            const st0 = await p2.evaluate(startRead);
+            const o0 = st0.order.join('|');
+            L.startCentreFits = st0.handheld === phoneScreen && (phoneScreen
+                ? o0 === '[Open]|Open a project file|Open a shared link|[Try an example]|Student wellbeing survey|Dose response study|Reaction time practice|[Start from scratch]|Blank data sheet|Paste data|Search open data'
+                : o0.indexOf('[Start]|Open project or data|Blank data sheet|Paste data|Open data from the web') === 0 && !st0.link);
+            dbgStart = 'first visit: ' + st0.order.slice(0, 4).join(', ');
             await p2.locator('#ps-welcome-sample').tap(); await p2.waitForTimeout(2400);
 
             // a. the panel title, with the Applies to switch in the bar. A
@@ -1512,9 +1524,40 @@ async function runDevice(browser, dev) {
                 dbgKeys += '; after a key, Save project reads ' + (save ? '"' + save.key + '"' : 'nothing');
                 await p2.keyboard.press('Escape'); await p2.waitForTimeout(200);
             }
+            // d. coming back. The work above was autosaved, so a new tab
+            //    has something to continue: on a phone screen Continue
+            //    leads; elsewhere it is where it always was. Then the new
+            //    card: it opens the paste-a-link tab, and a pasted link to
+            //    the app opens what the link names.
+            await p2.waitForTimeout(1200);
+            const p3 = await ctx2.newPage();
+            p3.on('pageerror', e => errors.push('coming back: ' + String(e).slice(0, 140)));
+            await p3.goto(pageUrl); await p3.waitForTimeout(1100);
+            const st1 = await p3.evaluate(startRead);
+            const o1 = st1.order.join('|');
+            L.startContinueLeads = phoneScreen
+                ? o1.indexOf('[Continue]|Continue autosaved project|[Open]|Open a project file|Open a shared link|[Try an example]') === 0
+                : o1.indexOf('[Start]|Open project or data') === 0 && o1.indexOf('Continue autosaved project') > 0;
+            dbgStart += '; coming back: ' + st1.order.slice(0, 3).join(', ');
+            if (!phoneScreen) { L.sharedLinkCardOpens = !st1.link; dbgLink = 'no such card off a phone'; }
+            else {
+                await p3.locator('#ps-welcome-link').tap(); await p3.waitForTimeout(500);
+                const lk = await p3.evaluate(() => ({ dlg: document.getElementById('ps-finddata-dialog').style.display === 'flex',
+                    row: !document.getElementById('ps-finddata-linkrow').hidden, focus: document.activeElement && document.activeElement.id }));
+                await p3.evaluate(() => { document.getElementById('ps-finddata-link-url').value = 'https://pandionplots.com/app/?example=practice';
+                    document.getElementById('ps-finddata-link-open').click(); });
+                await p3.waitForTimeout(2600);
+                const opened = await p3.evaluate(() => ({ title: document.title, find: document.getElementById('ps-finddata-dialog').style.display }));
+                L.sharedLinkCardOpens = lk.dlg && lk.row && lk.focus === 'ps-finddata-link-url' && /Reaction time practice/.test(opened.title) && opened.find !== 'flex';
+                dbgLink = 'paste tab ' + lk.row + ', field focused ' + (lk.focus === 'ps-finddata-link-url') + ', a pasted app link opened "' + opened.title.slice(0, 30) + '"';
+            }
         } catch (e) { why.push(String(e && e.message || e).slice(0, 120)); }
         await ctx2.close().catch(() => {});
         const note14 = why.length ? ' [' + why.join('; ') + ']' : '';
+        check(dev.id + '/start/order', L.startCentreFits && L.startContinueLeads,
+            tag + (phoneScreen ? 'a phone screen gets the phone start centre: Continue when there is something to continue, then Open, Try an example and Start from scratch'
+                : 'not a phone screen: the start centre is the full one') + ' (' + dbgStart + ')' + note14);
+        check(dev.id + '/start/link', L.sharedLinkCardOpens, tag + 'Open a shared link opens the paste-a-link tab and a pasted link to the app opens what it names (' + dbgLink + ')' + note14);
         check(dev.id + '/left/title', L.panelTitleWhole, tag + 'the panel title is whole with the Applies to switch in the bar (' + dbgTitle + ')' + note14);
         check(dev.id + '/left/readout', L.longReadoutInsideScreen, tag + 'a readout with a sentence for a name wraps inside the screen (' + dbgReadout + ')' + note14);
         check(dev.id + '/left/keys', L.menuRowsHideKeys && L.menuRowsShowKeysOnceSeen,
@@ -1593,6 +1636,11 @@ async function runDesktop(browser) {
     await page.keyboard.press('Escape'); await page.waitForTimeout(200);
     check('desktop/leftovers', /Cmd\/Ctrl\+S$/.test(dl.key) && dl.ws === 'nowrap' && dl.room === '',
         'desktop: Save project keeps its key hint, a readout is still one line, and no readout width is set (' + dl.key + ', ' + dl.ws + ', "' + dl.room + '")');
+    const ds = await page.evaluate(() => ({ handheld: document.body.classList.contains('ps-handheld'), link: !!document.getElementById('ps-welcome-link'),
+        first: (document.querySelector('#ps-welcome-open strong') || {}).textContent, find: (document.querySelector('#ps-welcome-find strong') || {}).textContent,
+        scratch: !!document.getElementById('ps-scratch-section') && !!document.getElementById('ps-scratch-section').parentNode }));
+    check('desktop/start', !ds.handheld && !ds.link && ds.first === 'Open project or data' && ds.find === 'Open data from the web',
+        'desktop: the start centre is the full one (' + ds.first + ', ' + ds.find + ', no shared link card)');
     check('desktop/errors', errors.length === 0, 'desktop: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctx.close();
 }

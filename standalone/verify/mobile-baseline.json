@@ -8,7 +8,7 @@
      "vh": 664,
      "scrollW": 390,
      "overflowX": false,
-     "targets": 8,
+     "targets": 7,
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
@@ -17,7 +17,7 @@
      "zoomInputs": [],
      "liftedOver": 0,
      "welcome": {
-      "cards": 7,
+      "cards": 8,
       "past": 0,
       "overflow": 0
      },
@@ -172,7 +172,10 @@
     "menuRowsHideKeys": true,
     "menuRowsShowKeysOnceSeen": true,
     "panelLabelsWhole": true,
-    "startCardsSayAll": true
+    "startCardsSayAll": true,
+    "startCentreFits": true,
+    "startContinueLeads": true,
+    "sharedLinkCardOpens": true
    }
   },
   "phone-landscape": {
@@ -191,7 +194,7 @@
      "zoomInputs": [],
      "liftedOver": 0,
      "welcome": {
-      "cards": 7,
+      "cards": 8,
       "past": 0,
       "overflow": 0
      }
@@ -340,7 +343,10 @@
     "menuRowsHideKeys": true,
     "menuRowsShowKeysOnceSeen": true,
     "panelLabelsWhole": true,
-    "startCardsSayAll": true
+    "startCardsSayAll": true,
+    "startCentreFits": true,
+    "startContinueLeads": true,
+    "sharedLinkCardOpens": true
    }
   },
   "android": {
@@ -350,7 +356,7 @@
      "vh": 839,
      "scrollW": 412,
      "overflowX": false,
-     "targets": 9,
+     "targets": 10,
      "under24": [],
      "under24Spaced": 1,
      "under44": 2,
@@ -359,7 +365,7 @@
      "zoomInputs": [],
      "liftedOver": 0,
      "welcome": {
-      "cards": 7,
+      "cards": 8,
       "past": 0,
       "overflow": 0
      }
@@ -508,7 +514,10 @@
     "menuRowsHideKeys": true,
     "menuRowsShowKeysOnceSeen": true,
     "panelLabelsWhole": true,
-    "startCardsSayAll": true
+    "startCardsSayAll": true,
+    "startCentreFits": true,
+    "startContinueLeads": true,
+    "sharedLinkCardOpens": true
    }
   },
   "tablet": {
@@ -682,7 +691,10 @@
     "menuRowsHideKeys": true,
     "menuRowsShowKeysOnceSeen": true,
     "panelLabelsWhole": true,
-    "startCardsSayAll": true
+    "startCardsSayAll": true,
+    "startCentreFits": true,
+    "startContinueLeads": true,
+    "sharedLinkCardOpens": true
    }
   },
   "tablet-landscape": {
@@ -860,7 +872,10 @@
     "menuRowsHideKeys": true,
     "menuRowsShowKeysOnceSeen": true,
     "panelLabelsWhole": true,
-    "startCardsSayAll": true
+    "startCardsSayAll": true,
+    "startCentreFits": true,
+    "startContinueLeads": true,
+    "sharedLinkCardOpens": true
    }
   }
  }
