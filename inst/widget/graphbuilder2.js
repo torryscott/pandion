@@ -57175,19 +57175,35 @@
                             " were really identical, a difference at least this big would turn up " +
                             _stPFreq(res.p) + " by chance.";
                         if (cmpCorr !== "none")
-                            s += " Because several pairs were tested, significance is decided by the adjusted p beside it.";
+                            s += (cmpPairs.length > 1
+                                ? " Because several pairs were tested, significance"
+                                : " With a correction on, significance") +
+                                " is decided by the adjusted p beside it.";
                         else
                             s += (res.p < stAlpha ? " That is below your " + stAlphaLbl + " cutoff."
                                 : " That is not below your " + stAlphaLbl + " cutoff.");
                         return s;
                     }
                     if (which === "padj") {
+                        // With Correct set to None the cell shows a dash and
+                        // nothing was adjusted (Nov 2026, the statistical
+                        // review: the dash used to explain itself as an
+                        // adjustment the p had survived, on rows no
+                        // correction would have passed).
+                        if (cmpCorr === "none")
+                            return (cmpPairs.length === 1)
+                                ? "No correction is applied, and with one comparison none is needed."
+                                : "No correction is applied, so there is no adjusted p here: each of the " +
+                                  cmpPairs.length + " comparisons is judged on its own. The more comparisons you read, the more likely one falls below your " +
+                                  stAlphaLbl + " cutoff by chance alone; choose a correction under Correct to allow for that.";
                         if (!(cp.adjApplied && isFinite(cp.adjP))) return "";
                         return "Here the raw " + _stP(res.p) + " became " + _stP(cp.adjP) +
                             " after adjusting for the " + cmpPairs.length + " comparison" +
                             (cmpPairs.length === 1 ? "" : "s") + ". " +
                             (cp.adjP < stAlpha ? "It still clears your " + stAlphaLbl + " cutoff."
-                                : "It no longer clears your " + stAlphaLbl + " cutoff.");
+                                : (res.p < stAlpha
+                                    ? "It no longer clears your " + stAlphaLbl + " cutoff."
+                                    : "It did not clear your " + stAlphaLbl + " cutoff before the adjustment, and does not now."));
                     }
                     if (which === "effect") {
                         if (!isFinite(raw.effect)) return "";
