@@ -611,7 +611,11 @@ fq_refs <- function(counts) {
     grp_tot <- colSums(m)
     pairsL <- list()
     raw <- c(); keys <- c()
-    for (cat in rownames(m)) {
+    # With two categories a pair's two proportions add to 1, so each pair of
+    # groups is one test: the widget lists it once, for the first category
+    # (Nov 2026), and Holm counts it once.
+    cats_listed <- if (nrow(m) == 2) rownames(m)[1] else rownames(m)
+    for (cat in cats_listed) {
         gs <- colnames(m)
         for (i in seq_along(gs)) for (j in seq_along(gs)) {
             if (j <= i) next

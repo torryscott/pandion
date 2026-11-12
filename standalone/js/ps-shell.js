@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "freq-pairwise-two-category-once", since: "3.2.1",
+      label: "the Frequencies Pairwise tab lists a two-category outcome once per pair of groups, so its Holm-adjusted p is no longer doubled" },
     { id: "likert-means-own-codes", since: "3.2.1",
       label: "survey item means, their intervals and Cronbach's alpha use the responses' own numbers (items coded from 0, or with an unused level, read differently)" },
     { id: "corrections-follow-test-menu", since: "3.2.1",

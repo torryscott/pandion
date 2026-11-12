@@ -30,6 +30,24 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Frequencies Pairwise counts a two-category outcome once, so Holm no longer doubles its p.** <!-- ledger: freq-pairwise-two-category-once -->
+On a grouped Frequencies bar chart whose outcome has exactly two
+categories, the Pairwise tab listed each pair of groups twice ("Improved:
+Drug vs Placebo" and "Not improved: Drug vs Placebo"). The two
+proportions of a pair add to 1, so these are one test whose z differs
+only in sign, but Holm counted two and doubled the adjusted p: a 2 x 2
+table of 30/20 against 18/32 read .033 in the Holm column while the
+chi-square on the same table, and the pair's own z test, give .016. Each
+pair of groups is now listed once, for the first category, and Holm's
+family is the number of real tests. Outcomes with three or more
+categories are unchanged. Raw p values, z and the difference in
+proportions are unchanged everywhere. Checked against jamovi's
+Contingency Tables and R's `prop.test` (`stats-judgment-check`; the
+rendered fuzzer's two-category reference lists each pair once).
+Affects: the Holm column and the significance tally of the Statistics
+panel's Pairwise tab on Frequencies, both hosts, two-category outcomes
+only. Implemented 2026-11-11. Not yet live on the web app.
+
 **Survey item means, their intervals and alpha use the responses' own numbers.** <!-- ledger: likert-means-own-codes -->
 On a Likert / Survey chart whose responses are numbers, item means,
 their t intervals and Cronbach's alpha were computed on each response's

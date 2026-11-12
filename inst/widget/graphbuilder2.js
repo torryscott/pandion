@@ -2185,6 +2185,33 @@
         // two-sided p matches prop.test(x, n, correct = FALSE).
         // seDiff is the unpooled Wald SE, used for the CI on p1 - p2
         // (also matching prop.test's correct = FALSE interval).
+        // Fisher's exact test for a 2 x 2 table, two-sided the way R's
+        // fisher.test computes it: the summed probability of every table
+        // with the same margins that is no more likely than the observed
+        // one (R's relative tolerance of 1e-7). Counts must be whole.
+        fisherExact2x2: function (a, b, c, d) {
+            var whole = function (v) {
+                return typeof v === "number" && isFinite(v) && v >= 0 && Math.abs(v - Math.round(v)) < 1e-9;
+            };
+            if (!whole(a) || !whole(b) || !whole(c) || !whole(d)) return null;
+            a = Math.round(a); b = Math.round(b); c = Math.round(c); d = Math.round(d);
+            var r1 = a + b, r2 = c + d, c1 = a + c, n = r1 + r2;
+            if (n < 1) return null;
+            var self = this;
+            var lf = function (x) { return self._logGamma(x + 1); };
+            var lp = function (x) {
+                return lf(r1) + lf(r2) + lf(c1) + lf(n - c1) - lf(n) -
+                    lf(x) - lf(r1 - x) - lf(c1 - x) - lf(r2 - c1 + x);
+            };
+            var lo = Math.max(0, c1 - r2), hi = Math.min(r1, c1);
+            var lobs = lp(a), sum = 0;
+            for (var x = lo; x <= hi; x++) {
+                var l = lp(x);
+                if (l <= lobs + 1e-7) sum += Math.exp(l);
+            }
+            if (!isFinite(sum)) return null;
+            return { p: Math.min(1, sum) };
+        },
         twoPropZ: function (x1, N1, x2, N2, tail) {
             if (!(N1 > 0) || !(N2 > 0)) return null;
             var p1 = x1 / N1, p2 = x2 / N2;
@@ -54045,9 +54072,18 @@
                     if (_fqT && typeof _fqT.minExp === "number" && isFinite(_fqT.minExp)
                         && (_fcMinE === null || _fqT.minExp < _fcMinE)) _fcMinE = _fqT.minExp;
                 }
+                // a 2 by 2 table cannot combine categories; Fisher's exact
+                // test (on the Chi-square tab) is the remedy there
+                var _fc22 = false;
+                for (var _fq3 = 0; _fq3 < data.freqTests.length; _fq3++)
+                    if (data.freqTests[_fq3] && data.freqTests[_fq3].type === "independence" &&
+                        data.freqTests[_fq3].df === 1) _fc22 = true;
                 if (_fcMinE !== null && _fcMinE < 5)
                     out.push({ id: "chisqexp", sev: "warn", title: "Expected counts are too small for chi-square",
-                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". Consider combining sparse categories, or collecting more data, before leaning on this p-value.", fixGt: null });
+                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". " +
+                            (_fc22
+                                ? "For a 2 by 2 table, read Fisher's exact test on the Chi-square tab of the Statistics panel, which needs no such minimum."
+                                : "Consider combining sparse categories, or collecting more data, before leaning on this p-value."), fixGt: null });
             }
             // --- Correlation matrix ---
             if (gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length) {
@@ -55833,6 +55869,26 @@
                 if (!worst || sr > worst.ratio) worst = { lo: lo, hi: hi, ratio: sr, facet: sf };
             }
             return worst;
+        }
+        // The four counts of a 2 x 2 Frequencies panel: two categories by
+        // two groups on a grouped bar chart, as [a, b, c, d] with rows the
+        // categories and columns the groups. Raw counts with hidden bars
+        // included, like every Frequencies test. Null for any other shape.
+        function _stFq2x2(facetKey) {
+            if (!(data && data.hasGroups && data.graphType === "bar") || !Array.isArray(bars)) return null;
+            var qCats = [], qGrps = [], qCnt = [[0, 0], [0, 0]];
+            for (var qi = 0; qi < bars.length; qi++) {
+                var qb = bars[qi];
+                if (!qb || _facetOf((typeof qb.x === "string") ? qb.x : "") !== facetKey) continue;
+                var qc = _stCatOf(qb.x), qg = (qb.group == null) ? "" : String(qb.group);
+                var qci = qCats.indexOf(qc), qgi = qGrps.indexOf(qg);
+                if (qci < 0) { qCats.push(qc); qci = qCats.length - 1; }
+                if (qgi < 0) { qGrps.push(qg); qgi = qGrps.length - 1; }
+                if (qci > 1 || qgi > 1) return null;
+                qCnt[qci][qgi] += _freqRawN(qb);
+            }
+            if (qCats.length !== 2 || qGrps.length !== 2) return null;
+            return [qCnt[0][0], qCnt[0][1], qCnt[1][0], qCnt[1][1]];
         }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
@@ -58167,7 +58223,7 @@
             } else if (mk === "freq") {
                 // ---- Chi-square (shipped tests; full data)
                 var ft = Array.isArray(data.freqTests) ? data.freqTests : [];
-                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false;
+                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false, fAnyFisher = false;
                 var fChip = function (txt) {
                     return '<span data-cmp-sig title="Significant at ' + stAlphaLbl + '" ' +
                         'style="background:#e9f4df;border:1px solid #c8e0b8;' +
@@ -58213,6 +58269,24 @@
                               (rv > 0 ? "more" : "fewer") + " cases than expected)"
                             : "no single cell departs notably (largest std. residual " + rvS + ")"));
                     }
+                    // Fisher's exact test for a 2 x 2 panel (Nov 2026, the
+                    // statistical review): it uses no approximation, so it
+                    // is the answer when the expected counts are small, and
+                    // jamovi's Contingency Tables offers it beside
+                    // chi-square. On 3/1 against 1/4 chi-square says .099
+                    // and Fisher .206.
+                    if (t.type === "independence" && t.df === 1) {
+                        var f22 = null, fxr = null;
+                        try {
+                            f22 = _stFq2x2(fFac);
+                            fxr = f22 ? _gb2Stats.fisherExact2x2(f22[0], f22[1], f22[2], f22[3]) : null;
+                        } catch (_eF2) { fxr = null; }
+                        if (fxr && isFinite(fxr.p)) {
+                            fAnyFisher = true;
+                            fNotes.push((fFac ? fFac + ": " : "") + "Fisher's exact test: " + _stP(fxr.p) +
+                                " (exact, with no minimum on the expected counts)");
+                        }
+                    }
                 }
                 if (!fAnyFacet) {
                     for (var fr2 = 0; fr2 < fRows.length; fr2++) fRows[fr2].shift();
@@ -58241,7 +58315,9 @@
                               'Heads up: the smallest expected count is ' +
                               _stEsc(String(Math.round(fMinExp * 10) / 10)) +
                               '. Below 5 the chi-square approximation is unreliable - ' +
-                              'combine sparse categories or collect more data.</div>'
+                              (fAnyFisher
+                                  ? "read Fisher's exact test above, which needs no such minimum.</div>"
+                                  : 'combine sparse categories or collect more data.</div>')
                             : "") +
                         _stBtnRow(
                             // The former on-chart chi-square plate is
@@ -58259,7 +58335,7 @@
                 }
                 // ---- Pairwise proportions (same math as the brackets/table)
                 try {
-                    var pw = [];
+                    var pw = [], pwTwoCat = false, pwMinExp = Infinity, pwMinSame = Infinity;
                     var facets = [], seenF = {};
                     for (var pb = 0; pb < bars.length; pb++) {
                         var fb = bars[pb];
@@ -58287,7 +58363,15 @@
                                 if (!seenC[cq]) { seenC[cq] = true; cats.push(cq); }
                                 if (!seenG[gq]) { seenG[gq] = true; grps.push(gq); }
                             }
-                            for (var c3 = 0; c3 < cats.length; c3++) {
+                            // With two categories a pair's two proportions
+                            // always add to 1, so "Improved: A vs B" and
+                            // "Not improved: A vs B" are one test (z differs
+                            // only in sign). Listing both made Holm count it
+                            // twice and double its p against the chi-square
+                            // on the same table (.016 there, .033 here).
+                            var cLim = cats.length;
+                            if (cats.length === 2) { cLim = 1; pwTwoCat = true; }
+                            for (var c3 = 0; c3 < cLim; c3++) {
                                 for (var g1 = 0; g1 < grps.length; g1++) {
                                     for (var g2 = g1 + 1; g2 < grps.length; g2++) {
                                         var cellA = null, cellB = null, tot1 = 0, tot2 = 0;
@@ -58303,6 +58387,12 @@
                                         var res2 = _gb2Stats.twoPropZ(
                                             cellA ? _freqRawN(cellA) : 0, tot1,
                                             cellB ? _freqRawN(cellB) : 0, tot2, "two");
+                                        if (res2) {
+                                            var ppE = (res2.x1 + res2.x2) / (res2.n1 + res2.n2);
+                                            var mnE = Math.min(res2.n1 * ppE, res2.n1 * (1 - ppE),
+                                                res2.n2 * ppE, res2.n2 * (1 - ppE));
+                                            if (isFinite(mnE) && mnE < pwMinExp) pwMinExp = mnE;
+                                        }
                                         var lk1 = [];
                                         if (cellA) lk1.push([cellA.x, grps[g1]]);
                                         if (cellB) lk1.push([cellB.x, grps[g2]]);
@@ -58329,6 +58419,8 @@
                                 for (var a2 = a1 + 1; a2 < cats2.length; a2++) {
                                     var res3 = _gb2Stats.sameSamplePropZ(
                                         nOf[cats2[a1]], nOf[cats2[a2]], N, "two");
+                                    if (res3 && (nOf[cats2[a1]] + nOf[cats2[a2]]) < pwMinSame)
+                                        pwMinSame = nOf[cats2[a1]] + nOf[cats2[a2]];
                                     if (res3) blk.push({
                                         label: cats2[a1] + " vs " + cats2[a2],
                                         res: res3, facet: fct,
@@ -58403,10 +58495,22 @@
                             '<b style="color:#333;">' + pwSigN + ' of ' + pwRows.length +
                             '</b> significant at ' + stAlphaLbl + ' (Holm-adjusted)</span></div>' +
                             _stTable(["Comparison", "Δp", "z", "p", "p (Holm)"], pwRows, pwAttrs, true) +
+                            ((pwMinExp < 5 || pwMinSame < 10)
+                                ? '<div data-role="st-pw-small" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">' +
+                                  (pwMinExp < 5
+                                      ? 'Heads up: some of these comparisons rest on very small counts (the smallest expected count is ' +
+                                        _stEsc(String(Math.round(pwMinExp * 10) / 10)) +
+                                        '). Below 5 the z approximation is unreliable, so read those p values as rough.'
+                                      : 'Heads up: some of these comparisons rest on very few cases (two categories holding ' +
+                                        _stEsc(String(pwMinSame)) +
+                                        ' between them). Under about 10 the z approximation is unreliable, so read those p values as rough.') +
+                                  '</div>'
+                                : "") +
                             _stBtnRow(_stBtn("copypw", "Copy table", false)) +
-                            _stFoot((data.hasGroups && data.graphType === "bar")
+                            _stFoot(((data.hasGroups && data.graphType === "bar")
                                 ? "Two-proportion z-tests (independent groups) without continuity correction; Holm controls the family-wise error within each panel. Same math as the on-chart brackets."
-                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel."));
+                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel.") +
+                                (pwTwoCat ? " With two categories a pair's two proportions always add to 1, so each pair of groups is one test and is listed once." : "")));
                         wire.push(["copypw", function (btn) {
                             _stWireTableCopy(btn, body, '[data-st-pane="pairwise"]');
                         }]);
