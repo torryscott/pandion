@@ -61,7 +61,7 @@ textscale-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check toolbar-labels-check toolbar-scroll-cue-check typing-check units-check update-check void-honesty-check wizard-parity-check variable-levels-check visuals-check \
-xlsx-import-check launch-eval-fixes-check launch-contract-check"
+xlsx-import-check launch-eval-fixes-check launch-contract-check empty-title-commit-check"
 
 echo "== m0-check (render + edit round-trip)"
 node standalone/verify/m0-check.mjs
