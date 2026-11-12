@@ -37309,7 +37309,31 @@
   // every render, so each one found is watched for its own size.
   var PANEL_RO = null, PANEL_RAF = 0, PANEL_WATCHED = [];
   var PANEL_NARROW_PX = 560;
+  // The engine's color strips end "or use the HSV picker on the right."
+  // In a narrow panel the picker is stacked BELOW the strip (measured on a
+  // phone: the hint at 565, the picker from 705, full width), so the hint
+  // pointed at nothing. The words follow where the picker really is.
+  function touchPickerWords(p) {
+    var pk = p.querySelector('[data-role="color-picker"]');
+    var els = p.querySelectorAll("span, div, p");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.children.length) continue;
+      if (e.__psPick == null) {
+        if (!/HSV picker on the right/.test(e.textContent)) continue;
+        e.__psPick = e.textContent;
+      }
+      var want = e.__psPick;
+      if (TOUCH_MODE && pk && e.offsetParent !== null && pk.offsetParent !== null) {
+        var hr = e.getBoundingClientRect(), kr = pk.getBoundingClientRect();
+        if (kr.left < hr.right - 8 && kr.top >= hr.bottom - 4)
+          want = e.__psPick.replace("on the right", "below");
+      }
+      if (e.textContent !== want) e.textContent = want;
+    }
+  }
   function touchPanelMark(p) {
+    try { touchPickerWords(p); } catch (ePk) {}
     var w = 0;
     try { w = p.getBoundingClientRect().width; } catch (eW) {}
     var narrow = TOUCH_MODE && w > 0 && w < PANEL_NARROW_PX;
@@ -38085,7 +38109,36 @@
     var hasCheck = !!chk && !chk.hidden && appWorkspace() === "chart";
     var b = hasCheck ? chk.textContent : "";
     var text = a + (b ? " · " + b : "");
-    if (st.textContent !== text) st.textContent = text;
+    // The line is one short row beside two buttons, and on a 390px phone
+    // "Autosaved locally \u00b7 Checks passed" does not fit. The button is a
+    // flex box, where text-overflow does nothing, so the line was cut
+    // mid-word ("1 not", "Chec"). The words sit in a span of their own and
+    // the line is the longest of these that fits whole: both parts; both
+    // with the save state's last word "locally" gone (on a phone there is
+    // nowhere else the work could be saved); then one part alone, the save
+    // state unless the chart check has something to fix and saving is
+    // working. Only a single part too long for the row ends in an ellipsis.
+    var line = st.firstElementChild;
+    if (!line || line.className !== "ps-phone-status-line") {
+      st.textContent = "";
+      line = document.createElement("span");
+      line.className = "ps-phone-status-line";
+      st.appendChild(line);
+    }
+    var aShort = a.replace(/\s+locally$/, "");
+    var cands = [text];
+    if (aShort !== a) cands.push(aShort + (b ? " \u00b7 " + b : ""));
+    if (b) cands.push(AUTOSAVE_HEALTH !== "error" && chk.getAttribute("data-state") === "warn"
+      ? b : aShort);
+    var fitKey = cands.join("\n") + "\n" + line.clientWidth;
+    if (line.__psFit !== fitKey) {
+      for (var ci = 0; ci < cands.length; ci++) {
+        if (line.textContent !== cands[ci]) line.textContent = cands[ci];
+        if (!line.clientWidth || line.scrollWidth <= line.clientWidth + 1) break;
+      }
+      // Not laid out yet: nothing was measured, so measure at the next sync.
+      line.__psFit = line.clientWidth ? fitKey : null;
+    }
     st.disabled = !hasCheck;
     if (hasCheck) st.setAttribute("data-state", chk.getAttribute("data-state") || "ok");
     else st.removeAttribute("data-state");
@@ -38403,6 +38456,12 @@
         if (n) mo.observe(n, { childList: true, characterData: true, subtree: true,
                                attributes: true, attributeFilter: ["hidden", "data-state"] });
       });
+    }
+    // The line is fitted to its row (syncPhoneStatus), so a row that
+    // changes width (the phone is turned) is fitted again.
+    if (typeof ResizeObserver === "function") {
+      var stRow = document.getElementById("ps-phone-status");
+      if (stRow) new ResizeObserver(function () { try { syncPhoneStatus(); } catch (e) {} }).observe(stRow);
     }
     try {
       var mq = window.matchMedia(NARROW_MQ);

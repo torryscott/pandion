@@ -1392,6 +1392,8 @@ async function runDevice(browser, dev) {
         const L = result.touch;
         L.panelTitleWhole = false; L.longReadoutInsideScreen = false; L.menuRowsHideKeys = false; L.menuRowsShowKeysOnceSeen = false;
         L.panelLabelsWhole = false; L.startCardsSayAll = false; L.startCentreFits = false; L.startContinueLeads = false; L.sharedLinkCardOpens = false;
+        L.statusLineWhole = false; L.menuRowsCentred = false; L.pickerHintPointsRight = false;
+        let dbgLine = 'not measured', dbgRows = 'not measured', dbgHint = 'not measured';
         let dbgTabs = 'not measured', dbgCards = 'not measured', dbgStart = 'not measured', dbgLink = 'not measured';
         const phoneScreen = Math.min(profile.viewport.width, profile.viewport.height) <= 480;
         const startRead = () => { const b = document.querySelector('.ps-welcome-body'); const vis = e => e.offsetParent !== null;
@@ -1524,6 +1526,59 @@ async function runDevice(browser, dev) {
                 dbgKeys += '; after a key, Save project reads ' + (save ? '"' + save.key + '"' : 'nothing');
                 await p2.keyboard.press('Escape'); await p2.waitForTimeout(200);
             }
+            // c2. three small things from a real phone. The line under the
+            //    project name ends on a whole word (it was cut to "Chec");
+            //    in Menu every row's words sit in the middle of the row
+            //    (File to Help sat at the top, tight under the divider);
+            //    and the Marker panel's hint says where the colour picker
+            //    is, below on a narrow panel and on the right beside it.
+            if (narrow) {
+                const sl = await at(() => { const st = document.getElementById('ps-phone-status'), l = st && st.querySelector('.ps-phone-status-line'); if (!l) return null;
+                    const save = (document.getElementById('ps-save-state') || {}).textContent || '', chk = document.getElementById('ps-status-check');
+                    const b = chk && !chk.hidden ? chk.textContent : '', aS = save.replace(/\s+locally$/, '');
+                    const whole = [save + (b ? ' · ' + b : ''), aS + (b ? ' · ' + b : ''), aS, b].filter(Boolean);
+                    return { text: l.textContent, fits: l.scrollWidth <= l.clientWidth + 1, whole: whole.indexOf(l.textContent) >= 0, w: l.clientWidth, full: whole[0] }; });
+                L.statusLineWhole = !!sl && sl.fits && sl.whole && sl.text.length > 3;
+                dbgLine = sl ? '"' + sl.text + '" in ' + sl.w + ' px, of "' + sl.full + '"' : 'no line';
+                if (!(await p2.locator('#ps-menubar [data-ps-menu="file"]').isVisible().catch(() => false))) { await p2.locator('#ps-narrow-menu').tap(); await p2.waitForTimeout(400); }
+                const rows = await at(() => [...document.querySelectorAll('.ps-menubar button')].filter(b => b.offsetParent !== null).map(b => { const r = b.getBoundingClientRect();
+                    const g = document.createRange(); g.selectNodeContents(b); const t = g.getBoundingClientRect();
+                    return { name: b.textContent.trim().slice(0, 14), off: Math.round((t.top + t.height / 2) - (r.top + r.height / 2)) }; }));
+                L.menuRowsCentred = rows.length >= 6 && rows.every(r => Math.abs(r.off) <= 2);
+                dbgRows = rows.map(r => r.name + ' ' + r.off).join(', ');
+                // Escape, not a tap on Menu: the scrim covers that button while the list is open
+                await p2.keyboard.press('Escape'); await p2.waitForTimeout(300);
+                if (await at(() => document.querySelector('.ps-appbar').classList.contains('ps-narrow-menu-open'))) { await p2.keyboard.press('Escape'); await p2.waitForTimeout(300); }
+            } else { L.statusLineWhole = true; L.menuRowsCentred = true; dbgLine = dbgRows = 'not the phone frame'; }
+            {
+                await at(() => { const S = window.PS_SHELL, t = S.project.table; const nums = t.order.filter(c => t.types[c] === 'continuous');
+                    // the table by now has one number column (step b): the same one on both axes still draws points
+                    S.addChart('xyplotbuilder'); S.setRoles('xyplotbuilder', { xvar: nums[0], yvar: nums[1] || nums[0] }); });
+                await p2.waitForTimeout(2800);
+                // the pane may be scrolled from the steps above: bring a point to the middle first
+                const ptAt = () => at(() => { const all = [...document.querySelectorAll('.graphbuilder2-host svg [data-role="xy-point"]')];
+                    const c = all[Math.floor(all.length / 2)]; if (!c) return null; c.scrollIntoView({ block: 'center' });
+                    const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, n: all.length }; });
+                await ptAt(); await p2.waitForTimeout(300);
+                const pt = await ptAt();
+                if (!pt) why.push('no scatter point in view');
+                else {
+                    await p2.touchscreen.tap(pt.x, pt.y); await p2.waitForTimeout(1500);
+                    const hn = await at(() => { const pn = [...document.querySelectorAll('.gb2-panel')].find(e => e.offsetParent !== null);
+                        let sel = ''; try { sel = String(JSON.parse(localStorage.getItem('graphbuilder2.inspector.v1') || '{}').selection || ''); } catch (e) {}
+                        if (!pn) return { hint: '', picker: false, dbg: 'no panel open, selection "' + sel + '"' };
+                        const h = [...pn.querySelectorAll('span, div, p')].find(e => e.children.length === 0 && e.offsetParent !== null && /HSV picker (on the right|below)/.test(e.textContent));
+                        const pk = pn.querySelector('[data-role="color-picker"]'); if (!h || !pk || pk.offsetParent === null) return { hint: h ? h.textContent.trim() : '', picker: false,
+                            dbg: 'selection "' + sel + '", ' + pn.querySelectorAll('*').length + ' nodes, picker ' + (pk ? (pk.offsetParent === null ? 'hidden' : 'shown') : 'absent') + ', panel says "' + (pn.innerText || '').replace(/\s+/g, ' ').slice(0, 90) + '"' };
+                        const hr = h.getBoundingClientRect(), kr = pk.getBoundingClientRect();
+                        return { hint: h.textContent.trim(), picker: true, under: kr.top >= hr.bottom - 4 && kr.left < hr.right - 8 }; });
+                    if (!hn || !hn.hint) { why.push('no picker hint in the Marker panel'); dbgHint = 'no hint: ' + (hn ? hn.dbg : 'nothing read'); }
+                    else {
+                        L.pickerHintPointsRight = hn.picker && (hn.under ? /picker below/.test(hn.hint) : /picker on the right/.test(hn.hint));
+                        dbgHint = 'picker ' + (hn.under ? 'under' : 'beside') + ' the hint, which says "' + hn.hint.slice(-28) + '"';
+                    }
+                }
+            }
             // d. coming back. The work above was autosaved, so a new tab
             //    has something to continue: on a phone screen Continue
             //    leads; elsewhere it is where it always was. Then the new
@@ -1564,6 +1619,9 @@ async function runDevice(browser, dev) {
             tag + 'menu rows carry no key hints until a keyboard shows itself, and Tab is not one (' + dbgKeys + ')' + note14);
         check(dev.id + '/ipad/labels', L.panelLabelsWhole, tag + 'no button in the editing panel is narrower than its own words (' + dbgTabs + ')' + note14);
         check(dev.id + '/ipad/cards', L.startCardsSayAll, tag + 'the start cards say all of their second line (' + dbgCards + ')' + note14);
+        check(dev.id + '/four/line', L.statusLineWhole, tag + 'the line under the project name ends on a whole word (' + dbgLine + ')' + note14);
+        check(dev.id + '/four/menu', L.menuRowsCentred, tag + 'every row of Menu has its words in the middle of the row (' + dbgRows + ')' + note14);
+        check(dev.id + '/four/hint', L.pickerHintPointsRight, tag + 'the Marker panel says where the colour picker is (' + dbgHint + ')' + note14);
     }
 
     check(dev.id + '/errors', errors.length === 0, tag + 'no page errors ' + errors.slice(0, 2).join(' | '));
@@ -1792,6 +1850,21 @@ async function runTabletExtras(browser) {
     const c2 = await pi.evaluate(() => ({ open: document.getElementById('ps-handover-dialog').style.display === 'flex', n: window.__shared.length, toast: (document.getElementById('ps-toast') || {}).textContent || '' }));
     check('installed/cancel', c1 && !c2.open && c2.n === 2 && /Save cancelled/.test(c2.toast),
         'installed: closing the dialog shares nothing and says the save was cancelled');
+    // iOS blurs the top of a home screen app unless a bar is pinned to the
+    // top edge (seen in the simulator; nothing here can see the blur). So
+    // the first row is pinned there, the status bar style is left alone
+    // (black-translucent leaves an empty strip at the bottom), and Menu
+    // still opens over the scrim though a pinned bar stacks on its own.
+    const pin = await pi.evaluate(() => { const a = document.querySelector('.ps-appbar');
+        return { pos: getComputedStyle(a).position, top: Math.round(a.getBoundingClientRect().top),
+            style: (document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]') || { content: '' }).content }; });
+    await pi.locator('#ps-narrow-menu').tap(); await pi.waitForTimeout(450);
+    const pm = await pi.evaluate(() => { const m = document.querySelector('.ps-menubar'), r = m.getBoundingClientRect();
+        const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { inList: !!e && !!e.closest('.ps-menubar'), h: Math.round(r.height) }; });
+    await pi.keyboard.press('Escape'); await pi.waitForTimeout(200);
+    check('installed/toprow', pin.pos === 'sticky' && pin.top === 0 && pin.style !== 'black-translucent' && pm.inList && pm.h > 200,
+        'installed: the first row is pinned to the top edge, the status bar style is the default, and Menu opens over the scrim (' + pin.pos + ', top ' + pin.top + ', list ' + pm.h + ' px, ' + (pm.inList ? 'on top' : 'under the scrim') + ')');
     check('extras/errors', errors.length === 0, 'tablet and installed extras: no page errors ' + errors.slice(0, 2).join(' | '));
     await ctxI.close();
 }

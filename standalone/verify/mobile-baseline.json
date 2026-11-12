@@ -175,7 +175,10 @@
     "startCardsSayAll": true,
     "startCentreFits": true,
     "startContinueLeads": true,
-    "sharedLinkCardOpens": true
+    "sharedLinkCardOpens": true,
+    "statusLineWhole": true,
+    "menuRowsCentred": true,
+    "pickerHintPointsRight": true
    }
   },
   "phone-landscape": {
@@ -346,7 +349,10 @@
     "startCardsSayAll": true,
     "startCentreFits": true,
     "startContinueLeads": true,
-    "sharedLinkCardOpens": true
+    "sharedLinkCardOpens": true,
+    "statusLineWhole": true,
+    "menuRowsCentred": true,
+    "pickerHintPointsRight": true
    }
   },
   "android": {
@@ -517,7 +523,10 @@
     "startCardsSayAll": true,
     "startCentreFits": true,
     "startContinueLeads": true,
-    "sharedLinkCardOpens": true
+    "sharedLinkCardOpens": true,
+    "statusLineWhole": true,
+    "menuRowsCentred": true,
+    "pickerHintPointsRight": true
    }
   },
   "tablet": {
@@ -694,7 +703,10 @@
     "startCardsSayAll": true,
     "startCentreFits": true,
     "startContinueLeads": true,
-    "sharedLinkCardOpens": true
+    "sharedLinkCardOpens": true,
+    "statusLineWhole": true,
+    "menuRowsCentred": true,
+    "pickerHintPointsRight": true
    }
   },
   "tablet-landscape": {
@@ -875,7 +887,10 @@
     "startCardsSayAll": true,
     "startCentreFits": true,
     "startContinueLeads": true,
-    "sharedLinkCardOpens": true
+    "sharedLinkCardOpens": true,
+    "statusLineWhole": true,
+    "menuRowsCentred": true,
+    "pickerHintPointsRight": true
    }
   }
  }

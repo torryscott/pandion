@@ -5074,6 +5074,13 @@ if (window.navigator.standalone === true) {
     text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     min-height: 44px;
   }
+  /* 13px here, not left to the touch text floor: the floor enlarges text a
+     moment after it is written, and the shell measures this line the
+     moment it writes it to decide whether a word has to go. */
+  body.ps-phone #ps-phone-status .ps-phone-status-line {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 13px;
+  }
   body.ps-phone #ps-phone-status[data-state="warn"] { color: #f2c46d; }
   body.ps-phone #ps-phone-status:disabled { opacity: 1; }
   body.ps-phone .ps-phone-top {
@@ -5089,7 +5096,9 @@ if (window.navigator.standalone === true) {
     padding: 4px 8px 10px; max-height: calc(var(--ps-vh) - 64px); overflow: auto;
   }
   body.ps-phone .ps-menubar button {
-    display: flex; justify-content: flex-start; min-height: 46px; padding: 0 10px;
+    /* align-items: File to Help sat at the TOP of their rows while Open
+       and Save project sat in the middle, so File hugged the divider. */
+    display: flex; justify-content: flex-start; align-items: center; min-height: 46px; padding: 0 10px;
     font-size: 15px; color: var(--ps-s0); text-align: left;
   }
   /* A menu's own list opens under the top row and takes the screen. It
@@ -5388,6 +5397,17 @@ if (window.navigator.standalone === true) {
      on a tablet the three columns were whatever they started as. */
   body.ps-touch .ps-splitter { touch-action: none; }
   body.ps-touch .ps-splitter::after { left: -10px; right: -10px; }
+  /* The home screen app (html[data-ps-installed], set in the head with the
+     viewport). iOS lays a soft blur over the top of a home screen app,
+     about a hundred points deep, and the app's first row sat inside it.
+     When a bar is pinned to the top edge iOS instead carries that bar's
+     colour up under the status bar and leaves the bar sharp. The app bar
+     is already the first row and the page never scrolls, so pinning it
+     moves nothing. A pinned bar is a stacking context of its own, though,
+     and the Menu list inside it would open under the scrim: while Menu is
+     open the bar is lifted over the scrim with its list. */
+  html[data-ps-installed] .ps-appbar { position: sticky; top: 0; }
+  html[data-ps-installed] .ps-appbar.ps-narrow-menu-open { z-index: 9000; }
   /* The phone start centre (body.ps-handheld, set by the shell on a phone
      screen). The cards are moved by the shell; the stylesheet fills the
      Continue card, since it leads. */
