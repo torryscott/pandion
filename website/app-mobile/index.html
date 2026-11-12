@@ -20,9 +20,9 @@ if (window.navigator.standalone === true) {
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-12T04:38Z d1e860c">
+<meta name="pandion-build" content="2026-11-12T19:36Z 6922572">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at d1e860c: the
+<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 6922572: the
      released app plus the phone and tablet work (touch gestures on the chart
      and on a layout page: a tap edits, a drag moves a part at once, a swipe
      on empty space scrolls, touch and hold still opens the part's menu; a
@@ -35,8 +35,11 @@ if (window.navigator.standalone === true) {
      show no keyboard shortcuts until a keyboard is used; tablet fixes
      from the iPad pass, the phone frame on every upright tablet and on a
      large phone held sideways, files out of the home screen app through
-     the share sheet with an opaque home screen icon, and the phone start
-     centre), so it
+     the share sheet with an opaque home screen icon, the phone start
+     centre, and four small fixes from device screenshots: the line under
+     the project name ends on a whole word, Menu rows are centred, the top
+     row of the home screen app is sharp, and the colour hint says where
+     the picker is), so it
      can be tried on a real phone before it ships. It does not carry the next-release queue that
      /app-next/ shows. Not linked from the site, not indexed, refreshed or
      removed as the work moves. The app at /app/ is the released one. -->
@@ -5103,6 +5106,13 @@ if (window.navigator.standalone === true) {
     text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     min-height: 44px;
   }
+  /* 13px here, not left to the touch text floor: the floor enlarges text a
+     moment after it is written, and the shell measures this line the
+     moment it writes it to decide whether a word has to go. */
+  body.ps-phone #ps-phone-status .ps-phone-status-line {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 13px;
+  }
   body.ps-phone #ps-phone-status[data-state="warn"] { color: #f2c46d; }
   body.ps-phone #ps-phone-status:disabled { opacity: 1; }
   body.ps-phone .ps-phone-top {
@@ -5118,7 +5128,9 @@ if (window.navigator.standalone === true) {
     padding: 4px 8px 10px; max-height: calc(var(--ps-vh) - 64px); overflow: auto;
   }
   body.ps-phone .ps-menubar button {
-    display: flex; justify-content: flex-start; min-height: 46px; padding: 0 10px;
+    /* align-items: File to Help sat at the TOP of their rows while Open
+       and Save project sat in the middle, so File hugged the divider. */
+    display: flex; justify-content: flex-start; align-items: center; min-height: 46px; padding: 0 10px;
     font-size: 15px; color: var(--ps-s0); text-align: left;
   }
   /* A menu's own list opens under the top row and takes the screen. It
@@ -5417,6 +5429,17 @@ if (window.navigator.standalone === true) {
      on a tablet the three columns were whatever they started as. */
   body.ps-touch .ps-splitter { touch-action: none; }
   body.ps-touch .ps-splitter::after { left: -10px; right: -10px; }
+  /* The home screen app (html[data-ps-installed], set in the head with the
+     viewport). iOS lays a soft blur over the top of a home screen app,
+     about a hundred points deep, and the app's first row sat inside it.
+     When a bar is pinned to the top edge iOS instead carries that bar's
+     colour up under the status bar and leaves the bar sharp. The app bar
+     is already the first row and the page never scrolls, so pinning it
+     moves nothing. A pinned bar is a stacking context of its own, though,
+     and the Menu list inside it would open under the scrim: while Menu is
+     open the bar is lifted over the scrim with its list. */
+  html[data-ps-installed] .ps-appbar { position: sticky; top: 0; }
+  html[data-ps-installed] .ps-appbar.ps-narrow-menu-open { z-index: 9000; }
   /* The phone start centre (body.ps-handheld, set by the shell on a phone
      screen). The cards are moved by the shell; the stylesheet fills the
      Continue card, since it leads. */
@@ -7855,6 +7878,6 @@ if (window.navigator.standalone === true) {
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.061ded7503.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.622690ea31.js"></script>
+<script src="lib/ps-shell.eab6d75de5.js"></script>
 </body>
 </html>
