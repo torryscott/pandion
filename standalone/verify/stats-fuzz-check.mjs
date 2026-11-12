@@ -204,8 +204,12 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
         name + ' ' + pk + ': degenerate welch refuses ("' + statCell + '")');
     }
   }
-  // Holm adjusted column over the welch family
+  // Holm adjusted column. With Test left on Auto the family runs on the
+  // pooled term (jamovi's ANOVA post hoc); a test picked by hand keeps each
+  // pair's own test (Nov 2026), so Auto is selected for the pooled reference
+  // and Welch for the by-hand one below.
   if (ds.adjust && ds.adjust.holm && pairKeys.length > 1) {
+    await setBand('test', 'auto');
     await setBand('correct', 'holm');
     rows = await readPairsRows();
     for (const pk of pairKeys) {
@@ -217,7 +221,22 @@ for (const [name, ds] of Object.entries(refs.datasets)) {
       const adjCell = row.cells[5] || '';
       pClose(adjCell, refAdj, name + ' ' + pk + ' holm p(adj)');
     }
+    // Welch picked by hand: Holm over each pair's own Welch p.
+    if (ds.adjust.welch_holm && Object.keys(ds.adjust.welch_holm).length > 1) {
+      await setBand('test', 'welch');
+      rows = await readPairsRows();
+      for (const pk of pairKeys) {
+        const refW = ds.adjust.welch_holm[pk];
+        if (refW === undefined || refW === null) continue;
+        const [ga, gb] = pk.split('|');
+        const row = rowFor(rows, ga, gb);
+        if (!row) { ok(false, name + " " + pk + ": expected comparison row missing (welch by hand, holm)"); continue; }
+        ok(/Welch/i.test(row.cells.join(' ')), name + ' ' + pk + ': Welch by hand stays Welch under Holm');
+        pClose(row.cells[5] || '', refW, name + ' ' + pk + ' holm p(adj) over the Welch tests');
+      }
+    }
     await setBand('correct', 'none');
+    await setBand('test', 'welch');
   }
   // Games-Howell adjusted p (test is still Welch here - the pooled trio
   // gates on it). Reference: R's own t.test + ptukey vs the engine's

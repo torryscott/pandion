@@ -151,6 +151,14 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 lv_all <- union(lv_all, lv)
                 cols[[it]] <- obs
             }
+            # A battery of number columns reads in ascending order, as the
+            # standalone's does. union() alone keeps first-seen order, which
+            # put a value the first item never used at the end of the scale.
+            if (length(lv_all) > 1 && !any(vapply(items, function(it)
+                    is.factor(data[[it]]), logical(1)))) {
+                lv_num0 <- suppressWarnings(as.numeric(lv_all))
+                if (all(is.finite(lv_num0))) lv_all <- lv_all[order(lv_num0)]
+            }
 
             # Missing-data disclosure: items keep their own n (a skipped
             # item drops that respondent from that row only).
@@ -206,6 +214,17 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 continuous <- TRUE
             }
 
+            # Numeric response codes (Nov 2026, the statistical review): when
+            # every response level is a number, in ascending order, the item
+            # means, their intervals and alpha are computed on those numbers
+            # and not on positions 1..k. Items coded 0 to 4 printed every
+            # mean one too high, and a level nobody chose compressed the
+            # scale (3.05 came out as 2.57). Text levels keep the 1..k
+            # coding, the only numbers they have.
+            lv_codes <- suppressWarnings(as.numeric(lv_all))
+            numeric_codes <- !continuous && length(lv_codes) >= 2 &&
+                all(is.finite(lv_codes)) && all(diff(lv_codes) > 0)
+
             agg_sig <- list(items = items, cols = cols,
                             levels = lv_all, ci = ci_level,
                             cont = continuous)
@@ -243,8 +262,10 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 obs <- cols[[it]]
                 obs <- obs[!is.na(obs)]
                 n_it <- length(obs)
-                # index coding 1..k on the master levels drives the means
+                # the response's own number when the levels are numbers,
+                # else its position 1..k on the master levels
                 code <- match(obs, lv_all)
+                if (numeric_codes) code <- lv_codes[code]
                 for (li in seq_along(lv_all)) {
                     n_cell <- sum(obs == lv_all[li])
                     if (n_cell == 0 && n_it > 0) next
@@ -301,10 +322,13 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 rev_set <- as.character(unlist(
                     spec$likertReverseItems))
                 k_lv <- length(lv_all)
+                # reverse scoring reflects around the two ends of the scale
+                refl_sum <- if (numeric_codes) lv_codes[1] + lv_codes[k_lv] else k_lv + 1
                 mat <- tryCatch(vapply(items, function(it) {
                     if (continuous) return(as.numeric(raws[[it]]))
                     v <- as.numeric(match(cols[[it]], lv_all))
-                    if (it %in% rev_set) (k_lv + 1) - v else v
+                    if (numeric_codes) v <- lv_codes[v]
+                    if (it %in% rev_set) refl_sum - v else v
                 }, numeric(nrow(data))), error = function(e) NULL)
                 if (!is.null(mat) && is.matrix(mat)) {
                     ok_rows <- apply(is.finite(mat), 1L, all)
@@ -319,6 +343,17 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                                     (kk / (kk - 1)) * (1 - vi / vt)),
                                 k = as.integer(kk),
                                 n = as.integer(nrow(m2)))
+                            # Each item against the sum of the others, on
+                            # the same scored rows (Nov 2026): a negative
+                            # value marks an item that runs against the
+                            # rest, usually one worded in reverse and not
+                            # yet reverse-scored. jamovi flags the same.
+                            likert_alpha$itemRest <- lapply(seq_len(kk), function(j) {
+                                rj <- suppressWarnings(stats::cor(
+                                    m2[, j], rowSums(m2[, -j, drop = FALSE])))
+                                if (is.finite(rj)) list(item = items[[j]], r = as.numeric(rj))
+                                else list(item = items[[j]])
+                            })
                         }
                     }
                 }
@@ -359,6 +394,7 @@ likertplotbuilderClass <- if (requireNamespace('jmvcore', quietly = TRUE)) R6::R
                 likert_cells = cells,
                 likert_means = means,
                 likert_alpha = likert_alpha,
+                likert_codes = if (numeric_codes) lv_codes else NULL,
                 likert_continuous = continuous,
                 likert_ci_level = ci_level,
                 chart_spec = gb_spec_sanitized_json(self$options$chartSpec),

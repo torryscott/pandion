@@ -43,7 +43,8 @@ const terms = Function('return ' +
 // 133 since Sep 19 2026: the Mode entry joined beside Median.
 check('glossary inventory remains 133 entries', glossary.length === 133);
 // 105 since Sep 19 2026: the Mode term joined with the Mode column.
-check('linked Sigma inventory remains 105 terms', Object.keys(terms).length === 105);
+// 106 since Nov 11 2026: Welch's F joined with its row on the Omnibus tab.
+check('linked Sigma inventory remains 106 terms', Object.keys(terms).length === 106);
 check('glossary names are unique', new Set(glossary.map(e => e.n)).size === glossary.length);
 
 const modules = new Set(['Compare', 'RM', 'Freq', 'Dist', 'Corr', 'Likert', 'Scatter']);
@@ -103,7 +104,9 @@ const linked = [
     ['p value', 'p', ['null hypothesis']],
     ['p adjusted', 'pAdj', ['comparison models']],
     ['Mann-Whitney U', 'mannWhitney', ['not automatically a test of medians']],
-    ['Wilcoxon signed-rank', 'wilcoxonSR', ['symmetric around zero']],
+    // The popover states the null in full since Nov 11 2026 ("spread
+    // symmetrically around zero"); the point held here is the symmetry.
+    ['Wilcoxon signed-rank', 'wilcoxonSR', ['symmetrically around zero']],
     ["Cronbach's alpha", 'cronbachAlpha', ['items contribute equally']],
     ['Data ellipse', 'confEllipse', ['model-based summary']],
     ['Cumulative %', 'cumulativePct', ['sorting a histogram table']],

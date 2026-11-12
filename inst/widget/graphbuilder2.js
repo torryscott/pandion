@@ -2185,6 +2185,33 @@
         // two-sided p matches prop.test(x, n, correct = FALSE).
         // seDiff is the unpooled Wald SE, used for the CI on p1 - p2
         // (also matching prop.test's correct = FALSE interval).
+        // Fisher's exact test for a 2 x 2 table, two-sided the way R's
+        // fisher.test computes it: the summed probability of every table
+        // with the same margins that is no more likely than the observed
+        // one (R's relative tolerance of 1e-7). Counts must be whole.
+        fisherExact2x2: function (a, b, c, d) {
+            var whole = function (v) {
+                return typeof v === "number" && isFinite(v) && v >= 0 && Math.abs(v - Math.round(v)) < 1e-9;
+            };
+            if (!whole(a) || !whole(b) || !whole(c) || !whole(d)) return null;
+            a = Math.round(a); b = Math.round(b); c = Math.round(c); d = Math.round(d);
+            var r1 = a + b, r2 = c + d, c1 = a + c, n = r1 + r2;
+            if (n < 1) return null;
+            var self = this;
+            var lf = function (x) { return self._logGamma(x + 1); };
+            var lp = function (x) {
+                return lf(r1) + lf(r2) + lf(c1) + lf(n - c1) - lf(n) -
+                    lf(x) - lf(r1 - x) - lf(c1 - x) - lf(r2 - c1 + x);
+            };
+            var lo = Math.max(0, c1 - r2), hi = Math.min(r1, c1);
+            var lobs = lp(a), sum = 0;
+            for (var x = lo; x <= hi; x++) {
+                var l = lp(x);
+                if (l <= lobs + 1e-7) sum += Math.exp(l);
+            }
+            if (!isFinite(sum)) return null;
+            return { p: Math.min(1, sum) };
+        },
         twoPropZ: function (x1, N1, x2, N2, tail) {
             if (!(N1 > 0) || !(N2 > 0)) return null;
             var p1 = x1 / N1, p2 = x2 / N2;
@@ -2316,6 +2343,41 @@
             return { F: F, df1: df1, df2: df2, p: p,
                      msb: msb, msw: msw,
                      etaSq: etaSq, k: k, N: N };
+        },
+        // Welch's one-way ANOVA (Welch 1951): each group weighted by its
+        // own precision n / s^2, so no common spread is assumed. Needs at
+        // least two values and a positive variance in every group. The
+        // second df is estimated and is rarely whole. Matches R's
+        // oneway.test(var.equal = FALSE) and jamovi's One-Way ANOVA.
+        welchANOVA: function (levels) {
+            if (!levels || levels.length < 2) return null;
+            var gs = [], W = 0, i;
+            for (i = 0; i < levels.length; i++) {
+                var v = (levels[i] || []).filter(isFinite);
+                if (v.length < 1) continue;
+                if (v.length < 2) return null;
+                var m = this.mean(v), s2 = this.variance(v, m);
+                if (!(s2 > 0) || !isFinite(s2)) return null;
+                var w = v.length / s2;
+                gs.push({ n: v.length, m: m, w: w });
+                W += w;
+            }
+            var k = gs.length;
+            if (k < 2 || !(W > 0)) return null;
+            var mw = 0;
+            for (i = 0; i < k; i++) mw += gs[i].w * gs[i].m;
+            mw /= W;
+            var num = 0, lam = 0;
+            for (i = 0; i < k; i++) {
+                num += gs[i].w * (gs[i].m - mw) * (gs[i].m - mw);
+                var q = 1 - gs[i].w / W;
+                lam += q * q / (gs[i].n - 1);
+            }
+            var df1 = k - 1;
+            var F = (num / df1) / (1 + 2 * (k - 2) / (k * k - 1) * lam);
+            var df2 = (k * k - 1) / (3 * lam);
+            if (!isFinite(F) || !isFinite(df2) || !(df2 > 0)) return null;
+            return { F: F, df1: df1, df2: df2, p: this.fSurvival(F, df1, df2), k: k };
         },
         // Gaussian elimination with partial pivoting for the small
         // normal-equations systems below (p <= ~a*b). Returns the
@@ -3612,10 +3674,15 @@
                 // value - one more and the histogram would carry an
                 // empty bin off its right end.
                 var k = 0;
+                // Stop at the first edge that reaches the maximum (Nov
+                // 2026). The test was "past the maximum", and on non-integer
+                // data the last of the target edges lands ON the maximum,
+                // so one more bin was added to hold only the largest value.
+                var aTol = Math.abs(ai.w) * 1e-9;
                 while (k < 2000) {
                     var ax = aStart + k * ai.w;
+                    if (k > 0 && ax >= ai.max - aTol) { edges.push(Math.max(ax, ai.max)); break; }
                     edges.push(ax);
-                    if (ax > ai.max + 1e-9) break;
                     k++;
                 }
                 if (edges.length >= 2) return edges;
@@ -11875,8 +11942,21 @@
                     ci95c: "difference-adjusted 95 percent intervals, read by whether one group\u2019s mean falls inside the other group\u2019s interval",
                     ci: "confidence intervals"
                 }[String(d.errorBarType || "").toLowerCase()];
-                if (_ebName)
-                    parts.push("Error bars show " + _ebName);
+                // Only where error bars are drawn (Nov 2026): the sentence
+                // was spoken for histograms, box plots and median charts,
+                // which draw none.
+                var _ebGt = String(d.graphType || "");
+                var _ebDrawn = (_ebGt === "bar" || _ebGt === "line" || _ebGt === "dot") &&
+                    d.freqMode !== true && d.summaryFunc !== "median";
+                if (_ebName && _ebDrawn) {
+                    // Repeated measures draws within-subject bars by default
+                    // (Nov 2026, the statistical review): say so, and on a
+                    // chart with groups say what they cannot be used for.
+                    var _ebWithin = (d.isRepeatedMeasures === true && d.errorBarMethod === "within");
+                    parts.push("Error bars show " + (_ebWithin ? "within-subject " : "") + _ebName);
+                    if (_ebWithin && gs.length > 1 && !_pieish)
+                        parts.push("They show change within each group and cannot be used to compare the groups");
+                }
                 var _hiddenDataCount =
                     (Array.isArray(d.hiddenBars) ? d.hiddenBars.length : 0) +
                     (Array.isArray(d.hiddenPoints) ? d.hiddenPoints.length : 0) +
@@ -16374,13 +16454,19 @@
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
             // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026;
-            // widened Oct 26 2026 after his class_year screenshot): with ANY
-            // correction on except Games-Howell (Tukey, Dunnett, Bonferroni,
-            // Holm, FDR), an independent t bracket's statistic and
+            // widened Oct 26 2026 after his class_year screenshot; narrowed
+            // Nov 11 2026, his ruling on the statistical review): under
+            // Tukey and Dunnett, whose math needs one error term, and under
+            // Bonferroni, Holm and FDR while Test is left on Auto, an
+            // independent t bracket's statistic and
             // unadjusted p come from the one-way ANOVA's pooled error term
             // over every cell of its panel - the same ruler the adjusted p
             // uses, and what jamovi's ANOVA post hoc prints under every one
             // of its corrections - so a row never mixes two error terms.
+            // Bonferroni, Holm and FDR only rescale p values, so a Welch's
+            // or Student's t PICKED BY HAND under Test stays that pair's
+            // own test (pooling unequal spreads can hide or invent a
+            // difference; the reviewer's case went from .002 to .273).
             // Games-Howell's own model is Welch's t, so under it a Student's
             // pick runs as Welch. With Correct = None each pair is its own
             // two-group test. Under a pooled correction Cohen's d (and g)
@@ -16393,7 +16479,8 @@
                 if (_pc === "gamesHowell") {
                     testKind = "welch";
                 } else if (_pc === "tukey" || _pc === "dunnett" ||
-                           _pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") {
+                           ((_pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") &&
+                            (!ann.autoPTest || ann.autoPTest === "auto"))) {
                     try {
                         var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
                         var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
@@ -16408,6 +16495,23 @@
             if (testKind === "studentT") {
                 res = _gb2Stats.studentT(lv, rv, _tail);
                 testFamily = "t";
+                // A group with a single value (or a pair with no spread of
+                // its own) has no two-group t, but the pooled model compares
+                // its mean all the same, and jamovi's post hoc lists those
+                // pairs (Nov 2026, the statistical review: with groups of 2,
+                // 3 and 1 the pair that drove the omnibus was not listed).
+                // Borrow the model's error term; the pair's own SDs stay
+                // whatever they are.
+                if (!res && _poolModel) {
+                    var _l1 = (lv || []).filter(isFinite), _r1 = (rv || []).filter(isFinite);
+                    if (_l1.length >= 1 && _r1.length >= 1) {
+                        var _lm1 = _gb2Stats.mean(_l1), _rm1 = _gb2Stats.mean(_r1);
+                        res = { t: NaN, df: NaN, p: NaN, m1: _lm1, m2: _rm1,
+                                sd1: (_l1.length > 1) ? _gb2Stats.sd(_l1, _lm1) : NaN,
+                                sd2: (_r1.length > 1) ? _gb2Stats.sd(_r1, _rm1) : NaN,
+                                n1: _l1.length, n2: _r1.length };
+                    }
+                }
                 if (res && _poolModel) {
                     var _seP = Math.sqrt(_poolModel.mse * (1 / res.n1 + 1 / res.n2));
                     if (isFinite(_seP) && _seP > 0) {
@@ -16865,8 +16969,13 @@
                                 applied[ai] = false;
                                 return r.res.p;
                             }
-                            corrStat[ai] = { t: tObs[ai], df: dfD,
-                                             basis: "pooled" };
+                            // the row reads left minus right; Dunnett's own
+                            // statistic is treatment minus control, so give
+                            // it the row's sign (it read +3.02 beside d = -1.35)
+                            corrStat[ai] = { t: (r.res && isFinite(r.res.t) && r.res.t < 0)
+                                                    ? -Math.abs(tObs[ai])
+                                                    : ((r.res && isFinite(r.res.t) && r.res.t > 0) ? Math.abs(tObs[ai]) : tObs[ai]),
+                                             df: dfD, basis: "pooled" };
                             var pd = 1 - _gb2Stats.dunnettCdf(
                                 qD, lambdas, dfD);
                             return Math.max(0, Math.min(1, pd));
@@ -45358,6 +45467,29 @@
                 var levels = Array.isArray(data.likertLevels)
                     ? data.likertLevels.map(String) : [];
                 var k = levels.length;
+                // Numeric response codes (Nov 2026, the statistical review):
+                // when the responses are numbers the payload ships their
+                // values (likertCodes, ascending, in level order) and the
+                // item means, intervals and alpha arrive on those numbers,
+                // not on positions 1..k. Reverse scoring then reflects
+                // around the two ends of the scale, and a mean is placed on
+                // the means axis (whose ticks sit at positions 1..k) by
+                // interpolating between the codes either side of it.
+                var _lkCodes = (Array.isArray(data.likertCodes) && k >= 2 &&
+                    data.likertCodes.length === k) ? data.likertCodes : null;
+                if (_lkCodes) {
+                    for (var _lc0 = 0; _lc0 < k; _lc0++) {
+                        if (typeof _lkCodes[_lc0] !== "number" || !isFinite(_lkCodes[_lc0]) ||
+                            (_lc0 > 0 && !(_lkCodes[_lc0] > _lkCodes[_lc0 - 1]))) { _lkCodes = null; break; }
+                    }
+                }
+                var _lkReflSum = _lkCodes ? (_lkCodes[0] + _lkCodes[k - 1]) : (k + 1);
+                function _lkPos(v) {
+                    if (!_lkCodes || typeof v !== "number" || !isFinite(v)) return v;
+                    var pi = 0;
+                    while (pi < k - 2 && v > _lkCodes[pi + 1]) pi++;
+                    return (pi + 1) + (v - _lkCodes[pi]) / (_lkCodes[pi + 1] - _lkCodes[pi]);
+                }
                 var allItems = Array.isArray(data.likertItems)
                     ? data.likertItems.map(String) : [];
                 // A continuous battery legitimately ships ZERO levels
@@ -45406,9 +45538,9 @@
                     var m = meanMap[it];
                     if (!m || !_lkIsRev(it)) return m;
                     var out = { item: m.item, n: m.n, mean: m.mean, se: m.se };
-                    if (typeof m.mean === "number") out.mean = k + 1 - m.mean;
-                    if (typeof m.hi === "number") out.lo = k + 1 - m.hi;
-                    if (typeof m.lo === "number") out.hi = k + 1 - m.lo;
+                    if (typeof m.mean === "number") out.mean = _lkReflSum - m.mean;
+                    if (typeof m.hi === "number") out.lo = _lkReflSum - m.hi;
+                    if (typeof m.lo === "number") out.hi = _lkReflSum - m.lo;
                     return out;
                 }
                 function pctOf(it, lv) {
@@ -45956,8 +46088,8 @@
                         var _ciEls = [];
                         if (hasCI) {
                             var _ciLine = svgEl("line", {
-                                x1: toX(Math.max(xmin, loV)), y1: cyD,
-                                x2: toX(Math.min(xmax, hiV)), y2: cyD,
+                                x1: toX(Math.max(xmin, _lkPos(loV))), y1: cyD,
+                                x2: toX(Math.min(xmax, _lkPos(hiV))), y2: cyD,
                                 stroke: _ciC, "stroke-width": ciW,
                                 "stroke-opacity": 0.85, "stroke-linecap": "round",
                                 "data-role": "likert-ci", "data-item": it
@@ -45968,7 +46100,7 @@
                             [loV, hiV].forEach(function (b2) {
                                 if (b2 < xmin || b2 > xmax) return;
                                 var _cap = svgEl("line", {
-                                    x1: toX(b2), y1: cyD - 4, x2: toX(b2), y2: cyD + 4,
+                                    x1: toX(_lkPos(b2)), y1: cyD - 4, x2: toX(_lkPos(b2)), y2: cyD + 4,
                                     stroke: _ciC, "stroke-width": ciW,
                                     "stroke-opacity": 0.85,
                                     "data-role": "likert-ci-cap", "data-item": it
@@ -45980,7 +46112,7 @@
                             // treatment (the interval thickens) + tooltip +
                             // click to open the means panel; the row stays
                             // drag-to-reorder.
-                            var _ciHX1 = toX(Math.max(xmin, loV)), _ciHX2 = toX(Math.min(xmax, hiV));
+                            var _ciHX1 = toX(Math.max(xmin, _lkPos(loV))), _ciHX2 = toX(Math.min(xmax, _lkPos(hiV)));
                             var _ciHit = svgEl("rect", {
                                 x: Math.min(_ciHX1, _ciHX2), y: cyD - 6,
                                 width: Math.abs(_ciHX2 - _ciHX1), height: 12,
@@ -46019,7 +46151,7 @@
                         var _lkDotShape = (typeof data.likertDotShape === "string" && data.likertDotShape.length) ? data.likertDotShape : "circle";
                         var _lkOutlineC = (typeof data.likertDotOutlineColor === "string" && data.likertDotOutlineColor.length) ? data.likertDotOutlineColor : "#ffffff";
                         var _lkOutlineW = (typeof data.likertDotOutlineWidth === "number" && data.likertDotOutlineWidth >= 0) ? data.likertDotOutlineWidth : 1;
-                        var dot = pointShapeEl(_lkDotShape, toX(md2.mean), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
+                        var dot = pointShapeEl(_lkDotShape, toX(_lkPos(md2.mean)), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
                         dot.setAttribute("data-role", "likert-dot");
                         dot.setAttribute("data-item", it);
                         dot.style.pointerEvents = "none";
@@ -46030,7 +46162,7 @@
                         // + click open the means panel; the row stays
                         // drag-to-reorder.
                         var _dotHalo = svgEl("circle", {
-                            cx: toX(md2.mean), cy: cyD, r: Math.max(dotR + 5, 9),
+                            cx: toX(_lkPos(md2.mean)), cy: cyD, r: Math.max(dotR + 5, 9),
                             fill: "transparent", stroke: "none",
                             style: "cursor:pointer;",
                             "data-role": "likert-dot-hit", "data-item": it
@@ -52033,16 +52165,17 @@
             mode: { name: "Mode", sym: "Mo", body: "The value that occurs most often in the sample. When several values share the highest count, the smallest of them is reported and the cell carries an asterisk; when every value occurs exactly once there is no mode and the cell shows a dash.", read: "For measurements with many distinct values the mode says little; it is most useful for counts, ratings and other data with a small set of repeated values. Compare it with the mean and median to see where the bulk of the observations sits." },
             sd: { name: "SD (standard deviation)", sym: "SD", body: "How spread out individual values are around their mean, in the same units as the data. A larger SD means the values are more spread out.", read: "SD describes the spread of the observations, not the precision of the estimated mean; do not confuse it with SE." },
             se: { name: "SE (standard error)", sym: "SE", body: "How much the cell's mean would wobble from sample to sample. For an ordinary independent cell it is the SD divided by the square root of n. Repeated Measures instead uses the selected within-subject or between-subject method; the table footnote names which one.", read: "A smaller SE (a shorter error bar) means the mean is estimated more precisely. In a repeated-measures chart, interpret it using the method named below the table." },
+            welchF: { name: "Welch's F", sym: "F", body: "A one-way ANOVA that does not assume the groups share one spread. Each group counts by its own precision, and the second degrees of freedom are estimated from the data, so they are rarely a whole number.", read: "Read it like the F above it: it asks whether the group means differ anywhere. When the groups' spreads differ a lot it is the safer of the two rows; when the spreads are similar the two rows nearly agree." },
             fStat: { name: "F statistic", sym: "F", body: "A ratio of effect-related variation to error variation. Larger F means the group or condition differences are large relative to the noise used for that test.", read: "A big F signals detectability, not importance; use an effect size to judge how large the difference is." },
             df: { name: "degrees of freedom", sym: "df", body: "How many values in the calculation are free to vary: depending on the test it tracks your sample size, the number of groups, or the size of the table. It sets the shape of the distribution the test uses.", read: "This is bookkeeping for the test, not a finding on its own." },
-            omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor on its own; an interaction means one factor's effect depends on the level of the other." },
+            omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor's effect averaged over the levels of the other factor, not that factor acting by itself; an interaction means one factor's effect depends on the level of the other." },
             mainEffect: { name: "Main effect", sym: "", body: "One factor's overall effect: whether its levels differ on the outcome when you average over the other factor(s) in the design.", read: "A small p is evidence this factor's levels differ on average. When an interaction is significant, read a main effect with care: the factor's effect is not the same at every level of the other factor." },
             interactionEffect: { name: "Interaction", sym: "", body: "An interaction means that the pattern for one factor changes across the levels of another. In ANOVA terms, the factors are not simply additive on the outcome scale being analyzed.", read: "A small interaction p is evidence that the modeled difference is not the same at every level of the other factor. Examine the cell means or simple effects instead of relying only on overall main effects." },
-            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the total corrected sum of squares.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA, the terms are adjusted and can overlap, so their eta-squared values do not have to add to 1." },
+            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA with unequal cell sizes the table's rows no longer add up to the data's total variation, so the share is of the table's own total." },
             etaSqP: { name: "Partial eta-squared", sym: "η²p", body: "Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.", read: "It runs from 0 to 1, but it is not a share of all outcome variation. Values for different terms do not add to 1 and can change with the design and error denominator." },
             omegaSq: { name: "Omega-squared", sym: "ω²", body: "Like eta-squared, omega-squared estimates how much population variation is associated with an ANOVA effect, but it corrects some of eta-squared's upward bias. It is often a little smaller.", read: "The estimate can be zero or negative. Read a small negative value as an effect near zero, not as negative variance." },
             shapiroW: { name: "Shapiro-Wilk W", sym: "W", body: "The Shapiro-Wilk test compares the ordered sample with the pattern expected from a normal distribution. W is generally nearer 1 when the sample is more compatible with normality, but W is not a percentage or a stand-alone closeness score; its p value also depends on sample size.", read: "A small p flags evidence against normality under the test. A larger p means no departure was detected, not that normality was proved." },
-            skewness: { name: "Skewness", sym: "", body: "How lopsided the distribution is. Positive means a longer tail to the right (high values), negative a longer tail to the left, and near zero is roughly symmetric.", read: "Past about 1 or below about -1 is noticeably skewed, but treat that as a rough guide, not a cutoff." },
+            skewness: { name: "Skewness", sym: "", body: "How lopsided the distribution is. Positive means a longer tail to the right (high values), negative a longer tail to the left. A symmetric distribution has skewness 0, but a value near zero does not by itself show symmetry.", read: "Past about 1 or below about -1 is noticeably skewed, but treat that as a rough guide, not a cutoff." },
             kurtosis: { name: "Kurtosis (excess)", sym: "", body: "Excess kurtosis summarizes how strongly extreme values affect the distribution compared with a normal distribution, which is set to 0. Positive values mean greater tail extremity; negative values mean less.", read: "Sample kurtosis is strongly influenced by extreme observations. It does not measure how tall, flat, or pointy the center of the distribution looks." },
             minMax: { name: "Min and Max", sym: "", body: "The smallest and largest values in the cell. Together they mark the full range the data cover.", read: "The gap between them is the total range; a lone extreme value can stretch it." },
             chiSq: { name: "Chi-square", sym: "χ²", body: "Pearson's chi-square compares observed counts with the counts expected under the null hypothesis. Pandion Plots uses the usual uncorrected statistic and an approximate chi-square p value for tests of independence or equal proportions.", read: "Interpret it only with df, p, expected counts, and an effect size. It assumes independent observational units and can be inaccurate with sparse expected counts." },
@@ -52050,7 +52183,7 @@
             cohensW: { name: "Cohen's w", sym: "w", body: "An effect size for the goodness-of-fit test: how far the observed proportions stray from the expected ones, on a scale that does not depend on sample size.", read: "Rough benchmarks are about 0.1 small, 0.3 medium, 0.5 large; read it alongside the p value, not instead of it." },
             deltaP: { name: "Difference in proportions", sym: "Δp", body: "The plain gap between two proportions, one minus the other, on the same scale as the proportions. It is the effect size that goes with the two-proportion z-test.", read: "A difference of 0.15 means one group's proportion is 15 percentage points higher; the sign shows the direction." },
             zStat: { name: "z statistic", sym: "z", body: "A standardized score for how many standard errors a result sits from what the no-difference assumption expects. Here it comes from comparing two proportions.", read: "Further from 0 (either sign) is more surprising under the null; the p value is the probability piece." },
-            stdResidual: { name: "Standardized residual", sym: "", body: "For one cell, how far its observed count sits above or below its expected count, on a standardized scale (adjusted, so it behaves roughly like a z-score).", read: "Positive means more cases than expected, negative fewer; a magnitude of about 2 or more marks a cell that departs notably." },
+            stdResidual: { name: "Standardized residual", sym: "", body: "For one cell, how far its observed count sits above or below its expected count, on a standardized scale (adjusted, so it behaves roughly like a z-score).", read: "Positive means more cases than expected, negative fewer; a magnitude of about 2 or more is worth a look, but a table has many cells and some pass 2 by chance, so treat it as a clue and not a separate test." },
             percentTotal: { name: "% of Total", sym: "", body: "A cell's count shown as a percentage of the total being used for that chart. Usually the total is all visible cases in the panel. In a 100% filled bar it is the total for that category, and in a grouped proportion histogram each group uses its own total.", read: "Check the denominator,the total used to calculate the percentage,before comparing values. Each complete set adds to about 100%, apart from rounding." },
             cumulativePct: { name: "Cumulative %", sym: "", body: "A running percentage over categories or intervals in a defined order. Histogram bins accumulate from the lowest interval upward. Frequency categories accumulate in chart order within each panel.", read: "Check both the order and the denominator. Sorting a histogram table only rearranges the already calculated rows, so a count-sorted view may not show 100% in its last visible row." },
             count: { name: "Count", sym: "", body: "A raw frequency: how many cases fall in this cell or bin.", read: "Counts depend on sample size; a percent is easier to compare across groups of different sizes." },
@@ -52067,7 +52200,7 @@
             studentT: { name: "Student's t-test", sym: "t", body: "Student's t-test compares the population means of two independent groups. It combines the two group variances into one pooled estimate, so it assumes that the population variances are equal. It also relies on independent observations and the usual normal or large-sample approximation.", read: "Use it when the equal-variance model is defensible; otherwise Welch's test is generally safer. Report the mean difference and its uncertainty, not t alone." },
             pairedT: { name: "Paired t-test", sym: "t", body: "The paired t-test compares two measurements from the same people or matched units by first calculating each pair's difference. It tests whether the population mean difference is zero. Pairs must be correctly matched, different pairs must be independent, and the difference scores need the usual normal or large-sample approximation.", read: "Report the signed mean difference, its uncertainty, and p value. A significant result does not mean that every unit changed or that the change was large." },
             mannWhitney: { name: "Mann-Whitney U", sym: "U", body: "Mann-Whitney compares two independent groups by ranking their combined observations. In general, it tests whether values from one group tend to rank differently from values in the other; it is not automatically a test of medians. Only when the distributions have comparable shapes can it be read cleanly as a location shift.", read: "Use the p value for the rank-distribution comparison and report the group distributions with a rank-based effect size. Skewness alone does not make Mann-Whitney preferable to Welch's t-test." },
-            wilcoxonSR: { name: "Wilcoxon signed-rank", sym: "V", body: "Wilcoxon signed-rank is a paired test that ranks the nonzero differences by size and keeps their signs. It tests whether the difference distribution is symmetric around zero. Under symmetry, this concerns the method's center, called the pseudomedian, rather than simply the ordinary sample median.", read: "A small p value indicates an imbalance between positive and negative signed ranks under that symmetry model. It does not show that every person changed or that the change was large." },
+            wilcoxonSR: { name: "Wilcoxon signed-rank", sym: "V", body: "Wilcoxon signed-rank is a paired test that ranks the nonzero differences by size and keeps their signs. Its null hypothesis is that the differences are spread symmetrically around zero. When the differences are symmetric, it tests whether their center is zero (median, mean and pseudomedian are then the same point). When they are not, it can reject even though the median or mean difference is zero.", read: "A small p value indicates an imbalance between positive and negative signed ranks under that symmetry model. It does not show that every person changed or that the change was large." },
             tStat: { name: "t statistic", sym: "t", body: "A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it further from 0. It feeds into the p value.", read: "Further from 0 (either sign) means a stronger difference relative to noise; the sign shows which side is higher. A large t can come from a tiny difference measured precisely." },
             uStat: { name: "U statistic", sym: "U", body: "The Mann-Whitney U statistic is based on pairwise ordering: each observation in one group is compared with each observation in the other, and tied pairs contribute half. Pandion Plots displays the smaller of the two complementary U values. The sign of its effect size separately follows jamovi's first-sample convention.", read: "U depends on the two sample sizes, so interpret it through its null distribution and p value. Report the group distributions and rank-biserial effect rather than treating U itself as a location difference." },
             vStat: { name: "V statistic", sym: "V", body: "The Wilcoxon signed-rank statistic used here: zero differences are removed, absolute differences are ranked, and the ranks attached to positive differences are summed.", read: "Interpret V through its null distribution and p value. Describe the full distribution of paired differences and report the rank-biserial effect for size. The signed-rank test is not simply a test of the ordinary median." },
@@ -52075,7 +52208,7 @@
             cohensDz: { name: "Cohen's dz (paired)", sym: "dz", body: "For paired or repeated measurements, Cohen's dz is the sample mean of the pairwise differences divided by the sample SD of those differences. It expresses the average difference in difference-score SD units.", read: "Larger absolute values mean that the mean difference is large relative to the variation among the pairwise differences. Its denominator differs from independent-group d, so the values are not directly interchangeable." },
             hedgesG: { name: "Hedges' g", sym: "g", body: "Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.", read: "Read it exactly like d, as a mean difference in standard deviation units, nudged a little toward zero in small samples." },
             rankBiserialR: { name: "Rank-biserial r", sym: "r", body: "A signed rank-based effect size from -1 to +1. For Mann-Whitney it summarizes pairwise ordering between groups; for Wilcoxon it compares the total positive and negative signed ranks. Pandion Plots follows jamovi's sign convention, which can point opposite to Cohen's d for the same independent-group ordering.", read: "Values near -1 or +1 mean that nearly all pairwise comparisons or signed ranks point in one direction; values near 0 mean little net rank dominance. It is not Pearson correlation and does not by itself describe a median difference." },
-            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
+            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
             varPair: { name: "Pair", sym: "", body: "The two variables whose correlation this row reports. Correlation is symmetric, so the order of the two names does not matter.", read: "" },
             surveyItem: { name: "Item", sym: "", body: "One question or statement from the survey battery. Each row summarizes every response to that one item.", read: "An (R) marker means the item was reverse-scored before these numbers were computed, so it reads in the same direction as the rest of the scale." },
             itemCount: { name: "Items", sym: "k", body: "How many survey items feed the reliability estimate. With the same average agreement among items, a longer scale pushes alpha higher, so compare alphas with the item count in mind.", read: "" }
@@ -53541,7 +53674,7 @@
             {g:1,n:"Cohen's dz (paired)",y:"dz",m:["RM"],s:["dz","paired d","effect size paired"],b:"For paired or repeated measurements, Cohen's dz is the mean of the paired differences divided by the SD of those differences.",r:"The sign shows the direction of the mean difference. A larger absolute value means the mean difference is larger relative to how much the paired differences vary.",w:"It does not describe a typical person's change and is not directly interchangeable with independent-group d. Fixed small/medium/large labels are context-dependent."},
             {g:1,n:"Hedges' g",y:"g",m:["Compare","RM"],s:["g","corrected d","effect size"],b:"Hedges' g is Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.",r:"Read it exactly like d, as a mean difference in standard deviation units, with values in small samples pulled a little toward zero compared to d.",w:"Several Hedges-g conventions and correction formulas exist. Report the software and denominator convention when exact cross-study comparability matters."},
             {g:1,n:"rank-biserial r",y:"r",m:["Compare","RM"],s:["rank biserial","effect size rank","nonparametric effect size"],b:"A rank-based effect size from -1 to +1. For Mann-Whitney, it summarizes whether observations from one independent group tend to outrank those from the other. For Wilcoxon, it compares the positive and negative ranked paired differences.",r:"Values near 0 show little overall rank advantage; values nearer -1 or +1 show that the ranked evidence falls mostly in one direction. Check group order before interpreting the sign: Pandion Plots follows jamovi's convention, which can point opposite to Cohen's d.",w:"It is not Pearson correlation, and it does not by itself estimate a difference in means or medians."},
-            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the total corrected sum of squares. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the total corrected sum of squares under this ANOVA calculation.",w:"In a factorial Type III ANOVA, adjusted terms can overlap, so their eta-squared values do not have to add to 1. Eta-squared also tends to overestimate the corresponding population effect."},
+            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the table's total under this ANOVA calculation.",w:"In a factorial Type III ANOVA with unequal cell sizes, the table's rows do not add up to the data's total variation, so eta-squared is a share of the table's own total, not of all the variation in the data. Eta-squared also tends to overestimate the corresponding population effect."},
             {g:1,n:"Partial eta-squared",y:"partial eta2",m:["Compare","RM"],s:["partial eta squared","eta p","effect size anova"],b:"Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.",r:"It runs from 0 to 1. Read it as the term's variation divided by that variation plus its own error,not as a share of all outcome variation.",w:"Values across terms do not add to 1 and depend on the design and error denominator. Do not compare them as though they were slices of one common whole."},
             {g:1,n:"Omega-squared",y:"omega2",m:["Compare","RM"],s:["omega squared","effect size anova","less biased"],b:"Omega-squared estimates the share of population variance associated with an ANOVA effect while correcting some of eta-squared's upward bias. It is often smaller than eta-squared, and an estimate can be zero or negative.",r:"Treat a small negative value as an estimate near zero, not as negative variance. Formula conventions differ across designs, so report the software or method when comparing studies.",w:"Bias correction does not make omega-squared assumption-free; it inherits the ANOVA model and design assumptions."},
             {g:1,n:"R-squared",y:"R2",m:["Scatter"],s:["r squared","variance explained","fit","goodness of fit regression"],b:"R-squared is the proportion of the variation in the outcome that the fitted line or model accounts for. It runs from 0 to 1, where 0 explains none of the spread and 1 explains all of it.",r:"Read it as the fraction of the outcome's variation captured by the fit: 0.25 means the model accounts for about 25 percent of the spread.",w:"A high R-squared means the model fits the spread of these data well, not that the relationship is causal or that predictions will be accurate for new cases."},
@@ -53550,7 +53683,7 @@
             {g:2,n:"paired t-test",y:"t",m:["RM"],s:["paired","dependent t","repeated t","before after"],b:"A test of whether the population's average paired difference is zero,for example, when the same people are measured before and after. It works on each matched pair's difference score.",r:"t is the mean difference divided by its SE. The sign shows direction; report the mean difference, confidence interval, and p value rather than t alone.",w:"Pairs must be correctly matched and independent of other pairs, and the difference-score mean needs an adequate normal or large-sample approximation. Significance does not mean every unit changed or that change was large."},
             {g:2,n:"Mann-Whitney U",y:"U",m:["Compare"],s:["u test","mann whitney","wilcoxon rank sum","nonparametric","rank test"],b:"A test for two independent groups that works with ranked values rather than means. In general, it asks whether values from the two groups tend to occupy different ranks; it is not automatically a test of medians.",r:"Use the p value to assess the rank-distribution difference and report both groups' distributions plus a rank-based effect size. If the group distributions have similar shapes, the result can be interpreted as a location shift; if their shapes differ, the test can respond to those differences too.",w:"Skewness alone does not make Mann-Whitney preferable to Welch's t-test. Different shapes can produce significance even when medians are equal."},
             {g:2,n:"Wilcoxon signed-rank",y:"V",m:["RM"],s:["signed rank","wilcoxon","nonparametric paired","rank test"],b:"A paired test that ranks the sizes of nonzero differences, then compares ranks attached to positive and negative differences. Its usual null assumes the difference distribution is symmetric around zero; under that assumption, it tests whether the distribution is centered at zero,technically, whether its pseudomedian is zero.",r:"Pandion Plots reports V as the sum of positive ranks. Use its p value to assess the signed-rank imbalance, and also report the paired differences and a rank-based effect size.",w:"The test uses both signs and ranked magnitudes, so it is not assumption-free and is not generally justified by saying the scores are merely ordinal or skewed."},
-            {g:2,n:"Which test?",y:"",m:["Compare","RM"],s:["which test","choose a test","welch or student","t test or mann whitney","test selection","equal variances","levene"],b:"Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.",r:"Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.",w:"Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not."},
+            {g:2,n:"Which test?",y:"",m:["Compare","RM"],s:["which test","choose a test","welch or student","t test or mann whitney","test selection","equal variances","levene"],b:"Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test does not hold the error rate that Welch's t holds when used every time (the pretest misses unequal variances in small samples, exactly where Student's t then goes wrong), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.",r:"Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.",w:"Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not."},
             {g:2,n:"the t statistic",y:"t",m:["Compare","RM"],s:["t","t value","signal to noise"],b:"A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it away from 0. It feeds into the p value; on its own it is a signal-to-noise ratio, not a probability.",r:"Look at how far t sits from 0: further out (in either direction) means a stronger difference relative to noise, and the sign just shows which group or direction is higher.",w:"t by itself is not a p value and not an effect size; a large t can come from a tiny difference measured very precisely."},
             {g:2,n:"the U statistic",y:"U",m:["Compare"],s:["u"],b:"A Mann-Whitney statistic equivalent to counting pairwise orderings between groups, with tied pairs contributing half. Pandion Plots displays the smaller of the two complementary U values, while rank-biserial sign follows jamovi's first-sample convention.",r:"Interpret U through the group sizes and its null distribution; report the group distributions and rank-biserial effect.",w:"U is not itself a difference in means or medians, and software may display U for a particular group rather than the smaller U."},
             {g:2,n:"the V statistic",y:"V",m:["RM"],s:["v"],b:"Pandion Plots removes zero paired differences, ranks the absolute nonzero differences, and reports V as the sum of ranks attached to positive differences, matching R's convention.",r:"Interpret V through its null distribution and p value; report the paired-difference distribution and rank-biserial effect size.",w:"V is not a median and different software can report a different signed-rank sum, so always name the convention when comparing output."},
@@ -53570,7 +53703,7 @@
             {g:4,n:"Bonferroni",y:"",m:["Compare","RM","Freq","Corr"],s:["bonferroni","strict correction"],b:"Bonferroni limits the chance of one or more false positives across a chosen family to no more than alpha. It does this by multiplying each p value by the number of tests, up to 1, which is equivalent to dividing alpha by that number. The guarantee does not require independent tests.",r:"Compare the adjusted p values with the original alpha and report what counted as the family.",w:"It controls an error probability; it does not guarantee zero false positives. Its conservatism can reduce power, especially with many dependent tests."},
             {g:4,n:"Holm",y:"",m:["Compare","RM","Freq","Corr"],s:["holm","step down","holm bonferroni"],b:"Holm first orders the p values, then applies a step-down version of Bonferroni. It controls the same family-wise error rate even when tests are dependent and is never less powerful than ordinary Bonferroni.",r:"Compare Holm-adjusted p values directly with alpha and report the family.",w:"Greater power than Bonferroni does not guarantee that every additional rejection is true; the procedure controls a long-run family error rate."},
             {g:4,n:"Benjamini-Hochberg (FDR)",y:"",m:["Compare","RM","Freq","Corr"],s:["fdr","false discovery rate","bh","benjamini hochberg"],b:"Benjamini-Hochberg controls the expected proportion of false positives among the hypotheses it rejects, rather than the chance of any false positive. This guarantee holds for independent tests and for common forms of positive dependence.",r:"Compare BH-adjusted p values with the chosen FDR level, and state which tests formed the family. BH often finds more results than family-wise methods because it controls a different error rate.",w:"It does not promise that this particular finding is true or that the realized false share in this one analysis is below the target. Arbitrary dependence requires additional justification or another procedure."},
-            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare","RM"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead."},
+            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare","RM"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does. On Repeated Measures that control is approximate: with few subjects and several occasions the family-wise rate runs somewhat above alpha, and Holm on the same paired tests holds it.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead."},
             {g:4,n:"Games-Howell",y:"",m:["Compare"],s:["games howell","unequal variance posthoc"],b:"Games-Howell compares every pair of independent-group means while allowing the groups to have different variances and sample sizes. It uses separate variance estimates and adjusts the p values for the full set of pairwise comparisons.",r:"Compare each adjusted p value directly with alpha. The adjustment accounts for both unequal variances and multiple comparisons.",w:"It still assumes independent units and a suitable mean-based sampling model. In Pandion Plots it does not apply to paired or rank-based tests."},
             {g:4,n:"Dunnett (vs control)",y:"",m:["Compare"],s:["dunnett","vs control","against control"],b:"A correction for the specific case where you compare several treatment groups only against one control group, not against each other. Because it tests fewer comparisons, it keeps more sensitivity than comparing every pair.",r:"Each adjusted p value tells you whether that treatment group differs from the control; compare it to your usual cutoff.",w:"It assumes independent units and a defensible common-variance normal linear model. It says nothing about treatment-versus-treatment contrasts and is not an unequal-variance alternative."},
             {g:5,n:"Cell",y:"",m:["Compare","RM","Dist","Freq","Likert"],s:["cell","group","bar"],b:"A cell is one group in the chart: a single bar, box, or point identity, defined by its category (and its panel if the chart is split into panels). All the numbers in a summary row describe that one cell.",r:"Read the row's label to see which group the cell is (for example, the category name, or the panel and category together when the chart is faceted).",w:""},
@@ -53601,7 +53734,7 @@
             {g:7,n:"Slope",y:"b",m:["Scatter"],s:["slope","regression","b","beta","rise over run"],b:"The regression slope is how much the y variable is predicted to change for each one-unit increase in the x variable, drawn as the tilt of the best-fit line. Its size depends on the units of your variables, so a slope of 2 means something different for dollars than for millimeters.",r:"Read it as: for every 1 unit more of x, the predicted y rises (or falls, if negative) by this many units; the sign matches the direction of the correlation.",w:"A large slope is not the same as a strong relationship, since slope depends on measurement units while strength is carried by r and R-squared."},
             {g:7,n:"Strongest pair",y:"",m:["Corr"],s:["strongest","largest correlation","biggest relationship"],b:"The pair with the largest absolute value of the currently selected matrix coefficient: Pearson r, Spearman rho, or Kendall tau-b. It is chosen only from pairs with computable coefficients in the displayed variable set.",r:"Check the selected method and sign. 'Strongest' is a relative ranking within this matrix, not a claim of significance, practical importance, stability, or causation.",w:"Because the app searches across several pairs and highlights the largest sample coefficient, that winner will often look stronger than it would in new data. Treat it as a lead to investigate, not a confirmed result."},
             {g:7,n:"Cronbach's alpha",y:"alpha",m:["Likert"],s:["cronbach","alpha","reliability","internal consistency","scale"],b:"Cronbach's alpha summarizes how a set of scored items hangs together in this sample. It is calculated from the item variances, their covariances, and the number of items. Pandion Plots uses respondents with complete data on all items after any reverse scoring.",r:"Report alpha with the number of items, sample size, scoring decisions, and missing-data handling. Interpreting alpha as reliability also assumes, among other things, that items contribute equally to the common score and that their errors are uncorrelated.",w:"There is no universal .70 pass mark, and alpha can be negative. Alpha does not by itself show that a scale is one-dimensional, valid, stable over time, or equally reliable for every subgroup or score level."},
-            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
+            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
             {g:7,n:"Internal consistency",y:"",m:["Likert"],s:["internal consistency","reliability","items agree"],b:"Internal consistency describes how responses to items intended for one combined score relate to one another in a sample. Cronbach's alpha is one common summary. Consistency does not mean that people answer every item identically, and it becomes a reliability claim only under a suitable measurement model.",r:"Before interpreting one coefficient, check the item content, scoring direction, dimensionality, and pattern of relationships among the items.",w:"Strong item relationships can come from redundancy, shared wording, method effects, or several correlated dimensions. They do not by themselves prove one dimension or construct validity."},
             {g:8,n:"Silverman's rule of thumb (bandwidth)",y:"",m:["Compare", "RM", "Dist"],s:["bandwidth", "silverman", "smoothing", "kde bandwidth", "smooth the curve"],b:"Bandwidth controls how much a density curve is smoothed. Pandion Plots first chooses an automatic width using Silverman's rule of thumb: h = 0.9 times min(SD, IQR/1.34) times n^(-1/5). If IQR is 0 it uses SD, and if there is no usable spread it uses width 1. The Bandwidth control multiplies this automatic value.",r:"Below 1 reduces smoothing and above 1 increases it. Inspect whether important features persist across reasonable nearby settings.",w:"The slider value is not the bandwidth in data units, and this rule is not optimal for every distribution, especially multimodal, bounded, or very small samples."},
             {g:8,n:"Kernel (kernel density estimate)",y:"",m:["Dist"],s:["kernel", "kde", "kernel density", "density estimate", "bump shape"],b:"A kernel density estimate places a small smooth bump at every observation and adds the bumps together. The Kernel setting chooses the bump's shape, while Bandwidth controls its width. Bandwidth usually changes the visible curve more.",r:"Try reasonable nearby bandwidths and, when useful, different kernels. Features that remain visible across those choices are more stable than bumps that appear under only one setting.",w:"The curve is an estimate, not a uniquely determined outline of the population. Near a hard boundary such as zero, it can spill into impossible values, and small samples can produce unstable bumps."},
@@ -54280,9 +54413,18 @@
                     if (_fqT && typeof _fqT.minExp === "number" && isFinite(_fqT.minExp)
                         && (_fcMinE === null || _fqT.minExp < _fcMinE)) _fcMinE = _fqT.minExp;
                 }
+                // a 2 by 2 table cannot combine categories; Fisher's exact
+                // test (on the Chi-square tab) is the remedy there
+                var _fc22 = false;
+                for (var _fq3 = 0; _fq3 < data.freqTests.length; _fq3++)
+                    if (data.freqTests[_fq3] && data.freqTests[_fq3].type === "independence" &&
+                        data.freqTests[_fq3].df === 1) _fc22 = true;
                 if (_fcMinE !== null && _fcMinE < 5)
                     out.push({ id: "chisqexp", sev: "warn", title: "Expected counts are too small for chi-square",
-                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". Consider combining sparse categories, or collecting more data, before leaning on this p-value.", fixGt: null });
+                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". " +
+                            (_fc22
+                                ? "For a 2 by 2 table, read Fisher's exact test on the Chi-square tab of the Statistics panel, which needs no such minimum."
+                                : "Consider combining sparse categories, or collecting more data, before leaning on this p-value."), fixGt: null });
             }
             // --- Correlation matrix ---
             if (gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length) {
@@ -54314,6 +54456,23 @@
                     out.push({ id: "likertn", sev: "warn", title: "Some items have very few responses", why: "The item with the fewest answers has n = " + _loItem + ", so a single person moves its percentages by about " + Math.round(100 / _loItem) + " points. Read those rows as sketches, not measurements.", fixGt: null });
                 if (gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 && data.likertLevels.length <= 4)
                     out.push({ id: "likshort", sev: "tip", title: "Means on a short rating scale", why: "A mean on a " + data.likertLevels.length + "-point scale treats the steps as evenly spaced, and it can hide a split: half strongly agree plus half strongly disagree averages to the middle. The diverging view shows the actual response mix.", fixGt: choiceHas("likertdiverging") ? "likertdiverging" : null });
+                // An item that runs against the rest (Nov 2026, the
+                // statistical review: alpha .33 from an item never reverse-
+                // scored read "Looks good"; jamovi flags such an item).
+                var _aiBad = [];
+                if (data.likertAlpha && Array.isArray(data.likertAlpha.itemRest)) {
+                    for (var _ai = 0; _ai < data.likertAlpha.itemRest.length; _ai++) {
+                        var _aiE = data.likertAlpha.itemRest[_ai];
+                        if (_aiE && typeof _aiE.r === "number" && _aiE.r < 0)
+                            _aiBad.push(String(_aiE.item) + " (r = " + (Math.round(_aiE.r * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.") + ")");
+                    }
+                }
+                if (_aiBad.length)
+                    out.push({ id: "alphaitem", sev: "warn",
+                        title: (_aiBad.length === 1 ? "An item runs" : "Some items run") + " against the others",
+                        why: _aiBad.join(", ") + (_aiBad.length === 1 ? " correlates" : " correlate") +
+                            " negatively with the sum of the other items. An item worded in the opposite direction has to be reverse-scored before items are averaged or alpha is read: click its label on the chart and turn on reverse scoring. If its wording is not reversed, it may not belong with the others.",
+                        fixGt: null });
             }
             // --- Tier-1 additions (Jul 2026): decodable colors, clipped
             // ranges, hidden-data disclosure, error-bar captioning, and
@@ -54719,6 +54878,18 @@
                     why: _ccWhich + " has no natural order, so the chart plots its categories in whatever order they happen to be in. " + _ccWhat + " then computed on those positions, and putting the categories in a different order would give a different answer. Compare Groups compares unordered categories honestly. If the categories really do have an order, set the variable's measure type to Ordinal and the numbers become meaningful. Two categories are the exception and are never flagged here: that is what a point-biserial, or a phi between two dichotomies, already is.",
                     fixGt: null });
             })();
+            // --- Within-subject error bars on a chart with groups (Nov
+            // 2026, the statistical review): each group's marks carry bars
+            // that describe change across the occasions. They ran 2 to 6
+            // times narrower than ordinary standard errors on the review's
+            // mixed design, where two groups looked far apart at an
+            // occasion whose own test gave p = .076. A note, never a pass.
+            if (_mk === "rm" && isBarType && data.hasGroups === true &&
+                data.errorBarMethod === "within" && data.summaryFunc !== "median" &&
+                typeof data.errorBarType === "string" && data.errorBarType !== "none")
+                out.push({ id: "rmwithin", sev: "tip", title: "These error bars cannot compare the groups",
+                    why: "The error bars are within-subject: they show how consistently each group changed from one occasion to the next, with the differences between people taken out, so they are much narrower than ordinary error bars. They say nothing about whether one group differs from another at the same occasion. For that, read the Compare pairs tab in the Statistics panel, or set Method to between-subjects in the error bar panel.",
+                    fixGt: null });
             var _skApp = false;
             (function () {
                 if (!((_mk === "cg" || _mk === "rm") && isBarType)) return;
@@ -54729,13 +54900,33 @@
                 // pushed every point off-chart, the skew is NOT visible
                 // and the tip should fire again.
                 if (q('[data-role="data-point"]').length > 0) return;
-                var worst = null;
+                var worst = null, outer = null;
                 for (var sb = 0; sb < bars.length; sb++) {
                     var bb3 = bars[sb]; if (!bb3 || !Array.isArray(bb3.values)) continue;
                     var vv3 = []; for (var sv = 0; sv < bb3.values.length; sv++) { var v3 = bb3.values[sv]; if (typeof v3 === "number" && isFinite(v3)) vv3.push(v3); }
-                    var n3 = vv3.length; if (n3 < 25) continue;
+                    // From 8 values (Nov 2026, the statistical review: the
+                    // rule needed 25, so one outlier dragging a mean of 12
+                    // values to 59.7 beside a median of 27.1 read "Looks
+                    // good", and small groups are where a mean is most
+                    // fragile). Skewness is judged from 10 values; from 8, a
+                    // mean lying outside the middle half of its own group.
+                    var n3 = vv3.length; if (n3 < 8) continue;
                     _skApp = true;
                     var m3 = 0; for (var sm = 0; sm < n3; sm++) m3 += vv3[sm]; m3 /= n3;
+                    var so3 = vv3.slice().sort(function (a, b) { return a - b; });
+                    var qAt3 = function (pp) {
+                        var h3 = (n3 - 1) * pp, l3 = Math.floor(h3), u3 = Math.ceil(h3);
+                        return so3[l3] + (h3 - l3) * (so3[u3] - so3[l3]);
+                    };
+                    var q1v = qAt3(0.25), q3v = qAt3(0.75);
+                    if (q3v > q1v && (m3 > q3v || m3 < q1v)) {
+                        var far3 = (m3 > q3v ? m3 - q3v : q1v - m3) / (q3v - q1v);
+                        if (!outer || far3 > outer.far) {
+                            var _co3 = String(bb3.x || "");
+                            if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _co3 += " / " + bb3.group;
+                            outer = { far: far3, cell: _co3, mean: m3, above: m3 > q3v, qv: (m3 > q3v ? q3v : q1v), med: qAt3(0.5) };
+                        }
+                    }
                     var s2 = 0, s3 = 0;
                     for (var sk = 0; sk < n3; sk++) { var d3 = vv3[sk] - m3; s2 += d3 * d3; s3 += d3 * d3 * d3; }
                     if (!(s2 > 0)) continue;
@@ -54744,14 +54935,126 @@
                     // quote one number for one cell.
                     var g1 = (Math.sqrt(n3 * (n3 - 1)) / (n3 - 2)) *
                              (Math.sqrt(n3) * s3 / Math.pow(s2, 1.5));
-                    if (Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
+                    if (n3 >= 10 && Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
                         var _cl3 = String(bb3.x || "");
                         if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _cl3 += " / " + bb3.group;
                         worst = { g1: g1, cell: _cl3 };
                     }
                 }
+                if (!worst && outer) {
+                    var _r3 = function (v) { return String(Math.round(v * 100) / 100); };
+                    out.push({ id: "skewmean", sev: "tip", title: "The mean sits outside the middle of its group",
+                        why: "In '" + outer.cell + "' the mean (" + _r3(outer.mean) + ") lies " + (outer.above ? "above" : "below") +
+                            " three quarters of the values (the " + (outer.above ? "upper" : "lower") + " quartile is " + _r3(outer.qv) +
+                            "): one or two extreme values are pulling it. The median (" + _r3(outer.med) +
+                            ") describes a typical value better here. Try the median (Summary, in the panel), or a box or raincloud that shows the shape.",
+                        fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+                }
                 if (worst)
                     out.push({ id: "skewmean", sev: "tip", title: "A skewed group is summarized by its mean", why: "The values behind '" + worst.cell + "' are strongly skewed (skewness = " + (Math.round(worst.g1 * 10) / 10) + "), so the mean is pulled toward the tail and a bar or dot at the mean represents a typical value poorly. Try the median (Summary Function in the panel), or a box or raincloud that shows the shape.", fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+            })();
+            // --- Very small groups under a mean and an error bar (Nov 2026,
+            // the statistical review: groups of 2, 3 and 1 drawn as bars
+            // with error bars read "Looks good"). Quiet when the values
+            // themselves are on the chart.
+            var _tgApp = (_mk === "cg" || _mk === "rm") && isBarType && !(data && data.freqMode === true);
+            (function () {
+                if (!_tgApp) return;
+                if (q('[data-role="data-point"]').length > 0) return;
+                var minN = Infinity;
+                for (var tb = 0; tb < bars.length; tb++) {
+                    var tbb = bars[tb]; if (!tbb || !Array.isArray(tbb.values)) continue;
+                    var tn = 0;
+                    for (var tv = 0; tv < tbb.values.length; tv++) if (typeof tbb.values[tv] === "number" && isFinite(tbb.values[tv])) tn++;
+                    if (tn > 0 && tn < minN) minN = tn;
+                }
+                if (minN < 5)
+                    out.push({ id: "tinygroups", sev: "tip", title: "Very small groups",
+                        why: "The smallest group here has " + (minN === 1 ? "a single value, so it has no error bar at all" : "only " + minN + " values") +
+                            ". A mean and an error bar say little about so few values, and they hide the few there are. Show every value instead: turn on Data points from the + menu.",
+                        fixGt: null });
+            })();
+            // --- One point doing the work, and a curved pattern (Nov 2026,
+            // the statistical review): r = .89 made by a single point (-.21
+            // without it) and a clean U shape at r = .01 both read "Looks
+            // good". Judged per plotted cell (group within panel), from 5
+            // points for the first and 8 for the second; the curve check
+            // stands aside when one point already explains the pattern.
+            var _xiApp = false, _xcApp = false;
+            (function () {
+                if (gt !== "scatter") return;
+                if (typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none") return;
+                var ptsI = Array.isArray(data.xyPoints) ? data.xyPoints : [];
+                var cellsI = {}, orderI = [], sepI = String.fromCharCode(31);
+                for (var pI = 0; pI < ptsI.length; pI++) {
+                    var qI = ptsI[pI];
+                    if (!qI || typeof qI.x !== "number" || typeof qI.y !== "number" || !isFinite(qI.x) || !isFinite(qI.y)) continue;
+                    var kI = ((qI.facet === undefined || qI.facet === null) ? "" : String(qI.facet)) + sepI +
+                             ((qI.group === undefined || qI.group === null) ? "" : String(qI.group));
+                    if (!cellsI[kI]) { cellsI[kI] = []; orderI.push(kI); }
+                    cellsI[kI].push(qI);
+                }
+                var fR = function (v) { return (Math.round(v * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1"); };
+                var fN = function (v) { return String(Math.round(v * 100) / 100); };
+                var nameI = function (key) {
+                    var parts = key.split(sepI).filter(function (s) { return s.length; });
+                    return parts.length ? " in " + parts.join(", ") : "";
+                };
+                var worstI = null, worstC = null;
+                for (var oI = 0; oI < orderI.length; oI++) {
+                    var cI = cellsI[orderI[oI]], nI = cI.length, iI;
+                    if (nI < 5 || nI > 5000) continue;
+                    var mx = 0, my = 0;
+                    for (iI = 0; iI < nI; iI++) { mx += cI[iI].x; my += cI[iI].y; }
+                    mx /= nI; my /= nI;
+                    var sxx = 0, syy = 0, sxy = 0;
+                    for (iI = 0; iI < nI; iI++) {
+                        var dx = cI[iI].x - mx, dy = cI[iI].y - my;
+                        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                    }
+                    if (!(sxx > 0) || !(syy > 0)) continue;
+                    var rAll = sxy / Math.sqrt(sxx * syy);
+                    _xiApp = true;
+                    for (iI = 0; iI < nI; iI++) {
+                        // leave point i out: the centered sums lose its
+                        // share, rescaled for the shifted means
+                        var ex = cI[iI].x - mx, ey = cI[iI].y - my, fI = nI / (nI - 1);
+                        var lxx = sxx - fI * ex * ex, lyy = syy - fI * ey * ey, lxy = sxy - fI * ex * ey;
+                        if (!(lxx > 0) || !(lyy > 0)) continue;
+                        var rLoo = lxy / Math.sqrt(lxx * lyy);
+                        var dI = Math.abs(rAll - rLoo);
+                        if (dI >= 0.2 && (!worstI || dI > worstI.d))
+                            worstI = { d: dI, rAll: rAll, rLoo: rLoo, x: cI[iI].x, y: cI[iI].y, cell: orderI[oI] };
+                    }
+                    if (nI >= 8) {
+                        _xcApp = true;
+                        // a quadratic in x against the straight line
+                        var m2 = sxx / nI, s22 = 0, s12 = 0, s2y = 0;
+                        for (iI = 0; iI < nI; iI++) {
+                            var cx = cI[iI].x - mx, z2 = cx * cx - m2;
+                            s22 += z2 * z2; s12 += cx * z2; s2y += z2 * (cI[iI].y - my);
+                        }
+                        var det = sxx * s22 - s12 * s12;
+                        if (det > 1e-12 * sxx * s22) {
+                            var b1 = (sxy * s22 - s2y * s12) / det, b2 = (s2y * sxx - sxy * s12) / det;
+                            var r2q = (b1 * sxy + b2 * s2y) / syy, r2l = rAll * rAll;
+                            if (isFinite(r2q) && r2q - r2l >= 0.25 && (!worstC || r2q - r2l > worstC.gain))
+                                worstC = { gain: r2q - r2l, r2q: Math.min(1, r2q), r2l: r2l, cell: orderI[oI] };
+                        }
+                    }
+                }
+                if (worstI)
+                    out.push({ id: "xyinfluence", sev: "warn", title: "One point is doing a lot of the work",
+                        why: "Leaving out the single point at (" + fN(worstI.x) + ", " + fN(worstI.y) + ")" + nameI(worstI.cell) +
+                            " changes r from " + fR(worstI.rAll) + " to " + fR(worstI.rLoo) +
+                            ". A correlation that depends on one observation says more about that observation than about the rest. Check it for a data-entry error, compare Spearman's rho (Method, in the Statistics panel), and report the result with and without it.",
+                        fixGt: null });
+                else if (worstC)
+                    out.push({ id: "xycurve", sev: "tip", title: "The pattern may be curved",
+                        why: "A straight line accounts for about " + Math.round(worstC.r2l * 100) + " percent of the variation" + nameI(worstC.cell) +
+                            "; a simple curve accounts for about " + Math.round(worstC.r2q * 100) +
+                            " percent. r and a straight fit line describe straight-line patterns only, so they understate this one. Look at the points, try the LOESS fit line, and describe the shape in words.",
+                        fixGt: null });
             })();
             var _lgXOn = (gt === "scatter" && _xyLogX());
             var _lgYOn = (gt === "scatter" && _xyLogY());
@@ -55024,6 +55327,7 @@
                 { id: "shapen", name: "Enough data for the shape", tip: "Box and violin shapes need a reasonable sample in every group (about n of 10 or more); a raincloud is exempt because it shows every raw point.", applies: (gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null },
                 { id: "violinn", name: "Violin sample size", tip: "A violin's smooth outline is trustworthy from about n = 20 per group.", applies: gt === "violin" && minN !== null && minN >= 10 },
                 { id: "errbars", name: "Uncertainty shown", tip: "Summary charts should show error bars (SE, SD, or a CI) so precision is visible. Not applicable to a median summary, which draws no error bars by design.", applies: isBarType && (_mk === "cg" || _mk === "rm") && bars.length > 0 && data.summaryFunc !== "median" },
+                { id: "tinygroups", name: "Enough values behind each mean", tip: "A mean and an error bar say little about fewer than 5 values; show the values themselves.", applies: _tgApp },
                 { id: "unequaln", name: "Comparable group sizes", tip: "Cells with very different ns should not look interchangeable; show or report the ns.", applies: _unApp },
                 { id: "skewmean", name: "Mean fits the data", tip: "A strongly skewed cell is poorly summarized by its mean; median or box views tell it straighter.", applies: _skApp },
                 { id: "ebnote", name: "Error bars explained", tip: "When a figure note is used, it should say whether error bars are SE, SD, or a confidence interval.", applies: _ebnApp },
@@ -55040,6 +55344,8 @@
                 { id: "overplot", name: "Overplotting", tip: "With very many points, dots pile up and hide where the data are densest.", applies: gt === "scatter" && !_hmOn },
                 { id: "xydupes", name: "Each observation visible", tip: "Points sharing an exact position stack invisibly; jitter (ordinal axes), point opacity, or a heatmap shows how many observations sit there.", applies: gt === "scatter" && !_hmOn },
                 { id: "fitfew", name: "Enough points for a fit line", tip: "A regression line on fewer than about 10 points is fragile.", applies: _ffApp },
+                { id: "xyinfluence", name: "No single point drives r", tip: "A correlation that changes a lot when one point is left out rests on that point.", applies: _xiApp },
+                { id: "xycurve", name: "A straight line fits the pattern", tip: "r and a straight fit line understate a curved relationship.", applies: _xcApp },
                 { id: "catcode", name: "Fits use meaningful positions", tip: "A fit line or correlation across three or more unordered categories is computed on arbitrary category positions.", applies: _ccApp },
                 { id: "logscale", name: "Log axis flagged", tip: "A logarithmic axis should be named in the axis title or the caption.", applies: _lgApp },
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
@@ -55049,11 +55355,13 @@
                 { id: "heatfew", name: "Enough points for a heatmap", tip: "A heatmap earns its keep when points overlap heavily; few points suit a scatter.", applies: _hmOn },
                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
+                { id: "rmwithin", name: "Within-subject error bars", tip: "Within-subject error bars describe change across the occasions, not differences between groups.", applies: false },
                 { id: "corrmany", name: "Many-tests caveat", tip: "Testing many correlations at once produces some false alarms by chance.", applies: false },
                 { id: "brorphan", name: "Brackets match the chart", tip: "A significance bracket must still name bars that exist; when the variables, grouping or panels change underneath one, it is not drawn.", applies: _bkAnyBracket },
                 { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
                 { id: "bracketcorr", name: "Multiple-comparisons handling", tip: "Several significance brackets call for a correction, or a stated caveat.", applies: _abCount >= 1 },
                 { id: "likertn", name: "Responses per item", tip: "Items answered by very few people have unstable percentages.", applies: gt.indexOf("likert") === 0 },
+                { id: "alphaitem", name: "Items point the same way", tip: "An item that correlates negatively with the rest is usually reverse-worded and needs reverse scoring.", applies: !!(gt.indexOf("likert") === 0 && data.likertAlpha && Array.isArray(data.likertAlpha.itemRest) && data.likertAlpha.itemRest.length >= 2) },
                 { id: "likshort", name: "Means on a short scale", tip: "Averaging a very short rating scale hides the response mix behind one number.", applies: gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 },
                 { id: "ytitle", name: "Value-axis title", tip: "The value axis should say what was measured, and in what units.", applies: _axApp },
                 { id: "xtitle", name: "X-axis title", tip: "The X axis should say what the categories or values represent.", applies: _axApp && !_axDistCat },
@@ -55481,7 +55789,7 @@
         }
         function _stStrip0(v, d) {
             return (typeof v === "number" && isFinite(v))
-                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.")
+                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1")
                 : "—";
         }
         function _stP(p) {
@@ -56047,6 +56355,90 @@
         // SS/(SS+SSE); omega² = (SS - df*MSE)/(SS_total + MSE). The
         // RM-ANOVA line keeps partial eta² (its within error term
         // makes the other flavors contested).
+        // Spread caution (Nov 2026, the statistical review): pooled
+        // comparisons and the classic F assume the groups share one
+        // spread, and nothing in the panel said so. This is a plain
+        // description, not a pretest: no test is chosen from it. Returns
+        // the panel whose largest SD is more than twice its smallest
+        // (cells with at least two values), or null.
+        function _stSpreadNote() {
+            var worst = null, seenF = {};
+            if (!Array.isArray(bars)) return null;
+            for (var si = 0; si < bars.length; si++) {
+                var sf = _facetOf((bars[si] && typeof bars[si].x === "string") ? bars[si].x : "");
+                if (seenF[sf]) continue;
+                seenF[sf] = 1;
+                var sfc = _facetCells(sf), lo = Infinity, hi = 0, nc = 0;
+                for (var sj = 0; sj < sfc.levels.length; sj++) {
+                    var sv = sfc.levels[sj];
+                    if (!sv || sv.length < 2) continue;
+                    var ssd = _gb2Stats.sd(sv);
+                    if (!isFinite(ssd)) continue;
+                    nc++;
+                    if (ssd < lo) lo = ssd;
+                    if (ssd > hi) hi = ssd;
+                }
+                if (nc < 2 || !(hi > 0) || !(hi > 2 * lo)) continue;
+                var sr = hi / Math.max(lo, 1e-12);
+                if (!worst || sr > worst.ratio) worst = { lo: lo, hi: hi, ratio: sr, facet: sf };
+            }
+            return worst;
+        }
+        // The four counts of a 2 x 2 Frequencies panel: two categories by
+        // two groups on a grouped bar chart, as [a, b, c, d] with rows the
+        // categories and columns the groups. Raw counts with hidden bars
+        // included, like every Frequencies test. Null for any other shape.
+        function _stFq2x2(facetKey) {
+            if (!(data && data.hasGroups && data.graphType === "bar") || !Array.isArray(bars)) return null;
+            var qCats = [], qGrps = [], qCnt = [[0, 0], [0, 0]];
+            for (var qi = 0; qi < bars.length; qi++) {
+                var qb = bars[qi];
+                if (!qb || _facetOf((typeof qb.x === "string") ? qb.x : "") !== facetKey) continue;
+                var qc = _stCatOf(qb.x), qg = (qb.group == null) ? "" : String(qb.group);
+                var qci = qCats.indexOf(qc), qgi = qGrps.indexOf(qg);
+                if (qci < 0) { qCats.push(qc); qci = qCats.length - 1; }
+                if (qgi < 0) { qGrps.push(qg); qgi = qGrps.length - 1; }
+                if (qci > 1 || qgi > 1) return null;
+                qCnt[qci][qgi] += _freqRawN(qb);
+            }
+            if (qCats.length !== 2 || qGrps.length !== 2) return null;
+            return [qCnt[0][0], qCnt[0][1], qCnt[1][0], qCnt[1][1]];
+        }
+        // jamovi's ANOVA table divides eta squared and omega squared by the
+        // sum of the table's own rows (every term's Type III SS plus the
+        // residual), not by the data's total SS. The two agree on a one-way
+        // or a balanced design; with unequal cell sizes Type III SS do not
+        // add up to the total, and the review's 2 x 3 design showed .22
+        // here where jamovi's table shows .29 (Nov 2026).
+        function _stTblTotal(m) {
+            var tot = (m && isFinite(m.sse)) ? m.sse : NaN;
+            var ks = ["A", "B", "C", "AB", "AC", "BC", "ABC"];
+            for (var ti = 0; ti < ks.length; ti++)
+                if (m && m[ks[ti]] && isFinite(m[ks[ti]].ss)) tot += m[ks[ti]].ss;
+            return tot;
+        }
+        // Every subject with at least one visible value on a repeated-
+        // measures chart (hidden cells and hidden points left out, as the
+        // ANOVA routines leave them out). The Omnibus footnote sets it
+        // beside the number of complete subjects the model used.
+        function _stRmSubjectsAll() {
+            var seenS = {}, nS = 0;
+            if (!Array.isArray(bars)) return 0;
+            for (var ri = 0; ri < bars.length; ri++) {
+                var rb = bars[ri];
+                if (!rb) continue;
+                var rvals = Array.isArray(rb._origValues) ? rb._origValues
+                          : (Array.isArray(rb.values) ? rb.values : null);
+                if (!rvals || !Array.isArray(rb.rowIds) || rb.rowIds.length !== rvals.length) continue;
+                if (_isBarHidden((typeof rb.x === "string") ? rb.x : "", (rb.group == null) ? "" : String(rb.group))) continue;
+                var rhs = _hiddenSetForBar(rb);
+                for (var rv2 = 0; rv2 < rvals.length; rv2++) {
+                    if (rhs && rhs[rv2]) continue;
+                    if (isFinite(rvals[rv2]) && !seenS[rb.rowIds[rv2]]) { seenS[rb.rowIds[rv2]] = 1; nS++; }
+                }
+            }
+            return nS;
+        }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
             var v, sym;
@@ -56118,9 +56510,9 @@
                 var tw = null;
                 try { tw = _gb2Stats.twoWayANOVA(obs2, fa.k, fb.k); } catch (_e2) {}
                 if (tw && !tw.emptyCells && tw.A) {
-                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
+                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
                 } else {
                     out.push("Two-way ANOVA: " + ((tw && tw.emptyCells)
                         ? ("needs every " + fa.name + " × " + fb.name + " combination observed (some cells are empty).")
@@ -56133,7 +56525,7 @@
             var thw = null;
             try { thw = _gb2Stats.threeWayANOVA(obs3, g1.k, g2.k, g3.k); } catch (_e3) {}
             if (thw && !thw.emptyCells && thw.A) {
-                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, thw.ssTotal, thw.mse); };
+                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, _stTblTotal(thw), thw.mse); };
                 out.push(L("Main effect of " + g1.name, thw.A));
                 out.push(L("Main effect of " + g2.name, thw.B));
                 out.push(L("Main effect of " + g3.name, thw.C));
@@ -56194,6 +56586,7 @@
                     try { mx2 = _computeMixedAnova2Raw(); } catch (_eM2) {}
                     if (mx2 && mx2.ok) {
                         var m2 = mx2.res;
+                        oLines.subjUsed = m2.n;
                         var gg2 = (m2.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(m2.eps) + ")"
                             : "";
@@ -56235,6 +56628,7 @@
                     } catch (_eMx) {}
                     if (mxR && mxR.ok) {
                         var mr = mxR.res;
+                        oLines.subjUsed = mr.n;
                         var ggTail = (mr.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(mr.eps) + ")"
                             : "";
@@ -56267,6 +56661,7 @@
                 } catch (_eR) {}
                 if (rawR && rawR.ok) {
                     var rr = rawR.res;
+                    oLines.subjUsed = rr.n;
                     var line = "Main effect of " + _stOccName() + ": F(" +
                         dfF(rr.df1) + ", " + dfF(rr.df2) + ") = " +
                         rr.F.toFixed(2) + ", " + _stP(rr.p) + ", " +
@@ -56329,7 +56724,7 @@
                     var mkLine = function (nm, t) {
                         return nm + ": F(" + t.df + ", " + tw.dfe + ") = " +
                             t.F.toFixed(2) + ", " + _stP(t.p) + ", " +
-                            _stOmniEffFmt(t.ss, t.df, tw.sse, tw.ssTotal, tw.mse);
+                            _stOmniEffFmt(t.ss, t.df, tw.sse, _stTblTotal(tw), tw.mse);
                     };
                     oLines.push(mkLine("Main effect of " + aName, tw.A));
                     oLines.push(mkLine("Main effect of " + bName, tw.B));
@@ -57388,19 +57783,35 @@
                             " were really identical, a difference at least this big would turn up " +
                             _stPFreq(res.p) + " by chance.";
                         if (cmpCorr !== "none")
-                            s += " Because several pairs were tested, significance is decided by the adjusted p beside it.";
+                            s += (cmpPairs.length > 1
+                                ? " Because several pairs were tested, significance"
+                                : " With a correction on, significance") +
+                                " is decided by the adjusted p beside it.";
                         else
                             s += (res.p < stAlpha ? " That is below your " + stAlphaLbl + " cutoff."
                                 : " That is not below your " + stAlphaLbl + " cutoff.");
                         return s;
                     }
                     if (which === "padj") {
+                        // With Correct set to None the cell shows a dash and
+                        // nothing was adjusted (Nov 2026, the statistical
+                        // review: the dash used to explain itself as an
+                        // adjustment the p had survived, on rows no
+                        // correction would have passed).
+                        if (cmpCorr === "none")
+                            return (cmpPairs.length === 1)
+                                ? "No correction is applied, and with one comparison none is needed."
+                                : "No correction is applied, so there is no adjusted p here: each of the " +
+                                  cmpPairs.length + " comparisons is judged on its own. The more comparisons you read, the more likely one falls below your " +
+                                  stAlphaLbl + " cutoff by chance alone; choose a correction under Correct to allow for that.";
                         if (!(cp.adjApplied && isFinite(cp.adjP))) return "";
                         return "Here the raw " + _stP(res.p) + " became " + _stP(cp.adjP) +
                             " after adjusting for the " + cmpPairs.length + " comparison" +
                             (cmpPairs.length === 1 ? "" : "s") + ". " +
                             (cp.adjP < stAlpha ? "It still clears your " + stAlphaLbl + " cutoff."
-                                : "It no longer clears your " + stAlphaLbl + " cutoff.");
+                                : (res.p < stAlpha
+                                    ? "It no longer clears your " + stAlphaLbl + " cutoff."
+                                    : "It did not clear your " + stAlphaLbl + " cutoff before the adjustment, and does not now."));
                     }
                     if (which === "effect") {
                         if (!isFinite(raw.effect)) return "";
@@ -57802,11 +58213,15 @@
                                 }
                                 if (!pm) return "";
                                 var dfTxt = (pm.df % 1 === 0) ? String(pm.df) : pm.df.toFixed(2);
-                                return _stFoot("With " + (cmpCorr === "dunnett" ? "Dunnett" : "Tukey") +
-                                    " on, every row's statistic and unadjusted p use the pooled variance of all " +
+                                var pmModel = (cmpCorr === "tukey" || cmpCorr === "dunnett");
+                                return _stFoot("With " + _gb2CorrName(cmpCorr) + " on" +
+                                    (pmModel ? "" : " and Test left on Auto") +
+                                    ", every row's statistic and unadjusted p use the pooled variance of all " +
                                     pm.k + (data.hasGroups ? " cells" : " groups") +
                                     " in the panel (the one-way ANOVA's error term, df " + dfTxt +
-                                    "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups.");
+                                    (pmModel
+                                        ? "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups."
+                                        : "), as jamovi's ANOVA post hoc does. To keep each pair's own two-group test, pick Welch's or Student's t under Test."));
                             }
                             var seen = {}, keys = [];
                             for (var fi = 0; fi < cmpPairs.length; fi++) {
@@ -57830,6 +58245,42 @@
                                 txt = "With a correction on, every pair uses the subjects complete across all occasions of its panel (the RM ANOVA rule); subjects with a missing occasion are left out. With Correct set to None each pair uses everyone who has both occasions.";
                             }
                             return _stFoot(txt);
+                        })()) +
+                        ((function () {
+                            // A cell with one value has no t test of its
+                            // own: say which one is missing from the list.
+                            if (cmpIsRM || mk !== "cg" || cmpTest === "mannWhitneyU") return "";
+                            var listed = {}, lone = [], nmOf = function (c) {
+                                return _stCatOf(c.cat) + (c.group ? " (" + c.group + ")" : "");
+                            };
+                            for (var li5 = 0; li5 < cmpPairs.length; li5++) {
+                                var lp5 = cmpPairs[li5];
+                                if (lp5 && lp5.left) listed[lp5.left.cat + "|" + lp5.left.group] = 1;
+                                if (lp5 && lp5.right) listed[lp5.right.cat + "|" + lp5.right.group] = 1;
+                            }
+                            var allC = [];
+                            try { allC = _cmpVisibleCells(); } catch (_eLc) { allC = []; }
+                            for (var lc5 = 0; lc5 < allC.length; lc5++) {
+                                var cc5 = allC[lc5], nf5 = 0;
+                                var cv5 = (cc5 && cc5.b && Array.isArray(cc5.b.values)) ? cc5.b.values : [];
+                                for (var lv5 = 0; lv5 < cv5.length; lv5++) if (isFinite(cv5[lv5])) nf5++;
+                                if (nf5 === 1 && !listed[cc5.cat + "|" + cc5.group]) lone.push(nmOf(cc5));
+                            }
+                            if (!lone.length) return "";
+                            return _stFoot(lone.join(", ") + (lone.length === 1 ? " has" : " have") +
+                                " a single value, so " + (lone.length === 1 ? "it has" : "they have") +
+                                " no two-group test of " + (lone.length === 1 ? "its" : "their") +
+                                " own and " + (lone.length === 1 ? "is" : "are") +
+                                " not listed. With Tukey or Dunnett, or with Bonferroni, Holm or FDR and Test on Auto, the pooled error term covers " +
+                                (lone.length === 1 ? "it" : "them") + " and the pairs appear.");
+                        })()) +
+                        ((function () {
+                            if (cmpIsRM || mk !== "cg") return "";
+                            var sp = null;
+                            try { sp = _stSpreadNote(); } catch (_eSp) {}
+                            if (!sp) return "";
+                            return _stFoot("The groups' spreads differ a lot (SD from " + _stNum(sp.lo) +
+                                " to " + _stNum(sp.hi) + "). Pooled comparisons (Tukey, Dunnett, and Bonferroni, Holm or FDR with Test on Auto) and Student's t assume the groups share one spread; Welch's t and Games-Howell do not.");
                         })()) +
                         // Keep ONLY the statistical-honesty warning: the
                         // plotted center and test estimand must be named.
@@ -58107,12 +58558,23 @@
                 // to its reading width. Short there, with the full name in the
                 // aria-label, the title and the popover; jamovi and the panel
                 // under the chart keep the long headers.
+                // Repeated measures prints the within-subject SE and an
+                // interval built from it, beside the raw SD (the table
+                // matches the drawn bars). The headers now say so (Nov
+                // 2026): read as the mean's own SE and CI they were far
+                // too narrow.
+                var _dWithin = (data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
+                    (data.errorBarType || "se") !== "none");
                 var _ciLoHdr = _ciP + "% CI lower", _ciHiHdr = _ciP + "% CI upper";
-                if (_gb2DockActive()) {
-                    _ciLoHdr = { html: _stTerm("CI lo", "ci95", _ciP + "% CI lower") };
-                    _ciHiHdr = { html: _stTerm("CI hi", "ci95", _ciP + "% CI upper") };
+                if (_dWithin) {
+                    _ciLoHdr = { html: _stTerm(_ciP + "% CI lower (within)", "ci95") };
+                    _ciHiHdr = { html: _stTerm(_ciP + "% CI upper (within)", "ci95") };
                 }
-                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
+                if (_gb2DockActive()) {
+                    _ciLoHdr = { html: _stTerm(_dWithin ? "CI lo (within)" : "CI lo", "ci95", _ciP + "% CI lower" + (_dWithin ? " (within-subject)" : "")) };
+                    _ciHiHdr = { html: _stTerm(_dWithin ? "CI hi (within)" : "CI hi", "ci95", _ciP + "% CI upper" + (_dWithin ? " (within-subject)" : "")) };
+                }
+                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm(_dWithin ? "SE (within)" : "SE", "se") }, _ciLoHdr, _ciHiHdr);
                 var descCardHtml = _stCard("",
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
@@ -58125,7 +58587,7 @@
                             : "") +
                         ((data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
                           (data.errorBarType || "se") !== "none")
-                            ? " SE is the Cousineau-Morey within-subject value, matching the drawn error bars."
+                            ? " SE and the CI are Cousineau-Morey within-subject values, matching the drawn error bars: they describe change across the occasions, not how precisely each mean is known, and cannot compare one group with another."
                             : "")));
                 // ---- Omnibus (visible chart, like the brackets)
                 var oLines = _stOmniLines();
@@ -58166,6 +58628,19 @@
                         omniFoot = omniFaceted
                             ? "Two-way ANOVA with interaction (Type III sums of squares) over the visible chart; the panels variable joins the model as a factor."
                             : "One-way ANOVA over the visible chart, the same math as the bracket omnibus.";
+                    }
+                    // A repeated-measures ANOVA needs every occasion from a
+                    // subject; anyone missing one drops out of the whole
+                    // test. The chart's means and Descriptives keep them, so
+                    // say how many the test used (Nov 2026).
+                    if (mk === "rm" && typeof oLines.subjUsed === "number" && isFinite(oLines.subjUsed)) {
+                        var _suAll = 0;
+                        try { _suAll = _stRmSubjectsAll(); } catch (_eSu) { _suAll = 0; }
+                        if (_suAll > oLines.subjUsed)
+                            omniFoot += " This test uses the " + oLines.subjUsed + " of " + _suAll +
+                                " subjects who have a value at every occasion; " + (_suAll - oLines.subjUsed) +
+                                " with a missing occasion " + ((_suAll - oLines.subjUsed) === 1 ? "is" : "are") +
+                                " left out, though the chart's means and the Descriptives table still include them.";
                     }
                     // Parse the self-produced sentence format into the
                     // shared table look (Torry: the readout box read as
@@ -58259,6 +58734,41 @@
                             _stEsc(mLn[7])
                         ]);
                     }
+                    // Welch's F (Nov 2026, the statistical review): the
+                    // classic F assumes one spread while the default pair
+                    // test (Welch's t) does not, and jamovi's One-Way ANOVA
+                    // prints both. One-way designs only; no effect size, as
+                    // in jamovi.
+                    var omniWelch = null;
+                    if (mk === "cg" && !data.hasGroups && !omniFaceted && omniRows.length === 1) {
+                        try { omniWelch = _gb2Stats.welchANOVA(_facetCells("").levels); }
+                        catch (_eWf) { omniWelch = null; }
+                    }
+                    if (omniWelch) {
+                        var wPs = _stP(omniWelch.p);
+                        var wSig = omniWelch.p < stAlpha;
+                        var wPd = _stEsc(wPs.replace(/^p = /, "").replace(/^p /, ""));
+                        omniRows.push([
+                            _stCellTerm("Welch's F (spreads may differ)", "welchF",
+                                "This row asks the same question as the row above, do the means differ anywhere, without assuming the groups share one spread. Here " +
+                                wPs + (wSig ? " is below your " : " is not below your ") + stAlphaLbl +
+                                " cutoff. When the groups' spreads differ a lot, this is the row to lean on."),
+                            omniWelch.F.toFixed(2),
+                            String(omniWelch.df1) + ", " + omniWelch.df2.toFixed(2),
+                            (wSig ? omniChip(wPd) : wPd),
+                            _stNum(NaN)
+                        ]);
+                    }
+                    var omniSpread = "";
+                    if (mk === "cg") {
+                        var _osp = null;
+                        try { _osp = _stSpreadNote(); } catch (_eOs) {}
+                        if (_osp) omniSpread = " The groups' spreads differ a lot (SD from " + _stNum(_osp.lo) +
+                            " to " + _stNum(_osp.hi) + "): " +
+                            (omniWelch
+                                ? "the classic F assumes the groups share one spread; Welch's F does not."
+                                : "these F tests assume the groups share one spread, so read them with that in mind.");
+                    }
                     omniCardHtml = _stCard("",
                         effSel +
                         (omniRows.length
@@ -58270,7 +58780,7 @@
                                        omniRows, null, true)
                             : "") +
                         (omniPlain.length ? _stReadout(omniPlain.join("\n")) : "") +
-                        _stFoot(omniFoot +
+                        _stFoot(omniFoot + omniSpread +
                             (omniGG
                                 ? ((mk === "rm" && data.hasGroups)
                                     ? " The within-subject rows (" + _stOccName() + " + its interactions) are Greenhouse-Geisser-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
@@ -58308,7 +58818,7 @@
             } else if (mk === "freq") {
                 // ---- Chi-square (shipped tests; full data)
                 var ft = Array.isArray(data.freqTests) ? data.freqTests : [];
-                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false;
+                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false, fAnyFisher = false;
                 var fChip = function (txt) {
                     return '<span data-cmp-sig title="Significant at ' + stAlphaLbl + '" ' +
                         'style="background:#e9f4df;border:1px solid #c8e0b8;' +
@@ -58354,6 +58864,24 @@
                               (rv > 0 ? "more" : "fewer") + " cases than expected)"
                             : "no single cell departs notably (largest std. residual " + rvS + ")"));
                     }
+                    // Fisher's exact test for a 2 x 2 panel (Nov 2026, the
+                    // statistical review): it uses no approximation, so it
+                    // is the answer when the expected counts are small, and
+                    // jamovi's Contingency Tables offers it beside
+                    // chi-square. On 3/1 against 1/4 chi-square says .099
+                    // and Fisher .206.
+                    if (t.type === "independence" && t.df === 1) {
+                        var f22 = null, fxr = null;
+                        try {
+                            f22 = _stFq2x2(fFac);
+                            fxr = f22 ? _gb2Stats.fisherExact2x2(f22[0], f22[1], f22[2], f22[3]) : null;
+                        } catch (_eF2) { fxr = null; }
+                        if (fxr && isFinite(fxr.p)) {
+                            fAnyFisher = true;
+                            fNotes.push((fFac ? fFac + ": " : "") + "Fisher's exact test: " + _stP(fxr.p) +
+                                " (exact, with no minimum on the expected counts)");
+                        }
+                    }
                 }
                 if (!fAnyFacet) {
                     for (var fr2 = 0; fr2 < fRows.length; fr2++) fRows[fr2].shift();
@@ -58382,7 +58910,9 @@
                               'Heads up: the smallest expected count is ' +
                               _stEsc(String(Math.round(fMinExp * 10) / 10)) +
                               '. Below 5 the chi-square approximation is unreliable - ' +
-                              'combine sparse categories or collect more data.</div>'
+                              (fAnyFisher
+                                  ? "read Fisher's exact test above, which needs no such minimum.</div>"
+                                  : 'combine sparse categories or collect more data.</div>')
                             : "") +
                         _stBtnRow(
                             // The former on-chart chi-square plate is
@@ -58400,7 +58930,7 @@
                 }
                 // ---- Pairwise proportions (same math as the brackets/table)
                 try {
-                    var pw = [];
+                    var pw = [], pwTwoCat = false, pwMinExp = Infinity, pwMinSame = Infinity;
                     var facets = [], seenF = {};
                     for (var pb = 0; pb < bars.length; pb++) {
                         var fb = bars[pb];
@@ -58428,7 +58958,15 @@
                                 if (!seenC[cq]) { seenC[cq] = true; cats.push(cq); }
                                 if (!seenG[gq]) { seenG[gq] = true; grps.push(gq); }
                             }
-                            for (var c3 = 0; c3 < cats.length; c3++) {
+                            // With two categories a pair's two proportions
+                            // always add to 1, so "Improved: A vs B" and
+                            // "Not improved: A vs B" are one test (z differs
+                            // only in sign). Listing both made Holm count it
+                            // twice and double its p against the chi-square
+                            // on the same table (.016 there, .033 here).
+                            var cLim = cats.length;
+                            if (cats.length === 2) { cLim = 1; pwTwoCat = true; }
+                            for (var c3 = 0; c3 < cLim; c3++) {
                                 for (var g1 = 0; g1 < grps.length; g1++) {
                                     for (var g2 = g1 + 1; g2 < grps.length; g2++) {
                                         var cellA = null, cellB = null, tot1 = 0, tot2 = 0;
@@ -58444,6 +58982,12 @@
                                         var res2 = _gb2Stats.twoPropZ(
                                             cellA ? _freqRawN(cellA) : 0, tot1,
                                             cellB ? _freqRawN(cellB) : 0, tot2, "two");
+                                        if (res2) {
+                                            var ppE = (res2.x1 + res2.x2) / (res2.n1 + res2.n2);
+                                            var mnE = Math.min(res2.n1 * ppE, res2.n1 * (1 - ppE),
+                                                res2.n2 * ppE, res2.n2 * (1 - ppE));
+                                            if (isFinite(mnE) && mnE < pwMinExp) pwMinExp = mnE;
+                                        }
                                         var lk1 = [];
                                         if (cellA) lk1.push([cellA.x, grps[g1]]);
                                         if (cellB) lk1.push([cellB.x, grps[g2]]);
@@ -58470,6 +59014,8 @@
                                 for (var a2 = a1 + 1; a2 < cats2.length; a2++) {
                                     var res3 = _gb2Stats.sameSamplePropZ(
                                         nOf[cats2[a1]], nOf[cats2[a2]], N, "two");
+                                    if (res3 && (nOf[cats2[a1]] + nOf[cats2[a2]]) < pwMinSame)
+                                        pwMinSame = nOf[cats2[a1]] + nOf[cats2[a2]];
                                     if (res3) blk.push({
                                         label: cats2[a1] + " vs " + cats2[a2],
                                         res: res3, facet: fct,
@@ -58544,10 +59090,22 @@
                             '<b style="color:#333;">' + pwSigN + ' of ' + pwRows.length +
                             '</b> significant at ' + stAlphaLbl + ' (Holm-adjusted)</span></div>' +
                             _stTable(["Comparison", "Δp", "z", "p", "p (Holm)"], pwRows, pwAttrs, true) +
+                            ((pwMinExp < 5 || pwMinSame < 10)
+                                ? '<div data-role="st-pw-small" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">' +
+                                  (pwMinExp < 5
+                                      ? 'Heads up: some of these comparisons rest on very small counts (the smallest expected count is ' +
+                                        _stEsc(String(Math.round(pwMinExp * 10) / 10)) +
+                                        '). Below 5 the z approximation is unreliable, so read those p values as rough.'
+                                      : 'Heads up: some of these comparisons rest on very few cases (two categories holding ' +
+                                        _stEsc(String(pwMinSame)) +
+                                        ' between them). Under about 10 the z approximation is unreliable, so read those p values as rough.') +
+                                  '</div>'
+                                : "") +
                             _stBtnRow(_stBtn("copypw", "Copy table", false)) +
-                            _stFoot((data.hasGroups && data.graphType === "bar")
+                            _stFoot(((data.hasGroups && data.graphType === "bar")
                                 ? "Two-proportion z-tests (independent groups) without continuity correction; Holm controls the family-wise error within each panel. Same math as the on-chart brackets."
-                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel."));
+                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel.") +
+                                (pwTwoCat ? " With two categories a pair's two proportions always add to 1, so each pair of groups is one test and is listed once." : "")));
                         wire.push(["copypw", function (btn) {
                             _stWireTableCopy(btn, body, '[data-st-pane="pairwise"]');
                         }]);
@@ -58949,8 +59507,10 @@
                         _rHere = "Here r = " + _stStrip0(rP) + " for " + cellL + ": a " +
                             _xyMagW(Math.abs(rP)) + (rP >= 0 ? " positive" : " negative") +
                             " straight-line relationship by the usual rough guide (r runs from -1 to +1). " +
-                            (rP >= 0 ? "The two variables tend to rise together."
-                                : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall.");
+                            (Math.abs(rP) < 0.1
+                                ? "At this size there is no straight-line tendency to speak of in either direction."
+                                : (rP >= 0 ? "The two variables tend to rise together."
+                                    : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall."));
                     }
                     if (typeof xe.rho === "number" && isFinite(xe.rho)) {
                         _rhoHere = "Here rho = " + _stStrip0(xe.rho) + " for " + cellL +
@@ -59140,7 +59700,8 @@
                 var _coefHereFor = function (ce4, rTxt4) {
                     var mag = Math.abs(ce4.r);
                     var stren = mag >= 0.7 ? "strong" : mag >= 0.4 ? "moderate" : mag >= 0.2 ? "weak" : "very weak";
-                    var dirw = ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
+                    var dirw = mag < 0.1 ? "no consistent tendency for one to rise or fall with the other"
+                        : ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
                         : ce4.r < 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go down")
                         : "no consistent direction";
                     return "Here " + coefWord + " = " + rTxt4 + " between " + ce4.a + " and " + ce4.b +
@@ -59254,7 +59815,7 @@
                         (isFinite(nMin) ? ", pairwise n from " + nMin + " to " + nMax : "") +
                         (_aMS
                             ? ". p values are " + _corrPAdjLabel() + "-adjusted across the full set of pairs."
-                            : ". With this many tests some small p values are expected by chance alone - the Check-graph tab's many-tests caveat applies here too.")));
+                            : ". With this many tests some small p values are expected by chance alone; the Adjust p menu above allows for that.")));
                 // ---- All pairs: the full per-pair listing the Summary
                 // table shows (each off-diagonal pair once).
                 var _pairRows = [];
@@ -59345,10 +59906,15 @@
                     var revd = !isCont && revSet.indexOf(le.item) >= 0;
                     var mVal = le.mean, loV = le.lo, hiV = le.hi;
                     if (revd && typeof mVal === "number" && kLv > 0) {
-                        mVal = (kLv + 1) - mVal;
+                        // around the two ends of the scale: its own codes
+                        // when the responses are numbers, else 1 and k
+                        var lkCd = (Array.isArray(data.likertCodes) && kLv >= 2 &&
+                            data.likertCodes.length === kLv) ? data.likertCodes : null;
+                        var lkRf = lkCd ? (lkCd[0] + lkCd[kLv - 1]) : (kLv + 1);
+                        mVal = lkRf - mVal;
                         var t2 = loV;
-                        loV = (typeof hiV === "number") ? (kLv + 1) - hiV : undefined;
-                        hiV = (typeof t2 === "number") ? (kLv + 1) - t2 : undefined;
+                        loV = (typeof hiV === "number") ? lkRf - hiV : undefined;
+                        hiV = (typeof t2 === "number") ? lkRf - t2 : undefined;
                     }
                     var lrow = [_stEsc(le.item) + (revd ? " " + _stCellTerm("(R)", "reverseScored", "") : ""), String(le.n)];
                     if (lShowPct) {
@@ -59383,6 +59949,10 @@
                     _stBtnRow(_stBtn("copymeans", "Copy table", false)) +
                     _stFoot(isCont
                         ? "Means with t-based confidence intervals from the raw values."
+                        : (Array.isArray(data.likertCodes) && kLv >= 2 && data.likertCodes.length === kLv)
+                        ? "Means \u00b1 CI on the items' own codes (" + data.likertCodes[0] + " to " + data.likertCodes[kLv - 1] +
+                          "); per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected around " +
+                          data.likertCodes[0] + " and " + data.likertCodes[kLv - 1] + ")."
                         : "Means ± CI on the 1–" + kLv +
                           " coding; per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected)."));
                 var lkAlphaCard = "";
@@ -59394,12 +59964,28 @@
                         (la.alpha < 0
                             ? "A negative value means the summed score has less variance than the item variances imply; inspect scoring direction and the covariance structure."
                             : "Evaluate this sample-specific coefficient against the intended score use and a defensible measurement model; there is no universal .70 pass mark.");
+                    // Say whether any item is reflected (the footnote said
+                    // "reverse-scored item codes" with none marked), and
+                    // flag an item that runs against the rest (Nov 2026).
+                    var _laAnyRev = Array.isArray(data.likertReverseItems) && data.likertReverseItems.length > 0;
+                    var _laRev = _laAnyRev ? ", with the items marked (R) reflected." : " (no item is marked reverse-scored).";
+                    var _laBad = [], _laIR = Array.isArray(la.itemRest) ? la.itemRest : [];
+                    for (var _lq = 0; _lq < _laIR.length; _lq++)
+                        if (_laIR[_lq] && typeof _laIR[_lq].r === "number" && _laIR[_lq].r < 0) _laBad.push(_laIR[_lq]);
+                    var _laNeg = _laBad.length
+                        ? '<div data-role="st-alpha-neg" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">Heads up: ' +
+                          _laBad.map(function (bq) { return _stEsc(String(bq.item)) + " (r = " + _stStrip0(bq.r) + ")"; }).join(", ") +
+                          (_laBad.length === 1 ? " runs" : " run") + " against the other items: its correlation with the sum of the rest is negative. If " +
+                          (_laBad.length === 1 ? "it was" : "they were") + " worded in the opposite direction, reverse-score " +
+                          (_laBad.length === 1 ? "it" : "them") + " (click the item's label on the chart and turn on reverse scoring) before reading alpha.</div>"
+                        : "";
                     lkAlphaCard = _stCard("",
                         _stTable([
                             { html: '<span style="text-transform:none;">' + _stTerm("Cronbach\u2019s \u03b1", "cronbachAlpha") + '</span>' },
                             "Items", "Complete N"],
                             [[_stCellTerm(_stStrip0(la.alpha), "cronbachAlpha", _laHere), String(la.k), String(la.n)]], null, true) +
-                        _stFoot("Raw Cronbach's α is computed from listwise-complete, reverse-scored item codes. It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
+                        _laNeg +
+                        _stFoot("Raw Cronbach's α is computed from listwise-complete item codes" + _laRev + " It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
 
                 } else {
                     lkAlphaCard = _stCard("",
@@ -96967,7 +97553,9 @@
                     lines.push("         over all " + r.res.pooled.k +
                                ((data && data.hasGroups) ? " cells" : " groups") +
                                " in this panel, df " + _pdf +
-                               " (Correct: None uses the pair alone)");
+                               ((data && (data.autoPCorrection === "tukey" || data.autoPCorrection === "dunnett"))
+                                   ? " (Correct: None uses the pair alone)"
+                                   : " (Test: Welch's or Student's t keeps the pair's own test)"));
                 }
                 if (r.testFamily === "rank") {
                     if (r.testKind === "mannWhitneyU") {

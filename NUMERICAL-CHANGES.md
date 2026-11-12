@@ -30,6 +30,119 @@ the hosted page.
 
 ## v3.2.1 (unreleased; deployment dates noted per change)
 
+**Automatic histogram bins no longer add a last bin for the largest value alone.** <!-- ledger: histogram-auto-bins-top-edge -->
+With automatic bins on data that is not all whole numbers, the bin
+width is the range divided by the target number of bins, and edges were
+laid down until one passed the maximum. The last target edge lands
+exactly on the maximum, so one more bin was added, holding only the
+largest value (or values tied at it): eight values drew seven bins, the
+top one a lone bar, and the axis ran one bin past the data. The edges
+now stop at the maximum, which belongs to the bin below it. The
+histogram shows the target number of bins, and the Frequency table's
+top two intervals become one whose count is their sum; every other
+interval, count and percent is unchanged. Whole-number data and a bin
+count or width set by hand were never affected. Checked by counting
+bins and values on the review's eight-value sample
+(`stats-judgment-check`). Affects: histograms and the Frequency table
+tab on Distribution, both hosts, automatic bins on non-integer data.
+Implemented 2026-11-11. Not yet live on the web app.
+
+**A group with a single value joins the pooled comparisons, as in jamovi's post hoc.** <!-- ledger: cg-single-value-group-pooled-pairs -->
+On Compare Groups, a pooled correction (Tukey, Dunnett, or Bonferroni,
+Holm or FDR with Test on Auto) runs each pair on the one-way ANOVA's
+error term, which needs only the two means. The engine still required
+the pair's own two-group t first, so a group holding one value (or a
+pair with no spread of its own) had no row, although jamovi's post hoc
+lists it. With groups of 2, 3 and 1 only one of three comparisons
+appeared, and because the family was that one row, its adjusted p was
+too small: .076 under Bonferroni and Holm where jamovi's table of three
+gives .228 and .091. Those pairs are now computed on the pooled term and
+listed, and the family counts them. With no correction, or under
+Games-Howell, such a group still has no test of its own, and the
+Compare pairs footnote now names it. Checked against jamovi's ANOVA post
+hoc (`stats-judgment-check`; the rendered fuzzer's pooled reference
+covers one-observation groups). Affects: brackets and Compare pairs
+under a pooled correction on Compare Groups, both hosts, only when a
+group has a single value or two compared groups have no spread.
+Implemented 2026-11-11. Not yet live on the web app.
+
+**Eta squared and omega squared on factorial designs divide by the ANOVA table's own total, as jamovi's do.** <!-- ledger: anova-effect-size-table-total -->
+On the Omnibus tab of a Compare Groups chart with two or three factors,
+eta squared and omega squared divided each term's sum of squares by the
+data's total sum of squares. jamovi's ANOVA divides by the sum of the
+table's own rows (every term's Type III sum of squares plus the
+residual). The two are the same number on a one-way design and on any
+design with equal cell sizes; with unequal cell sizes Type III rows do
+not add up to the total and the values differed: a 2 x 3 design with
+cells of 3 to 12 showed eta squared .22, .01 and .06 where jamovi's
+table shows .29, .01 and .08, and omega squared .19 and .04 where
+jamovi shows .25 and .05. Both now use the table's total. F, df, p and
+partial eta squared are unchanged, as are one-way and repeated-measures
+tables. Checked against jamovi's ANOVA on the same data
+(`stats-judgment-check`; the statistics probe's unbalanced two-way
+reference uses the same total). Affects: the eta squared and omega
+squared columns of the Omnibus tab on Compare Groups with a Group By or
+a Panels variable, both hosts, unequal cell sizes only. Implemented
+2026-11-11. Not yet live on the web app.
+
+**Frequencies Pairwise counts a two-category outcome once, so Holm no longer doubles its p.** <!-- ledger: freq-pairwise-two-category-once -->
+On a grouped Frequencies bar chart whose outcome has exactly two
+categories, the Pairwise tab listed each pair of groups twice ("Improved:
+Drug vs Placebo" and "Not improved: Drug vs Placebo"). The two
+proportions of a pair add to 1, so these are one test whose z differs
+only in sign, but Holm counted two and doubled the adjusted p: a 2 x 2
+table of 30/20 against 18/32 read .033 in the Holm column while the
+chi-square on the same table, and the pair's own z test, give .016. Each
+pair of groups is now listed once, for the first category, and Holm's
+family is the number of real tests. Outcomes with three or more
+categories are unchanged. Raw p values, z and the difference in
+proportions are unchanged everywhere. Checked against jamovi's
+Contingency Tables and R's `prop.test` (`stats-judgment-check`; the
+rendered fuzzer's two-category reference lists each pair once).
+Affects: the Holm column and the significance tally of the Statistics
+panel's Pairwise tab on Frequencies, both hosts, two-category outcomes
+only. Implemented 2026-11-11. Not yet live on the web app.
+
+**Survey item means, their intervals and alpha use the responses' own numbers.** <!-- ledger: likert-means-own-codes -->
+On a Likert / Survey chart whose responses are numbers, item means,
+their t intervals and Cronbach's alpha were computed on each response's
+position among the values that occur (1, 2, 3, ...), not on the number
+itself. Items coded 0 to 4 printed every mean exactly one too high
+(3.03 where the data's mean is 2.03), and a level nobody chose
+compressed the scale: items coded 1 to 5 with no 3 chosen printed 2.57
+where the mean is 3.05, could change the order of two items, and moved
+alpha (.68 where it is .66). Reverse scoring reflected around 1 and the
+number of levels; it now reflects around the lowest and highest
+response value. A battery of number columns also reads in ascending
+order in jamovi even when the first item never used one of the values.
+Responses stored as text have no numbers of their own and keep the
+1, 2, 3 coding, unchanged. Checked against jamovi's Descriptives and
+Reliability Analysis on the same data (`stats-judgment-check`); the R
+side and the app's own data code are held equal by the parity check.
+Affects: the Item means tab, the means chart's dots and intervals, mean
+sorting, and Reliability, in both hosts, for numeric responses that are
+not coded 1 to k with every level used. Implemented 2026-11-11. Not yet
+live on the web app.
+
+**Bonferroni, Holm and FDR keep a test picked by hand as each pair's own test.** <!-- ledger: corrections-follow-test-menu -->
+Since 3.2.0 every correction but Games-Howell ran each Compare Groups
+pair on the one-way ANOVA's pooled error term, to match jamovi's ANOVA
+post hoc, and it did so even when Test was set to Welch's t or Student's
+t by hand. Pooling assumes the groups share one spread: with SDs of 1.5,
+2.4 and 7.2 (n = 8, 20, 40) one pair read p = .273 under Holm where its
+own Welch test gives .002 (Holm .004). Tukey and Dunnett still pool,
+because their math needs one error term, and Bonferroni, Holm and FDR
+still pool while Test is left on Auto, so those numbers are unchanged
+and still match jamovi line for line. With Welch's or Student's t picked
+by hand, the statistic, the unadjusted p, the adjusted p and Cohen's d
+under Bonferroni, Holm or FDR are now that pair's own two-group values.
+Checked against R's `pairwise.t.test` and `p.adjust`
+(`stats-judgment-check`, and the rendered fuzzer's new reference for
+Holm over each pair's Welch test). Affects: brackets and Compare pairs
+on Compare Groups, both hosts, only where Test was changed from Auto
+and Correct is Bonferroni, Holm or FDR. Implemented 2026-11-11. Not yet
+live on the web app.
+
 **Tukey and Games-Howell adjusted p values are accurate for large samples and for groups of two.** <!-- ledger: ptukey-df-scaled-grid -->
 The studentized-range integral behind Tukey HSD and Games-Howell
 adjusted p averaged over the error-SD estimate on a grid fixed between

@@ -137,6 +137,7 @@ CH <- list(
                         "missingNote"),
     likertplotbuilder = c("likertItems", "likertLevels", "likertCells",
                           "likertMeans", "likertAlpha", "likertContinuous",
+                          "likertCodes",
                           "graphType", "graphTypeChoices", "missingNote")
 )
 

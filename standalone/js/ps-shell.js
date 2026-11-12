@@ -552,6 +552,18 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "histogram-auto-bins-top-edge", since: "3.2.1",
+      label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
+    { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
+      label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
+    { id: "anova-effect-size-table-total", since: "3.2.1",
+      label: "eta squared and omega squared on two-way and three-way Compare Groups designs with unequal cell sizes match jamovi's ANOVA table" },
+    { id: "freq-pairwise-two-category-once", since: "3.2.1",
+      label: "the Frequencies Pairwise tab lists a two-category outcome once per pair of groups, so its Holm-adjusted p is no longer doubled" },
+    { id: "likert-means-own-codes", since: "3.2.1",
+      label: "survey item means, their intervals and Cronbach's alpha use the responses' own numbers (items coded from 0, or with an unused level, read differently)" },
+    { id: "corrections-follow-test-menu", since: "3.2.1",
+      label: "Compare Groups comparisons under Bonferroni, Holm or FDR keep a Welch's or Student's t picked by hand as each pair's own test" },
     { id: "ptukey-df-scaled-grid", since: "3.2.1",
       label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",

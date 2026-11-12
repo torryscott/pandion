@@ -233,12 +233,14 @@ dataset_refs <- function(groups) {
         key <- paste0(ks[[i]], "|", ks[[j]])
         pr <- pair_refs(groups[[i]], groups[[j]])
         pairs[[key]] <- pr
-        # The engine runs the pair's Student t first and pools only when
-        # that exists (a one-observation group has no row at all, pooled
-        # term or not); without a usable fit it keeps the pair's Welch p.
+        # With a usable fit every pair of groups that each hold a value is
+        # compared on the pooled term, a one-observation group included
+        # (Nov 2026: jamovi's post hoc lists those pairs; the engine used to
+        # require the pair's own Student t first). Without a usable fit the
+        # pair keeps its Welch p.
         fam_p <- NULL
         if (is.null(pool)) fam_p <- pr$welch$p
-        else if (!is.null(pr$student$p)) fam_p <- pooled_p(groups[[i]], groups[[j]])
+        else fam_p <- pooled_p(groups[[i]], groups[[j]])
         if (!is.null(fam_p)) { raw_p <- c(raw_p, fam_p); pair_keys <- c(pair_keys, key) }
     }
     adj <- list()
@@ -247,6 +249,17 @@ dataset_refs <- function(groups) {
             av <- p.adjust(raw_p, method = meth)
             adj[[meth]] <- as.list(setNames(as.list(as.numeric(av)), pair_keys))
         }
+    }
+    # A Welch's t picked by hand under Test keeps each pair's own test under
+    # Bonferroni, Holm and FDR (Nov 2026): Holm over the pairs' Welch p.
+    {
+        wp <- c(); wk <- c()
+        for (key in names(pairs)) {
+            pv <- pairs[[key]]$welch$p
+            if (!is.null(pv) && is.finite(pv)) { wp <- c(wp, pv); wk <- c(wk, key) }
+        }
+        if (length(wp) > 0)
+            adj$welch_holm <- as.list(setNames(as.list(as.numeric(p.adjust(wp, method = "holm"))), wk))
     }
     # Games-Howell: per-pair Welch t + Welch-Satterthwaite df under the
     # studentized range with k = the group count (the engine's
@@ -600,7 +613,11 @@ fq_refs <- function(counts) {
     grp_tot <- colSums(m)
     pairsL <- list()
     raw <- c(); keys <- c()
-    for (cat in rownames(m)) {
+    # With two categories a pair's two proportions add to 1, so each pair of
+    # groups is one test: the widget lists it once, for the first category
+    # (Nov 2026), and Holm counts it once.
+    cats_listed <- if (nrow(m) == 2) rownames(m)[1] else rownames(m)
+    for (cat in cats_listed) {
         gs <- colnames(m)
         for (i in seq_along(gs)) for (j in seq_along(gs)) {
             if (j <= i) next
