@@ -1383,12 +1383,36 @@
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
     return changed;
   }
-  function dockColumnIsDrawer() {
+  // The drawer frame's one condition, word for word the stylesheet's media
+  // query, so script and styles can never disagree: a window under 760px,
+  // OR a finger on a screen held upright. The second half is the upright
+  // tablet (Torry, Nov 11 2026: "give every upright tablet the phone
+  // frame"): at 820px an upright iPad had the three-column frame with the
+  // chart at 45% in a 345px column, while an upright iPad mini, a few
+  // pixels under the breakpoint, had the phone frame and a full-size
+  // chart. A tablet held sideways keeps the three columns, and so does a
+  // mouse at any width above 760.
+  // The last two clauses are the LARGE PHONE HELD SIDEWAYS (Torry, the
+  // same day: "Fix the large phone held sideways too"). An iPhone Pro Max
+  // is 814 by 380 that way and a Pixel 7 is 863 by 360: wider than 760, so
+  // they had three columns with the chart 252px wide in a pane about 330
+  // by 230, while an iPhone 13 (750 wide) had the phone frame. A phone is
+  // told from a tablet by its SCREEN, not by the window: the screen's
+  // short side is under 480 on every phone and over 600 on every tablet.
+  // The screen is asked rather than the window's height because an
+  // on-screen keyboard shrinks the window in some browsers, and a tablet
+  // held sideways must not turn into a phone while someone types. Two
+  // clauses because iOS reports the screen as held upright whichever way
+  // it is turned (the short side is the device WIDTH) and Android reports
+  // it as it is held (sideways, the short side is the device HEIGHT).
+  var NARROW_MQ = "(max-width: 760px), (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-device-width: 480px), (pointer: coarse) and (max-device-height: 480px)";
+  function narrowFrame() {
     try {
-      return !!(window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches);
-    } catch (e) { return false; }
+      if (window.matchMedia) return !!window.matchMedia(NARROW_MQ).matches;
+    } catch (e) {}
+    return window.innerWidth <= 760;
   }
+  function dockColumnIsDrawer() { return narrowFrame(); }
   function panelDockWanted() { return DOCK_BESIDE; }
   function dockSlot() { return el("ps-engine-dock-slot"); }
   // A panel showing under the chart right now (the engine keeps one
@@ -9709,7 +9733,7 @@
     // Narrow layout first: the inspector is display:none behind a drawer
     // there, so the old code decorated a 0x0 element. skipFocus, because
     // the focus target below is ours, not the drawer's first tabbable.
-    if (window.innerWidth <= 760) narrowSet("inspector", true);
+    if (narrowFrame()) narrowSet("inspector", true);
     var miss = firstUnsatisfiedRole();
     var def = miss && miss.def;
     if (!def) {
@@ -27078,7 +27102,7 @@
   }
   function layFocusSelectionInspector() {
     if (!laySelectedIds().length) return;
-    if (window.innerWidth <= 760) narrowSet("inspector");
+    if (narrowFrame()) narrowSet("inspector");
     window.setTimeout(function () {
       var input = el("ps-ctx-lx");
       try { input.focus(); input.select(); } catch (ignore) {}
@@ -37902,9 +37926,10 @@
   // The find-your-way pass (Nov 2026). On a phone the three unnamed icons
   // were the only way to the menu, the other workspaces and chart setup, half
   // the chart toolbar sat off the right edge, and nothing on screen kept a
-  // chart to the Notebook. PHONE is touch mode AND a window under the 760px
-  // drawer breakpoint: a narrow desktop window and a tablet keep the frame
-  // they had. Everything here is a second handle on something that already
+  // chart to the Notebook. PHONE is touch mode AND the drawer frame
+  // (narrowFrame: under 760px, or a finger on a screen held upright, which
+  // since Nov 11 2026 takes in every upright tablet). A narrow desktop
+  // window and a tablet held sideways keep the frame they had. Everything here is a second handle on something that already
   // exists (the workspace switch, the drawers, the Export button, the
   // toolbar's own buttons), so there is one behavior behind each and the
   // phone frame cannot drift from the desktop one.
@@ -37913,8 +37938,7 @@
   var PHONE_SHEET_FOCUS = null;
   function phoneWanted() {
     try {
-      return TOUCH_MODE && !!window.matchMedia &&
-        window.matchMedia("(max-width: 760px)").matches;
+      return TOUCH_MODE && narrowFrame();
     } catch (e) { return false; }
   }
   function phoneOn() { return PHONE; }
@@ -38263,7 +38287,7 @@
       });
     }
     try {
-      var mq = window.matchMedia("(max-width: 760px)");
+      var mq = window.matchMedia(NARROW_MQ);
       if (mq.addEventListener) mq.addEventListener("change", phoneRefresh);
       else if (mq.addListener) mq.addListener(phoneRefresh);
     } catch (eMq) {}
@@ -38299,7 +38323,7 @@
     // Widening the window puts everything back in the grid, so a drawer left
     // open would sit on top of the panel it IS.
     window.addEventListener("resize", function () {
-      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null, true);
+      if (NARROW_OPEN && !narrowFrame()) narrowSet(null, true);
     });
   }
   function wireBypassLinks() {
@@ -38316,7 +38340,7 @@
     if (settingsLink && settings)
       settingsLink.addEventListener("click", function (e) {
         e.preventDefault();
-        if (window.innerWidth <= 760) narrowSet("inspector", true);
+        if (narrowFrame()) narrowSet("inspector", true);
         window.requestAnimationFrame(function () { settings.focus(); });
       });
   }

@@ -4578,7 +4578,14 @@ if (window.navigator.standalone === true) {
     background: rgba(20, 32, 46, 0.42);
   }
   #ps-narrow-scrim[hidden] { display: none; }
-  @media (max-width: 760px) {
+  /* The second clause of this query is the upright tablet (Nov 11 2026): a
+     finger on a screen held upright gets the drawer frame at any width,
+     and with it the phone frame below. The last two are the large phone
+     held sideways, which is wider than 760: a phone is told by its screen
+     (short side under 480), asked as the device's width for iOS and as
+     its height for Android. The shell tests the same words (NARROW_MQ in
+     ps-shell.js); change both or neither. */
+  @media (max-width: 760px), (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-device-width: 480px), (pointer: coarse) and (max-device-height: 480px) {
     /* Let user text spacing grow the chrome instead of overlapping a fixed
        row. Keep each density's usual minimum heights. */
     .ps-page {
@@ -5011,9 +5018,10 @@ if (window.navigator.standalone === true) {
 
   /* ------------------------------------------------------------------
      The phone frame (the find-your-way pass, Nov 2026). body.ps-phone is
-     set by the shell when the primary pointer is a finger AND the window
-     is under the 760px drawer breakpoint; a narrow desktop window keeps
-     the frame above, and so does a tablet. Seven things, each ruled on
+     set by the shell when the primary pointer is a finger AND the drawer
+     frame above is on (under 760px, or held upright, which takes in every
+     upright tablet); a narrow desktop window keeps the frame above, and so
+     does a tablet held sideways. Seven things, each ruled on
      from a mockup: the four workspaces as named tabs along the bottom;
      one top row (Menu, the project and its state, Keep, Export) where
      there were two, with Open and Save project inside Menu; a Keep

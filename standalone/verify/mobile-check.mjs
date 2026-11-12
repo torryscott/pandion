@@ -91,7 +91,9 @@ if (OUT) mkdirSync(OUT, { recursive: true });
 // The profiles. A phone both ways up, a second phone width (most Android
 // phones are a little wider than an iPhone), and a small tablet both ways
 // up. The tablet in portrait is 768 px wide, eight more than the app's
-// drawer breakpoint, so it gets the full three-column desktop frame.
+// 760px drawer breakpoint; since Nov 11 2026 a finger on a screen held
+// upright gets the drawer frame at any width, so it has the phone frame
+// too, and only the tablet held sideways keeps three columns.
 const ALL_DEVICES = [
     { id: 'phone', profile: 'iPhone 13', axe: true },
     { id: 'phone-landscape', profile: 'iPhone 13 landscape', axe: false },
@@ -394,7 +396,7 @@ async function runDevice(browser, dev) {
         } });
     });
     const tag = dev.id + ': ';
-    const narrow = profile.viewport.width <= 760;
+    const narrow = profile.viewport.width <= 760 || profile.viewport.height > profile.viewport.width || profile.viewport.height <= 480;
     // A toast is on screen for a few seconds after an action. Measured
     // mid-flight it lands in whichever screen it happens to overlap, so
     // every measurement waits for the toast host to go quiet first.
@@ -957,7 +959,7 @@ async function runDevice(browser, dev) {
     //     every step. Anything wider keeps the frame it had.
     const isPhone = await page.evaluate(() => document.body.classList.contains('ps-phone'));
     check(dev.id + '/frame/kind', isPhone === narrow,
-        tag + (narrow ? 'the phone frame is on (a finger, under 760px)' : 'a tablet keeps the frame it had, with no phone frame'));
+        tag + (narrow ? 'the phone frame is on (a finger, under 760px or held upright)' : 'a tablet held sideways keeps three columns, with no phone frame'));
     if (isPhone) {
         await goWorkspace('chart');
         await closeEditor();
@@ -1617,7 +1619,8 @@ async function runTabletExtras(browser) {
         const p = document.querySelector('.gb2-panel'); const pr = pane.getBoundingClientRect(), sr = svg.getBoundingClientRect();
         return { touch: document.body.classList.contains('ps-touch'), beside: document.body.classList.contains('ps-dock-beside'),
             panel: !!p && p.getBoundingClientRect().height > 40, hiddenTop: Math.round(pr.top - sr.top), hiddenBottom: Math.round(sr.bottom - pr.bottom) }; });
-    check('ipad/dock', !!bar && dk.touch && dk.panel && dk.beside && dk.hiddenTop <= 1 && dk.hiddenBottom <= 1,
+    check('ipad/dock', !!bar && dk.touch && dk.panel && dk.beside && dk.hiddenTop <= 1 && dk.hiddenBottom <= 1 &&
+            !(await page.evaluate(() => document.body.classList.contains('ps-phone'))),
         'a tablet held sideways: a tap on a bar opens the editor beside the chart and the whole chart stays in view (beside ' + dk.beside + ', ' + Math.max(0, dk.hiddenTop) + ' px of the chart above the pane)');
     // a finger drags the column divider
     const sp = await page.evaluate(() => { const s = document.querySelector('[data-splitter="rail"]'), r = s.getBoundingClientRect();
@@ -1636,8 +1639,50 @@ async function runTabletExtras(browser) {
         'the empty "Script error." a browser raises for its own scripts shows no notice, and a real failure still does (quiet ' + er.quiet + ', real one shown ' + er.loud + ')');
     await ctx.close();
 
-    // an upright tablet's settings column: the page size fields
-    const ctxP = await browser.newContext({ ...devices['iPad Mini'], viewport: { width: 820, height: 1094 } });
+    // an upright tablet (an iPad at 820 by 1094): the phone frame, and the
+    // chart at full size where three columns left it 324 px wide
+    const ctxU = await browser.newContext({ ...devices['iPad Mini'], viewport: { width: 820, height: 1094 } });
+    const pu = await ctxU.newPage();
+    pu.on('pageerror', e => errors.push('upright: ' + String(e).slice(0, 140)));
+    await pu.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+    await pu.goto(pageUrl); await pu.waitForTimeout(900);
+    await pu.locator('#ps-welcome-sample').tap(); await pu.waitForTimeout(2600);
+    const up = await pu.evaluate(() => { const svg = document.querySelector('svg[data-role="gb2-chart-svg"]'), nav = document.getElementById('ps-phone-nav');
+        const pane = document.querySelector('.ps-main-workspace').getBoundingClientRect();
+        const off = [...document.querySelectorAll('.ps-main-workspace [data-role="chart-toolbar"] button')].filter(b => b.offsetParent && (b.getBoundingClientRect().right > pane.right + 1)).length;
+        return { phone: document.body.classList.contains('ps-phone'), nav: !!nav && getComputedStyle(nav).display !== 'none',
+            w: svg ? Math.round(svg.getBoundingClientRect().width) : 0, pane: Math.round(pane.width), off, sw: document.documentElement.scrollWidth, iw: innerWidth }; });
+    check('ipad/upright', up.phone && up.nav && up.w >= 600 && up.pane >= 800 && up.off === 0 && up.sw <= up.iw + 1,
+        'an upright tablet has the phone frame: bottom tabs, the chart ' + up.w + ' px wide in a pane of ' + up.pane + ', ' + up.off + ' toolbar buttons off the edge');
+    await ctxU.close();
+
+    // a large phone held sideways is wider than 760 and is still a phone
+    for (const name of ['iPhone 14 Pro Max landscape', 'Pixel 7 landscape']) {
+        const ctxW = await browser.newContext({ ...devices[name] });
+        const pw = await ctxW.newPage();
+        pw.on('pageerror', e => errors.push(name + ': ' + String(e).slice(0, 140)));
+        await pw.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
+        await pw.goto(pageUrl); await pw.waitForTimeout(900);
+        await pw.locator('#ps-welcome-sample').tap(); await pw.waitForTimeout(2600);
+        // the chart is taller than a sideways phone: bring a bar into view first
+        const barAt = () => pw.evaluate(() => { const n = [...document.querySelectorAll('.graphbuilder2-host svg [data-bar-cat]')].filter(e => e.tagName !== 'text' && e.getBoundingClientRect().height > 20)[0];
+            if (!n) return null; n.scrollIntoView({ block: 'center' }); const r = n.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: Math.min(innerHeight - 70, Math.max(70, r.top + r.height * 0.5)) }; });
+        await barAt(); await pw.waitForTimeout(300);
+        const bw = await barAt();
+        if (bw) { await pw.touchscreen.tap(bw.x, bw.y); await pw.waitForTimeout(1400); }
+        const sw = await pw.evaluate(() => { const nav = document.getElementById('ps-phone-nav'), pane = document.querySelector('.ps-main-workspace').getBoundingClientRect();
+            const p = document.querySelector('.gb2-panel'), pr = p ? p.getBoundingClientRect() : null;
+            return { phone: document.body.classList.contains('ps-phone'), nav: !!nav && getComputedStyle(nav).display !== 'none', pane: Math.round(pane.width), iw: innerWidth, ih: innerHeight,
+                sw: document.documentElement.scrollWidth, editor: !!pr && pr.height > 40 && pr.width > 40 && pr.right > 0 && pr.left < innerWidth && pr.bottom > 0 && pr.top < innerHeight }; });
+        check('sideways/' + name.split(' ')[0].toLowerCase() + '-' + sw.iw, sw.phone && sw.nav && sw.pane >= sw.iw - 2 && sw.sw <= sw.iw + 1 && !!bw && sw.editor,
+            name + ' (' + sw.iw + ' by ' + sw.ih + '): a large phone held sideways has the phone frame, the chart pane is the full ' + sw.pane + ' px, and a tap on a bar opens its editor in view (frame ' + sw.phone + ', tabs ' + sw.nav + ', editor ' + sw.editor + ')');
+        await ctxW.close();
+    }
+
+    // a narrow three-column window under a finger (a tablet held sideways
+    // in a split view): the settings column is 285 px, the page size fields
+    const ctxP = await browser.newContext({ ...devices['iPad Mini landscape'], viewport: { width: 960, height: 700 } });
     const pp = await ctxP.newPage();
     await pp.addInitScript(() => { try { localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); } catch (e) {} });
     await pp.goto(pageUrl); await pp.waitForTimeout(900);
@@ -1648,7 +1693,7 @@ async function runTabletExtras(browser) {
         const need = c.measureText(i.value).width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
         return { value: i.value, need: Math.round(need), has: i.clientWidth }; });
     check('ipad/pagefield', !!lw && lw.has >= lw.need,
-        'an upright tablet: the page width field has room for its digits (' + (lw ? '"' + lw.value + '" needs ' + lw.need + ' px, the field has ' + lw.has : 'no field') + ')');
+        'a narrow settings column under a finger: the page width field has room for its digits (' + (lw ? '"' + lw.value + '" needs ' + lw.need + ' px, the field has ' + lw.has : 'no field') + ')');
     await ctxP.close();
 
     // an app opened from the home screen
