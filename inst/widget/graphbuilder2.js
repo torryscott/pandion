@@ -6059,6 +6059,20 @@
                 _hiddenPointLookup[key][h.idx] = true;
             }
         })();
+        // Host-declared, through the pointMenuVerb seam: this host's hidden
+        // points are real exclusions written from its own data editor, not a
+        // display choice. jamovi never ships the key, so every reader of
+        // this keeps the hide semantics there (the Descriptives hold the
+        // full data, the axis keeps a hidden point in view). Where the key
+        // is set, an excluded value is left out of everything that is
+        // computed or scaled from the data: the Descriptives, the outlier
+        // fences and the axis range, as well as the bars and tests that
+        // already left it out (Nov 2026: "if you exclude the data, it
+        // should be excluded in other places, including the descriptives").
+        // The slashed marker stays, drawn wherever it falls inside the axis.
+        function _gb2PtsExcluded() {
+            return !!(data && data.pointMenuVerb === "exclude");
+        }
         function _hiddenSetForBar(b) {
             if (!b) return null;
             var key = (b.x || "") + "::" + (b.group || "");
@@ -6722,7 +6736,10 @@
                 // markers at hidden positions must stay on-axis, and the
                 // axis holding still while points are hidden/restored
                 // keeps the exploration readable (Jul 9 2026).
-                var _rvArr = Array.isArray(barsArr[i]._origValues)
+                // Not where hidden points are exclusions (_gb2PtsExcluded):
+                // an excluded typo must not stretch the axis to keep its
+                // marker in view, so the range follows the values that remain.
+                var _rvArr = (!_gb2PtsExcluded() && Array.isArray(barsArr[i]._origValues))
                     ? barsArr[i]._origValues : barsArr[i].values;
                 if (isDistGraph && Array.isArray(_rvArr) && _rvArr.length > 0) {
                     var dvs = _rvArr;
@@ -36305,6 +36322,7 @@
                 for (var _orpI = 0; _orpI < n; _orpI++) {
                     var _orpV = values[_orpI];
                     if (typeof _orpV !== "number" || !isFinite(_orpV)) continue;
+                    if (_gb2PtsExcluded() && _isPointHidden(bar.x, bar.group, _orpI)) continue;
                     if (_orpV < _orpLo || _orpV > _orpHi) _outOfRangeCount++;
                 }
 
@@ -36783,7 +36801,9 @@
                 var srcVals = bar._origValues || bar.values;
                 if (!Array.isArray(srcVals)) return;
                 var arr = [];
+                var _fenceXcl = _gb2PtsExcluded();
                 for (var _bvi = 0; _bvi < srcVals.length; _bvi++) {
+                    if (_fenceXcl && _isPointHidden(bar.x, bar.group, _bvi)) continue;
                     var _bv = +srcVals[_bvi];
                     if (isFinite(_bv)) arr.push(_bv);
                 }
@@ -48069,10 +48089,15 @@
                 if (_hpCount > 0) {
                     var _hpRangePresent = _outOfRangeCount > 0;
                     var _hpMini = window.__gb2_hpBadgeMinimized === true;
-                    var _hpTip = _hpCount + (_hpCount === 1
-                        ? " data point is hidden."
-                        : " data points are hidden.") +
-                        " Click to open the Visibility panel and restore them.";
+                    var _hpTip = _gb2PtsExcluded()
+                        ? (_hpCount + (_hpCount === 1
+                            ? " value is excluded in the data."
+                            : " values are excluded in the data.") +
+                            " Click to list them and include them again.")
+                        : (_hpCount + (_hpCount === 1
+                            ? " data point is hidden."
+                            : " data points are hidden.") +
+                            " Click to open the Visibility panel and restore them.");
                     var _hpExpanded = window.__gb2_hpBadgeListOpen === true;
                     var _hpBadge = document.createElement("div");
                     _hpBadge.setAttribute("data-role", "gb2-hp-badge");
@@ -48176,9 +48201,11 @@
                         _hpHeader.title = _hpExpanded
                             ? "Click to collapse the list"
                             : "Click to show & restore individual hidden points";
-                        var _hpWord = _hpCount === 1 ? " point" : " points";
+                        var _hpWord = _gb2PtsExcluded()
+                            ? (_hpCount === 1 ? " value" : " values")
+                            : (_hpCount === 1 ? " point" : " points");
                         var _hpMsg = document.createElement("span");
-                        _hpMsg.textContent = "⊘ " + _hpCount + _hpWord + " hidden";
+                        _hpMsg.textContent = "⊘ " + _hpCount + _hpWord + (_gb2PtsExcluded() ? " excluded" : " hidden");
                         _hpMsg.style.cssText = "flex:1;line-height:1;";
                         _hpHeader.appendChild(_hpMsg);
                         // Chevron — rotates when list is open.
@@ -54091,6 +54118,7 @@
                         for (var bpi = 0; bpi < bpv.length; bpi++) {
                             var vv4 = bpv[bpi];
                             if (typeof vv4 !== "number" || !isFinite(vv4)) continue;
+                            if (_gb2PtsExcluded() && _isPointHidden(bpb.x, bpb.group, bpi)) continue;
                             totPts++;
                             if ((oLo && vv4 < data.yMin) || (oHi && vv4 > data.yMax)) outPts++;
                         }
@@ -54143,10 +54171,14 @@
                 // states which rule applies on this module.
                 var _hdRule =
                     (_mk === "cg" || _mk === "rm")
-                        ? " On this chart, significance brackets and ANOVA labels EXCLUDE the hidden data (hiding = excluding an observation), while the Statistics panel's Descriptives table keeps reporting the full data."
+                        ? (_gb2PtsExcluded()
+                            ? " On this chart, values excluded in the data are left out of everything: the bars, the tests and the Statistics panel's Descriptives. Hidden bars are left out of the tests, and the Descriptives table still lists them."
+                            : " On this chart, significance brackets and ANOVA labels EXCLUDE the hidden data (hiding = excluding an observation), while the Statistics panel's Descriptives table keeps reporting the full data.")
                     : (_mk === "freq")
                         ? " On this chart the chi-square, proportion brackets, and the tables all still INCLUDE the hidden bars - hiding only declutters the picture, it never changes a statistic."
-                        : " The Statistics panel's Descriptives table keeps reporting the full data, including the hidden parts.";
+                        : (_gb2PtsExcluded()
+                            ? " Values excluded in the data are left out of the Statistics panel's numbers. Hidden groups stay included there."
+                            : " The Statistics panel's Descriptives table keeps reporting the full data, including the hidden parts.");
                 if (_hdCount > 0)
                     out.push({ id: "hiddendata", sev: "tip", title: _hdCount + (_hdCount === 1 ? " part of the data is hidden" : " parts of the data are hidden"), why: "Hiding bars, groups, items, or variables with the eye tool is great for exploring, but a reported figure should either show them or say they were excluded - the Figure note (+ menu) is a good place. Restore hidden parts from the eye menu's Hidden list." + _hdRule, fixGt: null });
             })();
@@ -55360,6 +55392,21 @@
                     h.indexOf("corrVar:") === 0) hg++;
             }
             if (hb + hp + hg === 0) return "";
+            // Where hidden points are exclusions, say what was left out of
+            // what in two plain sentences (hp counts the excluded values).
+            if (_gb2PtsExcluded() && (kind === "cg" || kind === "rm" || kind === "dist")) {
+                var _xs = hp > 0
+                    ? hp + (hp === 1 ? " value excluded in the data is"
+                                     : " values excluded in the data are") +
+                      " left out of everything here, the tests and the descriptives alike."
+                    : "";
+                var _hs = (hb + hg) > 0
+                    ? ((kind === "dist")
+                        ? "Hidden groups stay included in these numbers."
+                        : "Hidden bars are left out of the tests; the descriptives still list them.")
+                    : "";
+                return _stFoot(_xs + (_xs && _hs ? " " : "") + _hs);
+            }
             var msg = (kind === "cg" || kind === "rm")
                 ? "Parts of the data are hidden: tests here EXCLUDE them (hiding = excluding); the descriptives report the full data."
                 : (kind === "freq")
@@ -57740,7 +57787,7 @@
                 for (var bi = 0; bi < bars.length; bi++) {
                     var b = bars[bi];
                     if (!b || !Array.isArray(b.values)) continue;
-                    var _dvals = Array.isArray(b._origValues) ? b._origValues : b.values;
+                    var _dvals = (!_gb2PtsExcluded() && Array.isArray(b._origValues)) ? b._origValues : b.values;
                     var mo = _stMoments(_dvals);
                     if (mo.n === 0) continue;
                     // SE (numeric): raw sd/sqrt(n) for CG (and RM between/none),
@@ -57753,7 +57800,7 @@
                         var _ebT = data.errorBarType || "se";
                         if (data.isRepeatedMeasures === true &&
                             data.errorBarMethod === "within" && _ebT !== "none") {
-                            var _hw = (typeof b._origSE === "number") ? b._origSE : b.se;
+                            var _hw = (!_gb2PtsExcluded() && typeof b._origSE === "number") ? b._origSE : b.se;
                             var _km = (_ebT === "sd") ? Math.sqrt(mo.n)
                                 : (_ebT === "ci95") ? _tCriticalTwoSided(0.05, mo.n - 1)
                                 : (_ebT === "ci99") ? _tCriticalTwoSided(0.01, mo.n - 1)
@@ -57804,7 +57851,9 @@
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
                     _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
-                        "Full data: hidden bars and points stay included in this Descriptives table." +
+                        (_gb2PtsExcluded()
+                            ? "Values excluded in the data are left out of this table; hidden bars stay listed."
+                            : "Full data: hidden bars and points stay included in this Descriptives table.") +
                         ((data.summaryFunc === "median")
                             ? " Error bars are hidden while Summary is Median: SD, SE, and CI describe the mean, so no bar draws around a median."
                             : "") +
@@ -58317,7 +58366,7 @@
                 for (var db = 0; db < bars.length; db++) {
                     var dbb = bars[db];
                     if (!dbb || !Array.isArray(dbb.values)) continue;
-                    var _dvals2 = Array.isArray(dbb._origValues) ? dbb._origValues : dbb.values;
+                    var _dvals2 = (!_gb2PtsExcluded() && Array.isArray(dbb._origValues)) ? dbb._origValues : dbb.values;
                     var dm = _stMoments(_dvals2);
                     if (dm.n === 0) continue;
                     var dg = (dbb.group == null) ? "" : String(dbb.group);
@@ -58411,7 +58460,9 @@
                     _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
                         "Skewness and kurtosis use jamovi's Descriptives formulas " +
                         "(sample-adjusted, SPSS-style); kurtosis is excess " +
-                        "(normal = 0). Full data: hidden groups stay included."));
+                        "(normal = 0). " + (_gb2PtsExcluded()
+                            ? "Values excluded in the data are left out; hidden groups stay included."
+                            : "Full data: hidden groups stay included.")));
                 // ---- Frequency table (histogram class intervals): the
                 // widget's own binning + the exact range math of R's
                 // .populateBinTable, so panel, chart, and the jamovi
@@ -58535,7 +58586,9 @@
                                 _stBtnRow(_stBtn("copybins", "Copy table", false)) +
                                 _stFoot("Class intervals mirror the chart's bins and X range. " +
                                     "Cumulative % always accumulates from the lowest interval " +
-                                    "upward, whatever the sort. Full data: hidden groups stay " +
+                                    "upward, whatever the sort. " + (_gb2PtsExcluded()
+                                        ? "Values excluded in the data are left out; hidden groups stay "
+                                        : "Full data: hidden groups stay ") +
                                     "included. Copy table copies tab-separated values that " +
                                     "paste straight into Excel or Word."));
                         }
@@ -61532,6 +61585,18 @@
             } else {
                 chipText = "Full data";
                 chipTip = "Hidden elements stay included - hiding a bar never changes an N, a mean, or a p.";
+            }
+            if (_gb2PtsExcluded() && Array.isArray(data.hiddenPoints) && data.hiddenPoints.length > 0 &&
+                (kind === "cg" || kind === "rm" || kind === "dist")) {
+                if ((kind === "cg" || kind === "rm") && tab !== "desc") {
+                    chipTip = "Pairwise tests and the omnibus recompute without hidden bars and without " +
+                        "values excluded in the data, so they always match what is drawn. The Descriptives " +
+                        "tab leaves out excluded values too, and still lists hidden bars.";
+                } else {
+                    chipText = "Exclusions applied";
+                    chipTip = "Values excluded in the data are left out of these numbers. " +
+                        "Hidden bars and groups stay listed.";
+                }
             }
             var chip = titleEl.querySelector('[data-role="gb2-crumb-chip"]');
             if (!chip) {
