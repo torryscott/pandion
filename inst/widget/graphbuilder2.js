@@ -16226,13 +16226,19 @@
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
             // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026;
-            // widened Oct 26 2026 after his class_year screenshot): with ANY
-            // correction on except Games-Howell (Tukey, Dunnett, Bonferroni,
-            // Holm, FDR), an independent t bracket's statistic and
+            // widened Oct 26 2026 after his class_year screenshot; narrowed
+            // Nov 11 2026, his ruling on the statistical review): under
+            // Tukey and Dunnett, whose math needs one error term, and under
+            // Bonferroni, Holm and FDR while Test is left on Auto, an
+            // independent t bracket's statistic and
             // unadjusted p come from the one-way ANOVA's pooled error term
             // over every cell of its panel - the same ruler the adjusted p
             // uses, and what jamovi's ANOVA post hoc prints under every one
             // of its corrections - so a row never mixes two error terms.
+            // Bonferroni, Holm and FDR only rescale p values, so a Welch's
+            // or Student's t PICKED BY HAND under Test stays that pair's
+            // own test (pooling unequal spreads can hide or invent a
+            // difference; the reviewer's case went from .002 to .273).
             // Games-Howell's own model is Welch's t, so under it a Student's
             // pick runs as Welch. With Correct = None each pair is its own
             // two-group test. Under a pooled correction Cohen's d (and g)
@@ -16245,7 +16251,8 @@
                 if (_pc === "gamesHowell") {
                     testKind = "welch";
                 } else if (_pc === "tukey" || _pc === "dunnett" ||
-                           _pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") {
+                           ((_pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") &&
+                            (!ann.autoPTest || ann.autoPTest === "auto"))) {
                     try {
                         var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
                         var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
@@ -57474,11 +57481,15 @@
                                 }
                                 if (!pm) return "";
                                 var dfTxt = (pm.df % 1 === 0) ? String(pm.df) : pm.df.toFixed(2);
-                                return _stFoot("With " + (cmpCorr === "dunnett" ? "Dunnett" : "Tukey") +
-                                    " on, every row's statistic and unadjusted p use the pooled variance of all " +
+                                var pmModel = (cmpCorr === "tukey" || cmpCorr === "dunnett");
+                                return _stFoot("With " + _gb2CorrName(cmpCorr) + " on" +
+                                    (pmModel ? "" : " and Test left on Auto") +
+                                    ", every row's statistic and unadjusted p use the pooled variance of all " +
                                     pm.k + (data.hasGroups ? " cells" : " groups") +
                                     " in the panel (the one-way ANOVA's error term, df " + dfTxt +
-                                    "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups.");
+                                    (pmModel
+                                        ? "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups."
+                                        : "), as jamovi's ANOVA post hoc does. To keep each pair's own two-group test, pick Welch's or Student's t under Test."));
                             }
                             var seen = {}, keys = [];
                             for (var fi = 0; fi < cmpPairs.length; fi++) {
@@ -96581,7 +96592,9 @@
                     lines.push("         over all " + r.res.pooled.k +
                                ((data && data.hasGroups) ? " cells" : " groups") +
                                " in this panel, df " + _pdf +
-                               " (Correct: None uses the pair alone)");
+                               ((data && (data.autoPCorrection === "tukey" || data.autoPCorrection === "dunnett"))
+                                   ? " (Correct: None uses the pair alone)"
+                                   : " (Test: Welch's or Student's t keeps the pair's own test)"));
                 }
                 if (r.testFamily === "rank") {
                     if (r.testKind === "mannWhitneyU") {

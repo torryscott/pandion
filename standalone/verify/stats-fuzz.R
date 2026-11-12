@@ -248,6 +248,17 @@ dataset_refs <- function(groups) {
             adj[[meth]] <- as.list(setNames(as.list(as.numeric(av)), pair_keys))
         }
     }
+    # A Welch's t picked by hand under Test keeps each pair's own test under
+    # Bonferroni, Holm and FDR (Nov 2026): Holm over the pairs' Welch p.
+    {
+        wp <- c(); wk <- c()
+        for (key in names(pairs)) {
+            pv <- pairs[[key]]$welch$p
+            if (!is.null(pv) && is.finite(pv)) { wp <- c(wp, pv); wk <- c(wk, key) }
+        }
+        if (length(wp) > 0)
+            adj$welch_holm <- as.list(setNames(as.list(as.numeric(p.adjust(wp, method = "holm"))), wk))
+    }
     # Games-Howell: per-pair Welch t + Welch-Satterthwaite df under the
     # studentized range with k = the group count (the engine's
     # _facetCells k). Independent route: R's own t.test + the studentized

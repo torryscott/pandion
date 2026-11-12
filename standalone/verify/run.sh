@@ -32,7 +32,7 @@ chart-check-check compare-pairs-apa-check chart-from-selection-check chart-group
 default-style-routes-check curve-handle-check grown-canvas-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check pixel-truth-check corpus-compat-check build-stamp-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
-drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
+drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check stats-judgment-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
 find-scope-check findpop-check find-columns-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check formula-explain-check formula-signature-check formula-term-check \
 grid-keys-check grid-enter-mode-check large-project-check large-autosave-check cell-edit-scope-check grid-column-window-check help-check hierarchy-check hidden-selection-check multi-column-type-check role-chip-order-check typed-alpha-check chip-chart-order-check chip-glide-check hist-facet-bins-check eb-method-preview-check
