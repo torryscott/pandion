@@ -55726,6 +55726,35 @@
         // SS/(SS+SSE); omega² = (SS - df*MSE)/(SS_total + MSE). The
         // RM-ANOVA line keeps partial eta² (its within error term
         // makes the other flavors contested).
+        // Spread caution (Nov 2026, the statistical review): pooled
+        // comparisons and the classic F assume the groups share one
+        // spread, and nothing in the panel said so. This is a plain
+        // description, not a pretest: no test is chosen from it. Returns
+        // the panel whose largest SD is more than twice its smallest
+        // (cells with at least two values), or null.
+        function _stSpreadNote() {
+            var worst = null, seenF = {};
+            if (!Array.isArray(bars)) return null;
+            for (var si = 0; si < bars.length; si++) {
+                var sf = _facetOf((bars[si] && typeof bars[si].x === "string") ? bars[si].x : "");
+                if (seenF[sf]) continue;
+                seenF[sf] = 1;
+                var sfc = _facetCells(sf), lo = Infinity, hi = 0, nc = 0;
+                for (var sj = 0; sj < sfc.levels.length; sj++) {
+                    var sv = sfc.levels[sj];
+                    if (!sv || sv.length < 2) continue;
+                    var ssd = _gb2Stats.sd(sv);
+                    if (!isFinite(ssd)) continue;
+                    nc++;
+                    if (ssd < lo) lo = ssd;
+                    if (ssd > hi) hi = ssd;
+                }
+                if (nc < 2 || !(hi > 0) || !(hi > 2 * lo)) continue;
+                var sr = hi / Math.max(lo, 1e-12);
+                if (!worst || sr > worst.ratio) worst = { lo: lo, hi: hi, ratio: sr, facet: sf };
+            }
+            return worst;
+        }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
             var v, sym;
@@ -57514,6 +57543,14 @@
                             }
                             return _stFoot(txt);
                         })()) +
+                        ((function () {
+                            if (cmpIsRM || mk !== "cg") return "";
+                            var sp = null;
+                            try { sp = _stSpreadNote(); } catch (_eSp) {}
+                            if (!sp) return "";
+                            return _stFoot("The groups' spreads differ a lot (SD from " + _stNum(sp.lo) +
+                                " to " + _stNum(sp.hi) + "). Pooled comparisons (Tukey, Dunnett, and Bonferroni, Holm or FDR with Test on Auto) and Student's t assume the groups share one spread; Welch's t and Games-Howell do not.");
+                        })()) +
                         // Keep ONLY the statistical-honesty warning: the
                         // plotted center and test estimand must be named.
                         (((data.graphType === "box" || data.graphType === "violin" ||
@@ -57940,6 +57977,13 @@
                             _stEsc(mLn[7])
                         ]);
                     }
+                    var omniSpread = "";
+                    if (mk === "cg") {
+                        var _osp = null;
+                        try { _osp = _stSpreadNote(); } catch (_eOs) {}
+                        if (_osp) omniSpread = " The groups' spreads differ a lot (SD from " + _stNum(_osp.lo) +
+                            " to " + _stNum(_osp.hi) + "): these F tests assume the groups share one spread, so read them with that in mind.";
+                    }
                     omniCardHtml = _stCard("",
                         effSel +
                         (omniRows.length
@@ -57951,7 +57995,7 @@
                                        omniRows, null, true)
                             : "") +
                         (omniPlain.length ? _stReadout(omniPlain.join("\n")) : "") +
-                        _stFoot(omniFoot +
+                        _stFoot(omniFoot + omniSpread +
                             (omniGG
                                 ? ((mk === "rm" && data.hasGroups)
                                     ? " The within-subject rows (" + _stOccName() + " + its interactions) are Greenhouse-Geisser-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
