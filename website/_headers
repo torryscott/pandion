@@ -53,9 +53,3 @@
   Cache-Control: public, max-age=0, must-revalidate
 /app-next/index.html
   Cache-Control: public, max-age=0, must-revalidate
-/app-mobile/lib/*
-  Cache-Control: public, max-age=86400
-/app-mobile/
-  Cache-Control: public, max-age=0, must-revalidate
-/app-mobile/index.html
-  Cache-Control: public, max-age=0, must-revalidate
