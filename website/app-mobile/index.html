@@ -20,30 +20,26 @@ if (window.navigator.standalone === true) {
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-13T00:47Z 1aed6a8">
+<meta name="pandion-build" content="2026-11-13T13:45Z a60f43c">
 <title>Pandion Plots (mobile preview)</title>
-<!-- PREVIEW COPY. Built from the probe/mobile-harness branch at 1aed6a8: the
-     released app plus the phone and tablet work (touch gestures on the chart
-     and on a layout page: a tap edits, a drag moves a part at once, a swipe
-     on empty space scrolls, touch and hold still opens the part's menu; a
-     touch density with larger controls and text; the phone frame and
-     sharing; a tapped part keeps its values on screen, touch and hold on a
-     button shows its tip, the title strip says Tap to add title, a data
-     cell's menu starts with Edit value and a shape's with Duplicate; a
-     long value readout wraps inside the screen, the editing panel's title
-     is whole with its Applies to switch on a line of its own, and menu rows
-     show no keyboard shortcuts until a keyboard is used; tablet fixes
-     from the iPad pass, the phone frame on every upright tablet and on a
-     large phone held sideways, files out of the home screen app through
-     the share sheet with an opaque home screen icon, the phone start
-     centre, and four small fixes from device screenshots: the line under
-     the project name ends on a whole word, Menu rows are centred, the top
-     row of the home screen app is sharp, and the colour hint says where
-     the picker is; and a scatter point's ring no longer stays lit when
-     another point is tapped), so it
-     can be tried on a real phone before it ships. It does not carry the next-release queue that
-     /app-next/ shows. Not linked from the site, not indexed, refreshed or
-     removed as the work moves. The app at /app/ is the released one. -->
+<!-- PREVIEW COPY. Built from the probe/candidate-2026-11-12-mobile branch at
+     a60f43c: the next-release queue that /app-next/ shows, the fixes from
+     the review rounds (a typed column's type, exclusions everywhere, one
+     set of gestures for every chart part with value readouts under the
+     pointer, and the statistical judgment changes), and the phone and
+     tablet work (touch gestures on the chart and on a layout page: a tap
+     edits, a drag moves a part at once, a swipe on empty space scrolls,
+     touch and hold still opens the part's menu; a touch density with
+     larger controls and text; the phone frame and sharing; a tapped part
+     keeps its values on screen; tablet fixes, the phone frame on every
+     upright tablet and on a large phone held sideways, files out of the
+     home screen app through the share sheet, and the phone start centre).
+     New where the two meet: a layout page's edge grips answer a finger
+     only on their visible pills, and a readout on a bar, a marker or a
+     heatmap tile no longer stays up after the pointer leaves. Put here
+     so the whole candidate can be tried on a real phone before it ships.
+     Not linked from the site, not indexed, refreshed or removed as the
+     work moves. The app at /app/ is the released one. -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   body::after {
@@ -1209,6 +1205,59 @@ if (window.navigator.standalone === true) {
     display: none; position: absolute; z-index: 1001; pointer-events: none;
     background: #d2267a;
   }
+  /* Page edges (Nov 2026, Torry's ask): grips on the paper itself. Dragging
+     one moves that edge only; items keep their size and place, the edge
+     stops at the outermost item and snaps to the margin. Pointer chrome,
+     like the item resize handle; the rail's Size fields and Fit page to
+     content are the keyboard route. The grips hang ENTIRELY outside the
+     page: every pixel of the page, its corners included, still belongs to
+     the canvas, so a rubber band dragged from the very corner, or an item
+     flush with an edge, is never caught by them. */
+  .ps-lpage-edges { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+  .ps-lpage-edge { position: absolute; pointer-events: auto; touch-action: none; }
+  .ps-lpage-edge[data-edge="n"] { left: 18px; right: 18px; top: -12px; height: 12px; cursor: ns-resize; }
+  .ps-lpage-edge[data-edge="s"] { left: 18px; right: 18px; bottom: -12px; height: 12px; cursor: ns-resize; }
+  .ps-lpage-edge[data-edge="w"] { top: 18px; bottom: 18px; left: -12px; width: 12px; cursor: ew-resize; }
+  .ps-lpage-edge[data-edge="e"] { top: 18px; bottom: 18px; right: -12px; width: 12px; cursor: ew-resize; }
+  .ps-lpage-edge[data-edge="nw"] { left: -18px; top: -18px; width: 18px; height: 18px; cursor: nwse-resize; }
+  .ps-lpage-edge[data-edge="ne"] { right: -18px; top: -18px; width: 18px; height: 18px; cursor: nesw-resize; }
+  .ps-lpage-edge[data-edge="sw"] { left: -18px; bottom: -18px; width: 18px; height: 18px; cursor: nesw-resize; }
+  .ps-lpage-edge[data-edge="se"] { right: -18px; bottom: -18px; width: 18px; height: 18px; cursor: nwse-resize; }
+  .ps-lpage-edge::before {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); border-radius: 3px;
+    background: var(--ps-l4); border: 1px solid var(--ps-s0);
+    box-sizing: border-box; transition: background-color .12s, opacity .12s;
+  }
+  .ps-lpage-edge[data-edge="n"]::before, .ps-lpage-edge[data-edge="s"]::before { width: 36px; height: 7px; }
+  .ps-lpage-edge[data-edge="w"]::before, .ps-lpage-edge[data-edge="e"]::before { width: 7px; height: 36px; }
+  .ps-lpage-edge[data-edge="nw"]::before, .ps-lpage-edge[data-edge="ne"]::before,
+  .ps-lpage-edge[data-edge="sw"]::before, .ps-lpage-edge[data-edge="se"]::before {
+    width: 10px; height: 10px; opacity: 0;
+  }
+  /* The corner grips show while the pointer is over the stage. Only where
+     there is a pointer that can hover: iPhone Safari spends a tap on a
+     hover that makes something appear, and no click follows. */
+  @media (hover: hover) {
+    #ps-lstage:hover .ps-lpage-edge::before { opacity: 1; }
+  }
+  .ps-lpage-edge.ps-lpage-edge-active::before { opacity: 1; }
+  /* Under a finger a grip is the pill that can be seen and nothing more.
+     Each edge grip was a strip as long as its edge, a browser hands a touch
+     to the nearest tappable thing within a finger's width, and a scroll
+     begun on the page beside its bottom edge resized the page (measured:
+     672 px tall became 525). So in touch mode an edge grip is as long as
+     its pill and a little more, and the corners, which a mouse sees on
+     hover, are always shown. A grip still moves its edge at once. */
+  body.ps-touch .ps-lpage-edge[data-edge="n"], body.ps-touch .ps-lpage-edge[data-edge="s"] {
+    left: calc(50% - 32px); right: auto; width: 64px;
+  }
+  body.ps-touch .ps-lpage-edge[data-edge="w"], body.ps-touch .ps-lpage-edge[data-edge="e"] {
+    top: calc(50% - 32px); bottom: auto; height: 64px;
+  }
+  body.ps-touch .ps-lpage-edge::before { opacity: 1; }
+  .ps-lpage-edge:hover::before, .ps-lpage-edge.ps-lpage-edge-active::before { background: var(--ps-accent); }
+  .ps-lstage-resizing, .ps-lstage-resizing * { user-select: none; }
   /* The selection box. Built from the accent already used for a selected
      item, so a marquee reads as the same act as clicking one. */
   .ps-lmarquee {
@@ -5497,6 +5546,7 @@ if (window.navigator.standalone === true) {
     .graphbuilder2-host, #ps-lviewport, #ps-lstage, #ps-lcanvas {
       overflow: visible !important; transform: none !important;
       box-shadow: none !important; }
+    .ps-lpage-edges { display: none !important; }
     .ps-print-note { display: block !important; margin: 12pt 0 0;
       font: 9pt/1.4 system-ui, sans-serif; color: #444; }
     @page { margin: 12mm; }
@@ -6033,6 +6083,18 @@ if (window.navigator.standalone === true) {
             <button type="button" id="ps-lunit-cm"
                     aria-pressed="false">cm</button>
           </div>
+        </div>
+        <!-- The page sized to the figure rather than the figure to the page
+             (Torry, Nov 2026). The same operation as dragging a page edge,
+             in one click, and the keyboard's route to it. -->
+        <div class="ps-linsp-row ps-lpage-fitrow">
+          <button type="button" class="ps-btn" id="ps-lpage-fit"
+                  data-tip="Trim the page to the items plus the margin. Items keep their size and place.">Fit page to content</button>
+        </div>
+        <div class="ps-loader-hint">
+          Drag an edge or corner of the page to resize it by hand: it stops at
+          the items and snaps to the margin. A preset or typed size scales the
+          figure to fit instead.
         </div>
         <label class="ps-inspector-field">
           Orientation
@@ -6621,6 +6683,19 @@ if (window.navigator.standalone === true) {
         <div class="ps-visually-hidden" id="ps-layout-options"></div>
         <div id="ps-lstage">
           <div id="ps-lcanvas"></div>
+          <!-- Page edges (Nov 2026): grips on the paper itself. Pointer-only
+               chrome, like the item resize handle; the keyboard route is the
+               Size fields and Fit page to content in the rail. -->
+          <div id="ps-lpage-edges" class="ps-lpage-edges" aria-hidden="true">
+            <div class="ps-lpage-edge" data-edge="n"></div>
+            <div class="ps-lpage-edge" data-edge="s"></div>
+            <div class="ps-lpage-edge" data-edge="w"></div>
+            <div class="ps-lpage-edge" data-edge="e"></div>
+            <div class="ps-lpage-edge" data-edge="nw"></div>
+            <div class="ps-lpage-edge" data-edge="ne"></div>
+            <div class="ps-lpage-edge" data-edge="sw"></div>
+            <div class="ps-lpage-edge" data-edge="se"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -6719,7 +6794,7 @@ if (window.navigator.standalone === true) {
             <span class="ps-launch-icon"><svg class="ps-icn" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></span>
             <span class="ps-launch-copy">
               <strong>Open data from the web</strong>
-              <span>Search teaching datasets or Zenodo, or paste a link</span>
+              <span>Search teaching datasets, Zenodo or Dataverse, or paste a link</span>
             </span>
           </button>
         </div>
@@ -7273,6 +7348,9 @@ if (window.navigator.standalone === true) {
         <button type="button" class="ps-finddata-source" role="tab" data-source="zenodo" aria-selected="false">
           <strong>Research data</strong><span>Zenodo, each record behind a DOI</span>
         </button>
+        <button type="button" class="ps-finddata-source" role="tab" data-source="dataverse" aria-selected="false">
+          <strong>Replication data</strong><span>Harvard Dataverse, the data behind published studies</span>
+        </button>
         <button type="button" class="ps-finddata-source" role="tab" data-source="link" aria-selected="false">
           <strong>A link you have</strong><span>A CSV, Excel, .omv or project file on the web</span>
         </button>
@@ -7364,6 +7442,10 @@ if (window.navigator.standalone === true) {
         </div>
       </div>
       <p id="ps-share-source" class="ps-finddata-meta" hidden></p>
+      <!-- Shown outside the hosted app (the desktop app, the portable file,
+           a local copy): the link points at pandionplots.com, not at this
+           copy, whose address nobody else can open. -->
+      <p id="ps-share-opens" class="ps-finddata-meta" hidden>The link opens the app at pandionplots.com, so whoever receives it needs nothing installed.</p>
       <p class="ps-share-foot" id="ps-share-foot">Anyone who has the link has the data.</p>
     </div>
   </div>
@@ -7623,8 +7705,12 @@ if (window.navigator.standalone === true) {
               stroke="currentColor" stroke-width="1.5"
               stroke-linecap="round"/>
       </svg>
+      <!-- Column names match too (Torry, Nov 2 2026), and the placeholder
+           is where a user learns it: his own question was whether Find
+           covered anything but the cells. -->
       <input id="ps-data-find" type="search" autocomplete="off"
-             placeholder="Find data" aria-label="Find in dataset">
+             placeholder="Find data or column names"
+             aria-label="Find data or column names in the table">
       <span id="ps-data-find-count" aria-live="polite"></span>
       <button type="button" id="ps-data-find-prev" aria-label="Previous match"
               data-tip="Previous match">&#8249;</button>
@@ -7869,16 +7955,16 @@ if (window.navigator.standalone === true) {
 <div id="ps-toast" role="status" aria-live="polite"></div>
 <p class="ps-print-note">Printed from Pandion Plots. For a publication-quality figure use Export (Cmd/Ctrl+P), which writes vector PDF and SVG.</p>
 
-<script src="lib/templates.92a98962b1.js"></script>
+<script src="lib/templates.2106dff6a6.js"></script>
 <script src="lib/ps-stat.118b17a666.js"></script>
 <script src="lib/ps-omv.524fd9328a.js"></script>
 <script src="lib/ps-xlsx.89a4ee7295.js"></script>
 <script src="lib/ps-formula.eb9530f59e.js"></script>
-<script src="lib/ps-data.c926facca8.js"></script>
+<script src="lib/ps-data.cece9135f6.js"></script>
 <script src="lib/jspdf.umd.min.979a2ef514.js"></script>
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
-<script src="lib/graphbuilder2.min.b4740fa24c.js"></script>
+<script src="lib/graphbuilder2.min.f75799f31d.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.eab6d75de5.js"></script>
+<script src="lib/ps-shell.02d4a07b5e.js"></script>
 </body>
 </html>

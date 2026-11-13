@@ -552,6 +552,20 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "histogram-auto-bins-top-edge", since: "3.2.1",
+      label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
+    { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
+      label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
+    { id: "anova-effect-size-table-total", since: "3.2.1",
+      label: "eta squared and omega squared on two-way and three-way Compare Groups designs with unequal cell sizes match jamovi's ANOVA table" },
+    { id: "freq-pairwise-two-category-once", since: "3.2.1",
+      label: "the Frequencies Pairwise tab lists a two-category outcome once per pair of groups, so its Holm-adjusted p is no longer doubled" },
+    { id: "likert-means-own-codes", since: "3.2.1",
+      label: "survey item means, their intervals and Cronbach's alpha use the responses' own numbers (items coded from 0, or with an unused level, read differently)" },
+    { id: "corrections-follow-test-menu", since: "3.2.1",
+      label: "Compare Groups comparisons under Bonferroni, Holm or FDR keep a Welch's or Student's t picked by hand as each pair's own test" },
+    { id: "ptukey-df-scaled-grid", since: "3.2.1",
+      label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
       label: "Compare Groups comparisons under a correction run on the ANOVA's pooled error term, with Cohen's d on the model SD" },
     { id: "rm-posthoc-complete-subjects", since: "3.2.0",
@@ -1902,6 +1916,61 @@
   }
   function inferType(rawVals, tokens) {
     return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
+  }
+  // An untyped column takes its type from the first data that lands in it
+  // (Nov 2026, a first-use walkthrough: quiz scores typed into a blank sheet
+  // stayed Nominal, and the chart then offered "none eligible" without
+  // naming the column or the cure). Two halves, because the question has to
+  // be asked BEFORE a write and answered AFTER it.
+  //
+  // firstDataWatch: should `col` take its type from what is about to be
+  // written into the cells in `rows`? Yes in exactly two situations, and
+  // never for a type somebody set by hand (setColTypes marks that).
+  //   1. The column is empty and untyped: it holds no readable value, and
+  //      its type is Nominal, which is what inference says of no data.
+  //   2. The column's type CAME from this rule earlier in the session
+  //      (t.typeAuto), and the write replaces every value it holds. That is
+  //      what lets someone type 14, think again, and type a name over it or
+  //      after deleting it, without the name going missing in a column the
+  //      first guess made Continuous. `emptyOnly` switches this half off.
+  // Any other column with data is never re-read: text typed or pasted over
+  // an imported Continuous column still goes missing and says so, which is
+  // the report that catches a misaligned paste. Both marks are session
+  // state on the table object and are never saved.
+  function firstDataWatch(t, col, rows, emptyOnly) {
+    if (!t || !t.types || !(col in t.types) || !t.raw[col]) return false;
+    if (t.typeByHand && t.typeByHand[col]) return false;
+    if (t.computed && t.computed[col] != null) return false;
+    var auto = !emptyOnly && !!(t.typeAuto && t.typeAuto[col]);
+    // The last audit is enough to say no cheaply: more readable values than
+    // cells being written means some of them are outside those cells.
+    var last = t.typeAudit && t.typeAudit[col];
+    if (last && last.seen > (auto ? rows.length : 0)) return false;
+    var tokens = tableMissingTokens(t, col), vals = t.raw[col];
+    var audit = numericAudit(vals, tokens);
+    if (!audit.seen) return t.types[col] === "nominal";
+    if (!auto) return false;
+    var inRows = Object.create(null), i;
+    for (i = 0; i < rows.length; i++) inRows[rows[i]] = 1;
+    for (i = 0; i < vals.length; i++) {
+      if (inRows[i]) continue;
+      if (!tokens[vals[i] == null ? "" : String(vals[i]).trim()]) return false;
+    }
+    return true;
+  }
+  // typeFromFirstData: after the write, give a watched column the type its
+  // values say, and remember that the type came from here. A column left
+  // with no readable value goes back to Nominal, which is what an untyped
+  // empty column is. Returns the new type when it changed, "" otherwise.
+  // The caller retypes.
+  function typeFromFirstData(t, col) {
+    if (!t.typeAuto) t.typeAuto = dataMap();
+    t.typeAuto[col] = 1;
+    var now = numericAudit(t.raw[col], tableMissingTokens(t, col));
+    var next = now.numeric ? "continuous" : "nominal";
+    if (next === t.types[col]) return "";
+    t.types[col] = next;
+    return next;
   }
   // A numeric missing-value CODE passes every gate the audit above has. It
   // reads as a number, so bad === 0, the column types Continuous, and the
@@ -7056,6 +7125,23 @@
     }
     applySvgAccessibility(doc, exportAccessibleTitle(),
       exportAccessibleDescription());
+    // PowerPoint-safe paints at the EXPORT boundary only (Nov 2026, Torry's
+    // deck): PowerPoint's SVG importer paints "transparent" and rgba() as
+    // opaque black once a saved deck is reopened, so every chart's invisible
+    // click targets came back as solid black boxes over the error bars. The
+    // chart export gets this inside the engine's harvest; a layout's panels
+    // come from the chart SNAPSHOTS, whose bytes must not change (the
+    // Notebook's drift verdict compares them), so the rewrite runs here, on
+    // the assembled export root, never on the snapshot.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportSafePaints === "function")
+      window.GraphBuilder2.exportSafePaints(root);
+    // Pattern fills become plain clipped geometry at the same boundary:
+    // every SVG-to-PDF writer turns an SVG pattern into a PDF tiling pattern,
+    // and tiling patterns draw hairline seams in some viewers and print RIPs.
+    if (window.GraphBuilder2 &&
+        typeof window.GraphBuilder2.exportFlattenPatterns === "function")
+      window.GraphBuilder2.exportFlattenPatterns(root);
     return {
       svg: serializeExportSvg(root),
       w: page.w, h: page.h
@@ -9233,6 +9319,31 @@
       }
     return false;
   }
+  // distNormality over each cell's values with the hidden (excluded) points
+  // removed. The entry shape is ps-data's own, which is R's: {group, facet,
+  // n, w, p}, W rounded to 3 dp on the producing side.
+  function normalityWithoutHidden(bars, hidden) {
+    var S = window.PSStat, drop = Object.create(null), out = [], i, v;
+    var keyOf = function (cat, group, idx) {
+      return String(cat == null ? "" : cat) + "\u0000" +
+             String(group == null ? "" : group) + "\u0000" + idx;
+    };
+    for (i = 0; i < hidden.length; i++)
+      drop[keyOf(hidden[i].cat, hidden[i].group, hidden[i].idx)] = 1;
+    for (i = 0; i < bars.length; i++) {
+      var b = bars[i], srcVals = b.values || [], vals = [];
+      for (v = 0; v < srcVals.length; v++)
+        if (!drop[keyOf(b.x, b.group, v)]) vals.push(srcVals[v]);
+      var sw = S && S.shapiroWilk ? S.shapiroWilk(vals) : null;
+      if (!sw) continue;
+      out.push({ group: b.group == null ? "" : String(b.group),
+                 facet: b.facet == null ? "" : String(b.facet),
+                 n: sw.n,
+                 w: Math.round(sw.w * 1000) / 1000,
+                 p: S.sigR(sw.p) });
+    }
+    return out;
+  }
   function dataHiddenPoints(payload) {
     var t = activeDataTable(), out = [];
     if (!t || !payload || !Array.isArray(payload.bars)) return out;
@@ -9338,6 +9449,13 @@
       var renderSpec = parseSpec(payload.chartSpec);
       renderSpec.hiddenPoints = derivedHidden;
       payload.chartSpec = JSON.stringify(renderSpec);
+      // The data layer computed the normality test from the values the
+      // builder was handed, and those still hold the excluded ones (they ride
+      // along so the chart can show where they were). An excluded value is
+      // out of every number, so the test is taken again over what remains.
+      if (derivedHidden.length && Array.isArray(payload.distNormality) &&
+          Array.isArray(payload.bars))
+        payload.distNormality = normalityWithoutHidden(payload.bars, derivedHidden);
     }
     // t4-19. An excluded cell reads as null everywhere downstream, which is
     // the whole point of the feature - but it means the builders count it into
@@ -15255,6 +15373,16 @@
     var t = PROJECT.table;
     type = normType(type);
     if (!type || !t || !t.types) return;
+    // Chosen by hand: typing into this column never re-reads its type again
+    // (firstDataWatch). Marked even when the type does not change, because
+    // picking Nominal for an empty column that already says Nominal is still
+    // a choice. Session state on the table object, never saved.
+    if (!t.typeByHand) t.typeByHand = dataMap();
+    (cols || []).forEach(function (c) {
+      if (!(c in t.types)) return;
+      t.typeByHand[c] = 1;
+      if (t.typeAuto) delete t.typeAuto[c];
+    });
     cols = (cols || []).filter(function (c) {
       return (c in t.types) && t.types[c] !== type;
     });
@@ -15491,6 +15619,21 @@
     syncDataGrid();
     return gridFindTd(col, row);
   }
+  // The column half of gridBuildCell, for a header: scroll the column
+  // window to the column when it is outside what is built, touching no
+  // row. The header row is sticky, so a column name is on screen the
+  // moment its column is.
+  function gridBuildColumn(col) {
+    var grid = el("ps-datagrid"), t = PROJECT.table;
+    if (!grid || !t || !GRID_COL_WINDOWED) return;
+    var cols = gridVisibleColumns(t), ci = cols.indexOf(col);
+    if (ci < 0 || (ci >= GRID_COL_START && ci < GRID_COL_END)) return;
+    var edge = gridColumnEdges(cols, ci);
+    grid.scrollLeft = ci < GRID_COL_START
+      ? Math.max(0, edge.left - 46)
+      : Math.max(0, edge.right - grid.clientWidth);
+    syncDataGrid();
+  }
   function gridShouldVirtualize(t) {
     if (!t) return false;
     var rows = nRows(t), cols = t.order ? t.order.length : 0;
@@ -15703,6 +15846,14 @@
       t.excluded[next] = t.excluded[oldName];
       delete t.excluded[oldName];
     }
+    if (t.typeByHand && t.typeByHand[oldName]) {
+      t.typeByHand[next] = 1;
+      delete t.typeByHand[oldName];
+    }
+    if (t.typeAuto && t.typeAuto[oldName]) {
+      t.typeAuto[next] = 1;
+      delete t.typeAuto[oldName];
+    }
     // The per-column missing labels were the one keyed store this did not
     // carry, and losing them is not cosmetic. The column silently falls back
     // to the dataset labels, so a code that WAS missing comes back as real
@@ -15802,6 +15953,8 @@
       if (t.declaredLevels) delete t.declaredLevels[col];
       if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
       if (t.excluded) delete t.excluded[col];
+      if (t.typeByHand) delete t.typeByHand[col];
+      if (t.typeAuto) delete t.typeAuto[col];
       if (t.computed) delete t.computed[col];
       if (t.importedFormulas) delete t.importedFormulas[col];
       if (t.sourceNames) delete t.sourceNames[col];
@@ -16415,6 +16568,15 @@
       if (lwBefore > 0 && lwBefore <= 8)
         levelWatch.push({ col: lwCol, before: lwBefore });
     }
+    // Empty, untyped columns among the targets take their type from this
+    // block (firstDataWatch): numbers pasted into an empty column are
+    // numbers. A column that already holds data never does, so text pasted
+    // over a Continuous column is still reported below as values lost.
+    var firstDataCols = [], firstDataRows = [];
+    for (var fdr = 0; fdr < targetRows; fdr++) firstDataRows.push(r.r0 + fdr);
+    for (var fdc = 0; fdc < targetCols && r.c0 + fdc < visCols.length; fdc++)
+      if (firstDataWatch(t, visCols[r.c0 + fdc], firstDataRows, true))
+        firstDataCols.push(visCols[r.c0 + fdc]);
     for (var y = 0; y < targetRows; y++) {
       for (var x = 0; x < targetCols; x++) {
         var srcRow = fillSelection ? 0 : y;
@@ -16425,6 +16587,8 @@
       }
     }
     t.edited = true;
+    for (var fdt = 0; fdt < firstDataCols.length; fdt++)
+      typeFromFirstData(t, firstDataCols[fdt]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     gridSetSelection(visCols[r.c0], r.r0,
@@ -16481,8 +16645,17 @@
     if (!t || !cells.length) return;
     dataMark("clearing the cells");
     var undoDepth = DATA_ACTION_SEQ;
+    // A column that the first-data rule typed this session goes back to
+    // untyped when its values are all cleared, so the next thing typed is
+    // read afresh. An imported column that is cleared keeps its type.
+    var clearRows = Object.create(null), clearWatch = [], cw;
+    for (cw = 0; cw < cells.length; cw++)
+      (clearRows[cells[cw].col] = clearRows[cells[cw].col] || []).push(cells[cw].row);
+    for (cw in clearRows)
+      if (firstDataWatch(t, cw, clearRows[cw])) clearWatch.push(cw);
     for (var i = 0; i < cells.length; i++) t.raw[cells[i].col][cells[i].row] = "";
     t.edited = true;
+    for (cw = 0; cw < clearWatch.length; cw++) typeFromFirstData(t, clearWatch[cw]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     offerDataUndo("Cleared " + cells.length +
@@ -16774,8 +16947,11 @@
     }
   }
   function gridFindResultKey(result) {
-    if (!result || !PROJECT.table || !PROJECT.table.caseIds[result.row])
-      return "";
+    if (!result || !PROJECT.table) return "";
+    // A column-name match (row -1) has no case id; its key is the name, so
+    // the current match survives a refresh the way a cell match does.
+    if (result.row === -1) return result.col + "\u0000#name";
+    if (!PROJECT.table.caseIds[result.row]) return "";
     return result.col + "\u0000" + PROJECT.table.caseIds[result.row];
   }
   // t3-47. Replace runs over GRID_FIND_RESULTS, so it acts on exactly the
@@ -16798,10 +16974,25 @@
     }
     var repl = String(el("ps-data-replace").value == null
       ? "" : el("ps-data-replace").value);
-    var targets = all ? GRID_FIND_RESULTS.slice()
-      : (GRID_FIND_INDEX >= 0 && GRID_FIND_RESULTS[GRID_FIND_INDEX]
-         ? [GRID_FIND_RESULTS[GRID_FIND_INDEX]] : []);
-    if (!targets.length) { showToast("No matches to replace"); return; }
+    // Column names are matches to Find (they lead the list) but never to
+    // Replace (Torry, Nov 2 2026): renaming a column through a bulk
+    // substitution is exactly the silent change the whole-cell default
+    // exists to prevent, and a header has its own rename path. All skips
+    // them; Replace on a name says so instead of silently doing nothing.
+    var current = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    if (!all && current && current.row === -1) {
+      showToast("Replace changes cells only. This match is a column name.");
+      return;
+    }
+    var targets = all
+      ? GRID_FIND_RESULTS.filter(function (r) { return r.row >= 0; })
+      : (current ? [current] : []);
+    if (!targets.length) {
+      showToast(GRID_FIND_RESULTS.length
+        ? "Only column names match. Replace changes cells only."
+        : "No matches to replace");
+      return;
+    }
     var needle = GRID_FIND_QUERY, lower = needle.toLocaleLowerCase();
     var wholeBox = el("ps-data-replace-whole");
     var whole = !wholeBox || wholeBox.checked;
@@ -16857,6 +17048,14 @@
     var t = PROJECT.table, needle = GRID_FIND_QUERY.toLocaleLowerCase();
     if (t && needle && GRID_FIND_QUERY.trim()) {
       var visible = gridVisibleColumns(t);
+      // Column NAMES match too (Torry, Nov 2 2026: "it'd be really nice to
+      // be able to search for the names of these different variables").
+      // They lead the list in table order, the way the grid reads: a name
+      // sits above its column's cells. row -1 marks one; the reveal selects
+      // the whole column and Replace leaves it alone.
+      for (var hc = 0; hc < visible.length; hc++)
+        if (String(visible[hc]).toLocaleLowerCase().indexOf(needle) !== -1)
+          GRID_FIND_RESULTS.push({ col: visible[hc], row: -1 });
       for (var row = 0; row < nRows(t); row++)
         for (var ci = 0; ci < visible.length; ci++) {
           var col = visible[ci];
@@ -16884,7 +17083,12 @@
       (GRID_FIND_RESULTS.length
        ? (GRID_FIND_INDEX + 1) + " of " + GRID_FIND_RESULTS.length
        : "No matches");
-    el("ps-data-find-count").textContent = findCountTxt;
+    // The popup's readout says when the current match is a column name,
+    // which is why a whole column lit up; the closed button keeps the bare
+    // count, which is all its width has room for.
+    var findCur = GRID_FIND_INDEX >= 0 ? GRID_FIND_RESULTS[GRID_FIND_INDEX] : null;
+    el("ps-data-find-count").textContent = findCountTxt +
+      (findCountTxt && findCur && findCur.row === -1 ? " \u00b7 column name" : "");
     // The trigger carries the live state so a sticky query is never
     // invisible while the popup is closed (the Filter button's idiom).
     var findBtn = el("ps-data-find-btn");
@@ -16997,43 +17201,59 @@
   }
   function gridRevealFound(result) {
     var t = PROJECT.table;
-    if (!t || !result || !t.raw[result.col] ||
-        result.row < 0 || result.row >= nRows(t)) return;
+    if (!t || !result || !t.raw[result.col]) return;
+    var isName = result.row === -1;
+    if (!isName && (result.row < 0 || result.row >= nRows(t))) return;
     if (GRID_EDIT) gridCommitEdit(null);
     var grid = el("ps-datagrid");
-    var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
-      Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
-    // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
-    // scroll is what says the row was ALREADY there rather than that the
-    // grid was replaced, which is the same reason the engine scrolls its own
-    // stats rows rather than snapping them. Only for a move worth animating,
-    // and never under the motion preference, where the jump IS the answer.
-    var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
-    var smooth = far && APP_PREFS.motion !== "reduce" &&
+    var motionOk = APP_PREFS.motion !== "reduce" &&
       !(window.matchMedia &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    // The window is rendered FROM the scroll position, so the rows have to
-    // exist before an animated scroll can travel across them: set the
-    // position, let syncDataGrid build that window, then animate the last
-    // part. Animating first and syncing after cancels the scroll outright,
-    // which is worse than the jump it was meant to replace.
-    grid.scrollTop = want;
-    syncDataGrid();
-    if (smooth && grid.scrollTo) {
-      grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
-      try { grid.scrollTo({ top: want, behavior: "smooth" }); }
-      catch (e) { grid.scrollTop = want; }
+    var smooth = false, cell = null;
+    if (isName) {
+      // A column-name match. The header row is sticky, so there is no
+      // vertical travel to make: the column only has to be BUILT (it may
+      // sit outside the column window) and then selected whole, the way a
+      // header click selects it, so the match reads as "this column".
+      gridBuildColumn(result.col);
+      if (nRows(t))
+        gridSetSelection(result.col, 0, result.col, nRows(t) - 1, "column");
+      else selectInspectorVariable(result.col);
+      smooth = motionOk;
+      cell = gridFindTh(result.col);
+    } else {
+      var want = Math.max(0, result.row * GRID_ROW_HEIGHT -
+        Math.max(0, grid.clientHeight - GRID_ROW_HEIGHT) / 2);
+      // t2-30. This used to jump: set scrollTop, rebuild, select. A smooth
+      // scroll is what says the row was ALREADY there rather than that the
+      // grid was replaced, which is the same reason the engine scrolls its own
+      // stats rows rather than snapping them. Only for a move worth animating,
+      // and never under the motion preference, where the jump IS the answer.
+      var far = Math.abs(want - (grid.scrollTop || 0)) > GRID_ROW_HEIGHT;
+      smooth = far && motionOk;
+      // The window is rendered FROM the scroll position, so the rows have to
+      // exist before an animated scroll can travel across them: set the
+      // position, let syncDataGrid build that window, then animate the last
+      // part. Animating first and syncing after cancels the scroll outright,
+      // which is worse than the jump it was meant to replace.
+      grid.scrollTop = want;
+      syncDataGrid();
+      if (smooth && grid.scrollTo) {
+        grid.scrollTop = Math.max(0, want - GRID_ROW_HEIGHT * 6);
+        try { grid.scrollTo({ top: want, behavior: "smooth" }); }
+        catch (e) { grid.scrollTop = want; }
+      }
+      gridSetSelection(result.col, result.row,
+                       result.col, result.row, "cells");
+      // Vertical only was half a reveal. At 40 columns every match Find walked
+      // to was off screen to the RIGHT while the counter cheerfully advanced,
+      // so the one feature for locating a value could not show you one. Done
+      // after the selection, because the cell has to be painted before it can
+      // be measured, and only when it is actually out of view so an in-view
+      // match never jolts sideways.
+      cell = gridFindTd(result.col, result.row) ||
+             gridBuildCell(result.col, result.row);
     }
-    gridSetSelection(result.col, result.row,
-                     result.col, result.row, "cells");
-    // Vertical only was half a reveal. At 40 columns every match Find walked
-    // to was off screen to the RIGHT while the counter cheerfully advanced,
-    // so the one feature for locating a value could not show you one. Done
-    // after the selection, because the cell has to be painted before it can
-    // be measured, and only when it is actually out of view so an in-view
-    // match never jolts sideways.
-    var cell = gridFindTd(result.col, result.row) ||
-               gridBuildCell(result.col, result.row);
     if (cell && grid.scrollWidth > grid.clientWidth + 1) {
       var cr = cell.getBoundingClientRect(), gr = grid.getBoundingClientRect();
       // The row-number gutter is sticky, so a cell tucked behind it is as
@@ -17810,6 +18030,7 @@
   function dataCellPatch(col, row) {
     var t = PROJECT.table;
     return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             type: t.types[col],
              roles: JSON.stringify(PROJECT.charts.map(function (c) {
                return { id: c.id, roles: c.roles || {} };
              })) };
@@ -17831,6 +18052,11 @@
     bigDirtyCol(p.col);
     t.raw[p.col][p.row] = p.raw;
     t.edited = p.edited;
+    // The column's type as it stood at this point in the history. A first
+    // value typed into an untyped column sets its type (firstDataWatch), so
+    // undoing that value has to take the type back with it, and redo has to
+    // bring it forward again.
+    if (p.type && t.types && (p.col in t.types)) t.types[p.col] = p.type;
     try {
       var roles = JSON.parse(p.roles);
       for (var ri = 0; ri < roles.length; ri++) {
@@ -18081,6 +18307,13 @@
       if (tds[i].getAttribute("data-gc") === col) return tds[i];
     return null;
   }
+  // The header's twin: the built th for a column, by attribute equality.
+  function gridFindTh(col) {
+    var ths = el("ps-datagrid").querySelectorAll("th[data-grid-col]");
+    for (var i = 0; i < ths.length; i++)
+      if (ths[i].getAttribute("data-grid-col") === col) return ths[i];
+    return null;
+  }
   function gridRefreshComputedCells(previousFilterMask) {
     var t = PROJECT.table;
     if (!t) return;
@@ -18144,11 +18377,16 @@
         gridNextEditAnnouncement(next));
       return;
     }
+    // Asked before the mark and the write, answered after them.
+    var firstData = firstDataWatch(t, ge.col, [ge.row]);
     dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
+    var typedAs = firstData ? typeFromFirstData(t, ge.col) : "";
     var previousFilterMask = t.filterMask;
     retype(t, false, [ge.col]);
+    // A changed type can change which roles the column may hold.
+    if (typedAs) validateRoles();
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -18161,7 +18399,9 @@
     syncDataCommandBar();
     gridApplySelection();
     persist();
-    syncDataRow();
+    // The header's type mark and the variable panel show the type, so a
+    // column that just took one needs the whole Data row redrawn.
+    if (typedAs) syncAll(); else syncDataRow();
     render();
     if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
     else {
@@ -18172,6 +18412,7 @@
       ? gridEditTarget(ge.col, ge.row) + " is missing. " + voided + "."
       : "Saved " + gridEditTarget(ge.col, ge.row) +
         " as " + gridEditValue(t, ge.col, newRaw) + ".") +
+      (typedAs ? " " + ge.col + " is now " + typeLabel(typedAs) + "." : "") +
       gridNextEditAnnouncement(next));
     // The sighted half of the same report. This is not a toast on every
     // edit. An ordinary edit lands, and only a value that was destroyed
@@ -23590,6 +23831,7 @@
   var LAYOUT_SEL = [];
   var LAYOUT_ACTIVE_ID = null;
   var LAY_DRAG = null;
+  var LAY_PAGE_DRAG = null;
   var LAY_RESIZE_TIMER = null;
   var LAY_PRESETS = {
     // Screen-ish presets are defined on ROUND INCHES (Torry's ruling,
@@ -27651,6 +27893,294 @@
     layClampAllItems();
     persist(); renderLayout();
   }
+  // ---- page edges (Nov 2026, Torry's ask: "handles on the very edge of
+  // the layout, to pull it in to the size of your graphs"). The presets,
+  // the typed size and the orientation flip all SCALE the arrangement onto
+  // the new page (layRefitToPage). A page edge in hand does the other
+  // thing: it moves that edge only. Items keep their size and their place
+  // (a left or top edge re-bases every item by the same amount, so nothing
+  // moves on the paper), the edge stops at the outermost item, so nothing
+  // is ever cropped, and it snaps to the item plus the margin, which is
+  // what "the size of your graphs" means on a page with an inset. Fit page
+  // to content is the same operation in one click. The whole gesture lives
+  // in integer pixels, the model's unit, so layNormalizeLayout's rounding
+  // on every layPage() read is a no-op mid-drag.
+  function layContentBounds() {
+    var items = layItems(), p = layPage();
+    var lo = Infinity, ln = Infinity, hi = -Infinity, hn = -Infinity;
+    for (var i = 0; i < items.length; i++) {
+      var r = layItemRect(items[i], p);
+      if (!(r.w > 0) || !(r.h > 0)) continue;
+      if (r.x < lo) lo = r.x;
+      if (r.y < ln) ln = r.y;
+      if (r.right > hi) hi = r.right;
+      if (r.bottom > hn) hn = r.bottom;
+    }
+    if (!isFinite(lo) || !isFinite(ln)) return null;
+    return { x: lo, y: ln, w: hi - lo, h: hn - ln, right: hi, bottom: hn };
+  }
+  function layShiftAllItems(dx, dy) {
+    if (!dx && !dy) return;
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      items[i].x = (Number(items[i].x) || 0) + dx;
+      items[i].y = (Number(items[i].y) || 0) + dy;
+    }
+  }
+  function layFitPageToContent() {
+    var c = activeChart();
+    if (!isLayoutTab(c)) return false;
+    var p = layPage(), cb = layContentBounds();
+    if (!cb) {
+      layAnnounce("There is nothing on the page to fit it to.");
+      showToast("Add a chart, text, or an image first; the page fits to " +
+        "what is on it.");
+      return false;
+    }
+    var m = p.margin;
+    var w = Math.round(layClamp(cb.w + 2 * m, 320, LAY_PAGE_MAX));
+    var h = Math.round(layClamp(cb.h + 2 * m, 240, LAY_PAGE_MAX));
+    // The content sits inside the margin; when the page minimum leaves
+    // more room than that, it is centred in the room.
+    var ox = Math.max(0, Math.round((w - cb.w) / 2));
+    var oy = Math.max(0, Math.round((h - cb.h) / 2));
+    var shiftX = ox - cb.x, shiftY = oy - cb.y;
+    if (p.w === w && p.h === h &&
+        Math.abs(shiftX) < 0.5 && Math.abs(shiftY) < 0.5) {
+      layAnnounce("The page already fits its content.");
+      showToast("The page already fits its content.");
+      return false;
+    }
+    laySnapshot("page size");
+    p.w = w; p.h = h; p.preset = "custom";
+    layShiftAllItems(shiftX, shiftY);
+    layNormalizeLayout(c);
+    layClampAllItems();
+    persist(); renderLayout();
+    layAnnounce("Page fitted to its content: " + pxToUnit(p.w) + " by " +
+      pxToUnit(p.h) + " " + unitLabel() + ".");
+    return true;
+  }
+  function layPageEdgePointerDown(e) {
+    if (e.button !== 0) return;
+    var grip = e.target && e.target.closest ? e.target.closest("[data-edge]") : null;
+    if (!grip) return;
+    var c = activeChart();
+    if (!isLayoutTab(c) || LAY_DRAG) return;
+    // preventDefault keeps the press from focusing the viewport, whose
+    // focus handler would select the active item; a grip is page chrome.
+    e.preventDefault();
+    e.stopPropagation();
+    if (LAY_PAGE_DRAG) layPageEdgeTeardown();
+    layNormalizeLayout(c);
+    var p = layPage(), items = layItems(), origins = [];
+    for (var i = 0; i < items.length; i++)
+      origins.push({ item: items[i], x: Number(items[i].x) || 0,
+                     y: Number(items[i].y) || 0 });
+    // The stage is centred by margin auto, so a width change on its own
+    // would move BOTH edges by half and the grip would run at half the
+    // pointer's speed. Pinning the stage's used margins keeps the edge
+    // that is not in hand still and the one in hand under the pointer;
+    // release lets the page settle back to centre.
+    var stage = el("ps-lstage"), vp = el("ps-lviewport");
+    var cs = vp ? window.getComputedStyle(vp) : null;
+    var padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+    var padT = cs ? parseFloat(cs.paddingTop) || 0 : 0;
+    LAY_PAGE_DRAG = {
+      edge: grip.getAttribute("data-edge") || "", grip: grip, docId: c.id,
+      sx: e.clientX, sy: e.clientY, zoom: layZoom(),
+      w0: p.w, h0: p.h, origins: origins, content: layContentBounds(),
+      ml0: stage ? stage.offsetLeft - padL : 0,
+      mt0: stage ? stage.offsetTop - padT : 0,
+      cursor0: document.body.style.cursor || "",
+      moved: false, before: laySnapState(c)
+    };
+    document.addEventListener("pointermove", layPageEdgeMove);
+    document.addEventListener("pointerup", layPageEdgeUp);
+    document.addEventListener("pointercancel", layPageEdgeCancelEvent);
+  }
+  function layPageEdgeMove(e) {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    var live = activeChart();
+    if (appWorkspace() !== "layout" || !isLayoutTab(live) ||
+        live.id !== d.docId) { layCancelPageEdgeDrag(); return; }
+    var z = d.zoom;
+    var dx = (e.clientX - d.sx) / z, dy = (e.clientY - d.sy) / z;
+    if (!d.moved && Math.abs(dx) < 3 / z && Math.abs(dy) < 3 / z) return;
+    if (!d.moved) {
+      d.moved = true;
+      d.grip.classList.add("ps-lpage-edge-active");
+      var st0 = el("ps-lstage");
+      if (st0) st0.classList.add("ps-lstage-resizing");
+      // The pointer leaves the grip at once; the body carries its cursor.
+      try { document.body.style.cursor = window.getComputedStyle(d.grip).cursor || ""; }
+      catch (ignore) {}
+    }
+    var p = layPage(), cb = d.content, m = p.margin, snapT = 8 / z;
+    var ed = d.edge, gx = null, gy = null;
+    var newW = d.w0, newH = d.h0, shiftX = 0, shiftY = 0;
+    if (ed.indexOf("e") !== -1) {
+      newW = d.w0 + dx;
+      var floorW = Math.max(320, cb ? Math.ceil(cb.right) : 0);
+      var wantW = cb ? cb.right + m : null;
+      if (wantW != null && wantW >= floorW && wantW <= LAY_PAGE_MAX &&
+          Math.abs(newW - wantW) <= snapT) { newW = wantW; gx = cb.right; }
+      newW = Math.round(layClamp(newW, floorW, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("w") !== -1) {
+      // The left edge moves by s (inward when positive); the width loses s
+      // and every item re-bases by -s, so nothing moves on the paper.
+      var s = dx;
+      var maxS = d.w0 - 320;
+      if (cb) maxS = Math.min(maxS, Math.floor(cb.x));
+      var minS = d.w0 - LAY_PAGE_MAX;
+      var wantS = cb ? cb.x - m : null;
+      if (wantS != null && wantS <= maxS && wantS >= minS &&
+          Math.abs(s - wantS) <= snapT) { s = wantS; gx = m; }
+      s = Math.round(layClamp(s, minS, maxS));
+      newW = d.w0 - s; shiftX = -s;
+    }
+    if (ed.indexOf("s") !== -1) {
+      newH = d.h0 + dy;
+      var floorH = Math.max(240, cb ? Math.ceil(cb.bottom) : 0);
+      var wantH = cb ? cb.bottom + m : null;
+      if (wantH != null && wantH >= floorH && wantH <= LAY_PAGE_MAX &&
+          Math.abs(newH - wantH) <= snapT) { newH = wantH; gy = cb.bottom; }
+      newH = Math.round(layClamp(newH, floorH, LAY_PAGE_MAX));
+    }
+    if (ed.indexOf("n") !== -1) {
+      var t = dy;
+      var maxT = d.h0 - 240;
+      if (cb) maxT = Math.min(maxT, Math.floor(cb.y));
+      var minT = d.h0 - LAY_PAGE_MAX;
+      var wantT = cb ? cb.y - m : null;
+      if (wantT != null && wantT <= maxT && wantT >= minT &&
+          Math.abs(t - wantT) <= snapT) { t = wantT; gy = m; }
+      t = Math.round(layClamp(t, minT, maxT));
+      newH = d.h0 - t; shiftY = -t;
+    }
+    p.w = newW; p.h = newH;
+    for (var i = 0; i < d.origins.length; i++) {
+      d.origins[i].item.x = d.origins[i].x + shiftX;
+      d.origins[i].item.y = d.origins[i].y + shiftY;
+    }
+    layPageEdgeApplyLive(d, gx, gy);
+    e.preventDefault();
+  }
+  // The live frame: canvas and stage take the new size, the stage's pinned
+  // margins hold the far edge still, re-based items move with the paper,
+  // the margin guide and the rail's fields follow. No rebuild mid-gesture.
+  function layPageEdgeApplyLive(d, gx, gy) {
+    var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
+    var p = layPage(), z = d.zoom;
+    if (canvas) {
+      canvas.style.width = p.w + "px";
+      canvas.style.height = p.h + "px";
+    }
+    if (stage) {
+      stage.style.width = Math.ceil(p.w * z) + "px";
+      stage.style.height = Math.ceil(p.h * z) + "px";
+      stage.style.marginLeft = (d.ml0 + (d.edge.indexOf("w") !== -1
+        ? (d.w0 - p.w) * z : 0)) + "px";
+      stage.style.marginTop = (d.mt0 + (d.edge.indexOf("n") !== -1
+        ? (d.h0 - p.h) * z : 0)) + "px";
+    }
+    laySyncMarginGuide();
+    for (var i = 0; i < d.origins.length; i++) {
+      var it = d.origins[i].item;
+      var node = canvas && canvas.querySelector(
+        '.ps-litem[data-item-id="' + it.id + '"]');
+      if (node) { node.style.left = it.x + "px"; node.style.top = it.y + "px"; }
+    }
+    layShowGuides(gx, gy);
+    var wf = el("ps-lpage-w"), hf = el("ps-lpage-h");
+    if (wf && document.activeElement !== wf) wf.value = pxToUnit(p.w);
+    if (hf && document.activeElement !== hf) hf.value = pxToUnit(p.h);
+    syncLayoutShellStatus();
+  }
+  // After release the pinned margins come off and the page re-centres; a
+  // short glide covers the move so the settle reads as the page coming to
+  // rest, not a jump. Position only: a fit zoom re-sizes in the same frame.
+  function layPageEdgeSettle(stage) {
+    if (!stage) return;
+    var fromL = stage.offsetLeft, fromT = stage.offsetTop;
+    stage.style.marginLeft = ""; stage.style.marginTop = "";
+    var dx = fromL - stage.offsetLeft, dy = fromT - stage.offsetTop;
+    if (!dx && !dy) return;
+    var reduced = false;
+    try {
+      reduced = !!(window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (ignore) {}
+    if (reduced) return;
+    stage.style.transition = "none";
+    stage.style.transform = "translate(" + dx + "px," + dy + "px)";
+    void stage.offsetWidth;
+    stage.style.transition = "transform 0.18s ease-out";
+    stage.style.transform = "";
+    window.setTimeout(function () { stage.style.transition = ""; }, 240);
+  }
+  function layPageEdgeTeardown() {
+    var d = LAY_PAGE_DRAG;
+    LAY_PAGE_DRAG = null;
+    document.removeEventListener("pointermove", layPageEdgeMove);
+    document.removeEventListener("pointerup", layPageEdgeUp);
+    document.removeEventListener("pointercancel", layPageEdgeCancelEvent);
+    if (d) document.body.style.cursor = d.cursor0 || "";
+    layHideGuides();
+    var stage = el("ps-lstage");
+    if (stage) stage.classList.remove("ps-lstage-resizing");
+    if (d && d.grip) d.grip.classList.remove("ps-lpage-edge-active");
+  }
+  function layPageEdgeUp() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage"), c = activeChart();
+    if (!d.moved || !isLayoutTab(c) || c.id !== d.docId) {
+      // A press that never travelled is not a resize: nothing changes and
+      // no history entry lands.
+      if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+      return;
+    }
+    var p = layPage();
+    // The floor was computed from the content at the press; after the
+    // re-base the content is where it is, so the page is held at or past
+    // it once more before anything is clamped.
+    var cb = layContentBounds();
+    if (cb) {
+      p.w = Math.max(p.w, Math.min(LAY_PAGE_MAX, Math.ceil(cb.right)));
+      p.h = Math.max(p.h, Math.min(LAY_PAGE_MAX, Math.ceil(cb.bottom)));
+    }
+    p.preset = "custom";
+    layNormalizeLayout(c);
+    var h = layHist();
+    if (h && d.before) {
+      h.undo.push({ label: "page size", state: d.before });
+      if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
+      h.redo.length = 0;
+      LAY_COALESCE = null;
+    }
+    layClampAllItems();
+    persist(); renderLayout();
+    layPageEdgeSettle(stage);
+    layAnnounce("Page is now " + pxToUnit(p.w) + " by " + pxToUnit(p.h) +
+      " " + unitLabel() + ".");
+  }
+  function layPageEdgeCancelEvent() { layCancelPageEdgeDrag(); }
+  // Escape, a cancelled pointer, or the layout leaving the screen mid-drag:
+  // the page and every item go back to the press-time state, no history.
+  function layCancelPageEdgeDrag() {
+    var d = LAY_PAGE_DRAG;
+    if (!d) return false;
+    layPageEdgeTeardown();
+    var stage = el("ps-lstage");
+    if (stage) { stage.style.marginLeft = ""; stage.style.marginTop = ""; }
+    var c = activeChart();
+    if (d.moved && isLayoutTab(c) && c.id === d.docId) layRestoreState(d.before);
+    return true;
+  }
   function layToggleView(key) {
     var v = layView();
     v[key] = !v[key];
@@ -28003,6 +28533,7 @@
       if (e.key === "Escape") {
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
+        if (layCancelPageEdgeDrag()) { e.preventDefault(); return; }
         if (layCancelDrag()) { e.preventDefault(); return; }
         if (layMarqueeCancel()) { e.preventDefault(); return; }
         if (ids.length) {
@@ -28079,6 +28610,18 @@
                                      Math.min(p.w, p.h) / 3));
       this.value = pxToUnit(p.margin);
       persist(); laySyncMarginGuide();
+    });
+    var pageEdges = el("ps-lpage-edges");
+    if (pageEdges) {
+      var grips = pageEdges.querySelectorAll("[data-edge]");
+      for (var gi = 0; gi < grips.length; gi++)
+        setTip(grips[gi], "Drag to resize the page from this edge. It stops " +
+          "at the items and snaps to the margin.");
+      pageEdges.addEventListener("pointerdown", layPageEdgePointerDown);
+    }
+    var fitPageBtn = el("ps-lpage-fit");
+    if (fitPageBtn) fitPageBtn.addEventListener("click", function () {
+      layFitPageToContent();
     });
     el("ps-lzoom").addEventListener("change", function () {
       layView().zoom = this.value; persist(); renderLayout();
@@ -30862,6 +31405,13 @@
       else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
       var bits = [];
       var repeated = c.module === "rmplotbuilder";
+      // Values excluded in Data ride the payload as hidden points, so the
+      // chart can show where they were. They are not cases the chart uses:
+      // the status bar said 34 cases over a chart whose bars and tests ran
+      // on 33 (a first-use walkthrough, Nov 2026). Repeated Measures already
+      // leaves them out in repeatedCaseCounts.
+      var excludedPts = Array.isArray(p.hiddenPoints) ? p.hiddenPoints.length : 0;
+      if (excludedPts && cells && !repeated) n = Math.max(0, n - excludedPts);
       var measures = repeated ? (rolesFor(c.module).measures || []) : [];
       var rmCounts = repeated ? repeatedCaseCounts(p, measures) : null;
       if (rmCounts)
@@ -30916,6 +31466,8 @@
             (rmCounts.complete === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
+      if (excludedPts)
+        bits.push(excludedPts + (excludedPts === 1 ? " value excluded" : " values excluded"));
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
   }
@@ -32788,10 +33340,10 @@
   }
 
   // ---- Find open data (Torry, Sep 21 2026) ----
-  // Two collections whose search AND file hosts both let a page on another
+  // Three collections whose search AND file hosts both let a page on another
   // origin read them (probed with a pandionplots.com origin the day this
-  // was built; Figshare, OSF, Dryad and Kaggle refuse one half or both, so
-  // they are not offered).
+  // was built and again on Nov 2 2026; Figshare, OSF, Dryad and Kaggle refuse
+  // one half or both, so they are not offered).
   //   rdatasets: the data shipped with R packages, indexed as one CSV on
   //     GitHub Pages. The index loads once per session and the search runs
   //     in this browser, so nothing typed leaves the machine.
@@ -32799,6 +33351,9 @@
   //     zenodo.org (30 a minute for anonymous callers, so it runs on Enter,
   //     never per keystroke), filtered to records holding a file this app
   //     can open.
+  //   dataverse: replication and survey data behind DOIs on Harvard
+  //     Dataverse. Each search is one request for FILES, filtered to the
+  //     content types this app reads, grouped under their dataset.
   // Every Open goes through openFromLink, so the fetch, the size guard, the
   // import preview and the provenance line are the link path's, unchanged.
   var FIND_SOURCES = {
@@ -32812,8 +33367,20 @@
       api: "https://zenodo.org/api/records",
       placeholder: "Type some words, then press Enter"
     },
+    // Harvard Dataverse (Nov 2 2026): replication and survey data behind
+    // DOIs. Its search API and its file downloads both send the CORS header
+    // (probed with a pandionplots.com origin), and a file hit already names
+    // its dataset, size, content type and whether it is restricted, so one
+    // request per search is enough.
+    dataverse: {
+      note: "Each search is sent to dataverse.harvard.edu. Only CSV, tab-separated or Excel files are listed, under the dataset they belong to. Opening one fetches the file into this browser; nothing is uploaded.",
+      api: "https://dataverse.harvard.edu/api/search",
+      access: "https://dataverse.harvard.edu/api/access/datafile/",
+      page: "https://dataverse.harvard.edu/dataset.xhtml?persistentId=",
+      placeholder: "Type some words, then press Enter"
+    },
     // A link the person already has (Torry, Sep 22 2026: the welcome's From
-    // a link folded in here, beside the two sources that always allow it).
+    // a link folded in here, beside the sources that always allow it).
     link: {
       note: "Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.",
       placeholder: "https://"
@@ -32861,7 +33428,7 @@
       return;
     }
     el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
-    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    el("ps-finddata-go").style.display = (id === "zenodo" || id === "dataverse") ? "" : "none";
     findRun();
   }
   function findLinkGo() {
@@ -32941,6 +33508,7 @@
   function findRun() {
     var q = String(el("ps-finddata-q").value || "").trim();
     if (FIND_SOURCE === "zenodo") findRunZenodo(q);
+    else if (FIND_SOURCE === "dataverse") findRunDataverse(q);
     else findRunRdatasets(q);
   }
   function findTokens(q) {
@@ -33094,11 +33662,111 @@
         findOpenButtonHtml(fl.url, fl.name) + "</div>";
     }
     if (rec.files.length > max)
-      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on Zenodo</div>";
+      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on " + escHtml(rec.more || "Zenodo") + "</div>";
     return '<div class="ps-finddata-row" data-find-record>' +
       '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(rec.title) + "</div>" +
       '<div class="ps-finddata-meta">' + meta + "</div>" + files + "</div>" +
       '<div class="ps-finddata-actions">' + findAboutHtml(rec.page) + "</div></div>";
+  }
+  // Harvard Dataverse: one request per Enter, asking for FILES (a file hit
+  // carries its dataset, size and content type, so no second request per
+  // dataset is needed), filtered server-side to the content types this app
+  // reads. Hits are grouped under their dataset so a study with several
+  // tables reads as one row, the way a Zenodo record does.
+  var FIND_DV_TYPES = ["text/csv", "text/tab-separated-values", "text/tsv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
+  function findRunDataverse(q) {
+    var seq = ++FIND_SEQ;
+    var box = el("ps-finddata-results");
+    if (!q) { box.innerHTML = ""; findStatus("Type some words and press Enter to search Harvard Dataverse.", false); return; }
+    findStatus("Searching dataverse.harvard.edu\u2026", false);
+    var types = FIND_DV_TYPES.map(function (t) { return '"' + t + '"'; }).join(" OR ");
+    var url = FIND_SOURCES.dataverse.api + "?type=file&per_page=50&q=" + encodeURIComponent(q) +
+      "&fq=" + encodeURIComponent("fileContentType:(" + types + ")");
+    fetch(url, { mode: "cors", cache: "no-store", headers: { Accept: "application/json" } }).then(function (r) {
+      if (r.status === 429) throw new Error("rate");
+      if (!r.ok) throw new Error("dataverse.harvard.edu answered " + r.status + ".");
+      return r.json();
+    }).then(function (j) {
+      if (seq !== FIND_SEQ) return;
+      var d = (j && j.data) || {};
+      var items = Array.isArray(d.items) ? d.items : [];
+      var total = Number(d.total_count) || items.length;
+      var recs = findDataverseRecords(items);
+      var h = "";
+      for (var i = 0; i < recs.length; i++) h += findZenodoRowHtml(recs[i]);
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      if (!recs.length) {
+        findStatus(items.length ? "The matching files are restricted or too large to read here. Try other words."
+          : "No datasets match those words.", false);
+        return;
+      }
+      findStatus(recs.length + (recs.length === 1 ? " dataset" : " datasets") + (total > items.length
+        ? " from the first " + items.length + " of about " + total.toLocaleString() + " matching files. Add a word to narrow it."
+        : " found."), false);
+    }).catch(function (e) {
+      if (seq !== FIND_SEQ) return;
+      var msg = String(e && e.message || e);
+      if (msg === "rate") msg = "dataverse.harvard.edu is limiting searches from this address for a minute. Wait a little and try again.";
+      else if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not reach dataverse.harvard.edu. Check the connection and try again.";
+      findStatus(msg, true);
+    });
+  }
+  // Groups file hits under their dataset, keeping the files this app can
+  // read: a listed content type or a readable extension, not restricted
+  // (the download would refuse), and under the size cap. The authors and
+  // year come from the citation line Dataverse writes for every file
+  // (A. Author; B. Author, 2022, "Title", https://doi.org/...), the DOI from
+  // the dataset's persistent id. The same file can appear once per dataset
+  // version, so a name already listed under its dataset is skipped. A file
+  // named without an extension (Dataverse allows it) gets one from its
+  // content type, because the Excel reader goes by name and openFromLink
+  // would otherwise call it .csv.
+  function findDataverseRecords(items) {
+    var recs = [], byKey = {};
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i] || {};
+      var name = String(it.name || "");
+      var ctype = String(it.file_content_type || "").toLowerCase();
+      var id = String(it.file_id || "");
+      if (!/^\d+$/.test(id) || it.restricted) continue;
+      if (FIND_DV_TYPES.indexOf(ctype) < 0 && !FIND_READABLE.test(name)) continue;
+      if (/\.txt$/i.test(name) && FIND_PROSE.test(name)) continue;
+      if (Number(it.size_in_bytes) > DATA_REFUSE_BYTES) continue;
+      if (!/\.[a-z0-9]{2,5}$/i.test(name)) {
+        var ext = ctype === "text/csv" ? ".csv"
+          : (ctype === "text/tab-separated-values" || ctype === "text/tsv") ? ".tsv"
+          : ctype === FIND_DV_TYPES[3] ? ".xlsx" : "";
+        if (ext) name += ext;
+      }
+      var pid = String(it.dataset_persistent_id || "");
+      var key = pid || ("id:" + String(it.dataset_id || name));
+      var rec = byKey[key];
+      if (!rec) {
+        var m = /^(.*?),\s*(\d{4}),\s*"/.exec(String(it.dataset_citation || ""));
+        var who = [];
+        if (m) {
+          var parts = m[1].split(/;\s*/).filter(Boolean);
+          who = parts.slice(0, 3);
+          if (parts.length > 3) who.push("and others");
+        }
+        rec = byKey[key] = {
+          title: String(it.dataset_name || "Untitled"), who: who.join(", "),
+          year: m ? m[2] : String(it.published_at || "").slice(0, 4),
+          doi: pid.replace(/^doi:/i, ""),
+          page: pid ? FIND_SOURCES.dataverse.page + encodeURIComponent(pid) : "",
+          files: [], more: "Dataverse"
+        };
+        recs.push(rec);
+      }
+      var dup = false;
+      for (var f = 0; f < rec.files.length; f++) if (rec.files[f].name === name) { dup = true; break; }
+      if (dup) continue;
+      rec.files.push({ name: name, size: Number(it.size_in_bytes) || 0, url: FIND_SOURCES.dataverse.access + id });
+    }
+    return recs;
   }
   function wireFindDataDialog() {
     var dlg = el("ps-finddata-dialog");
@@ -33174,7 +33842,22 @@
   var SHARE_FREEZE_SHA = null;    // {url, sha} from the commits API
   var SHARE_LONG_CHARS = 10000;
   var LOCK_MAGIC = "PANDION-LOCKED 1";
-  function appLinkBase() { return String(window.location.href).split(/[?#]/)[0]; }
+  // The address a shared link opens (Torry, Nov 4 2026). The page's own
+  // when this IS the hosted app (a preview copy such as /app-next links to
+  // itself); otherwise the app at pandionplots.com. The desktop app loads a
+  // file from its own disk and the portable file sits wherever it was
+  // saved, and a link to either opens nowhere else. A carried link holds
+  // the whole project, so the hosted app opens it with nothing installed,
+  // which is the point of sharing; a hosted-file link names the file's
+  // address, which any copy of the app can read.
+  var HOSTED_APP = "https://pandionplots.com/app/";
+  function appIsHosted() {
+    try { return /(^|\.)pandionplots\.com$/i.test(window.location.hostname); }
+    catch (e) { return false; }
+  }
+  function appLinkBase() {
+    return appIsHosted() ? String(window.location.href).split(/[?#]/)[0] : HOSTED_APP;
+  }
   function appLinkFor(kind, url) {
     return appLinkBase() + "?" + kind + "=" +
       encodeURIComponent(url).replace(/%2F/gi, "/").replace(/%3A/gi, ":");
@@ -33316,6 +33999,10 @@
         : "This project was opened from " + escHtml(linkHost(src)) +
           '. <button type="button" class="ps-share-inline" id="ps-share-source-copy">Copy a link that opens that file</button>';
     } else { srcLine.hidden = true; srcLine.innerHTML = ""; }
+    // From the desktop app or the portable file the link opens the hosted
+    // app, and the dialog says so; the hosted app's own links need no note.
+    var opens = el("ps-share-opens");
+    if (opens) opens.hidden = appIsHosted();
     shareSetMode(SHARE_MODE);
     openShellDialog("ps-share-dialog");
   }
@@ -39490,6 +40177,8 @@
     resizeLayoutPanel: layResizeDimensions,
     selectLayoutItems: function (ids) { laySetSelection(ids); renderLayout(); },
     layoutSelection: laySelectedIds,
+    layoutContentBounds: layContentBounds,
+    fitLayoutPageToContent: layFitPageToContent,
     // The layoutHistoryDepth idiom: what the Notebook's Cmd+Z would do.
     notebookHistory: function () {
       return { undo: NB_UNDO.map(function (s) { return s.label; }),
