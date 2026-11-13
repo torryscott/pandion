@@ -5511,6 +5511,13 @@
         // the echo later hashes identical and is skipped. Deferred so the
         // calling commit's own teardown finishes first.
         function _gb2RerenderSoon() {
+            // A commit routed through chartSpec schedules its undo snapshot
+            // 250 ms out, but this re-render re-seeds the undo baseline from
+            // data that already holds the change, so that pending step was
+            // lost (every Estimation band and Difference plot control that
+            // re-rendered lost its undo this way). Take it now; undo's own
+            // re-render runs while _undoApplying is set and takes nothing.
+            try { if (_undoTimer && !_undoApplying) { clearTimeout(_undoTimer); _undoTimer = null; _undoTake(); } } catch (_eUf) {}
             try {
                 setTimeout(function () {
                     try {
