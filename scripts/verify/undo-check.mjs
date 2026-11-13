@@ -333,6 +333,154 @@ for (const c of CASES) {
     } finally { await ctx.close(); }
 }
 
+// A title rename is its OWN undo step (Oct 2026). commitTitle, which every X /
+// Y / legend title commit goes through, re-renders locally in the same tick it
+// commits, and that re-render re-seeds the undo baseline from data already
+// holding the new title. The spec route's 250 ms snapshot was lost with it, so
+// one Cmd+Z reverted the rename TOGETHER with the edit before it, and the
+// replaced render's timer later wrote a longer stack to localStorage than the
+// live one. Driven through the real gesture: a colour edit, then double-click
+// the X title, type, Enter, and one Cmd/Ctrl+Z. These fixtures' titles were
+// never renamed, so the payload carries no xTitle / xTitleOverride at all (R
+// folds them into xLabel): the pre-edit value the undo has to restore must
+// survive the stack's localStorage round trip, where undefined is dropped.
+const TITLE_CASES = [
+    { page: 'cg_bar_labels', colorKey: 'groupColors', colorVal: [{ original: 'M', color: '#1b9e77' }],
+      bar: { cat: 'Ctrl', grp: 'M' } },
+    { page: 'xy_basic', colorKey: 'xyPointColor', colorVal: '#1b9e77' },
+];
+for (const tc of TITLE_CASES) {
+    console.log('== title rename is its own undo step (' + tc.page + ')');
+    const { ctx, page } = await newPage();
+    const tag = 'title-undo ' + tc.page;
+    try {
+        await page.goto('file://' + path.join(OUT, tc.page + '.html'));
+        await page.waitForFunction(() => !!(window.gb2_undo && typeof window.setOption === 'function'), { timeout: 8000 });
+        const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        const g = (k) => page.evaluate(kk => window.gb2_undo.getData()[kk], k);
+        const stackLen = () => page.evaluate(() => window.gb2_undo.stack.length);
+        const savedStackLen = () => page.evaluate(() => {
+            try { return JSON.parse(window.localStorage.getItem('graphbuilder2.undo.v2')).stack.length; }
+            catch (e) { return -1; }
+        });
+        const waitFor = async (fn, ms) => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < ms) { if (await fn()) return true; await page.waitForTimeout(50); }
+            return !!(await fn());
+        };
+        // Chart-svg texts whose content is exactly `text`, lowest first (the
+        // X title sits under the category labels). The chart svg is the
+        // largest one; the first svg is a toolbar icon.
+        const textsNamed = (text) => page.evaluate((text) => {
+            let svg = null, area = 0;
+            for (const s of document.querySelectorAll('.graphbuilder2-host svg')) {
+                const b = s.getBoundingClientRect();
+                if (b.width * b.height > area) { area = b.width * b.height; svg = s; }
+            }
+            if (!svg) return [];
+            return Array.from(svg.querySelectorAll('text'))
+                .filter(t => (t.textContent || '').trim() === text)
+                .map(t => { const r = t.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, bottom: r.bottom }; })
+                .sort((a, b) => b.bottom - a.bottom);
+        }, text);
+        const shows = async (text) => (await textsNamed(text)).length > 0;
+        const barFill = () => page.evaluate((b) => {
+            const el = document.querySelector('path[data-bar-cat="' + b.cat + '"][data-bar-group="' + b.grp + '"]');
+            return el ? (el.getAttribute('fill') || '').toLowerCase() : null;
+        }, tc.bar);
+        // Select the title, double-click it, replace its text, press Enter.
+        const rename = async (from, to) => {
+            let hits = await textsNamed(from);
+            if (!hits.length) return false;
+            await page.mouse.click(hits[0].cx, hits[0].cy);
+            await page.waitForTimeout(500);
+            hits = await textsNamed(from);
+            if (!hits.length) return false;
+            await page.mouse.dblclick(hits[0].cx, hits[0].cy);
+            try {
+                await page.waitForFunction(() => {
+                    const a = document.activeElement;
+                    return !!a && a.getAttribute('data-role') === 'inline-text-editor';
+                }, null, { timeout: 3000 });
+            } catch (e) { return false; }
+            await page.keyboard.press('ControlOrMeta+a');
+            await page.keyboard.type(to);
+            await page.keyboard.press('Enter');
+            const painted = await waitFor(async () => (await shows(to)) &&
+                !(await page.evaluate(() => !!document.querySelector('textarea[data-role="inline-text-editor"]'))), 3000);
+            // Past the 250 ms snapshot timer of the render that committed.
+            await page.waitForTimeout(600);
+            return painted;
+        };
+
+        const present = await page.evaluate(k => Object.prototype.hasOwnProperty.call(window.gb2_undo.getData(), k), tc.colorKey);
+        ok(tag + ': ' + tc.colorKey + ' present in payload', present);
+        const origTitle = await g('xLabel');
+        const origColor = await g(tc.colorKey);
+        ok(tag + ': the X title is on the chart (' + origTitle + ')', await shows(origTitle));
+        ok(tag + ': fixture title was never renamed (no xTitleOverride in the payload)',
+            !(await page.evaluate(() => Object.prototype.hasOwnProperty.call(window.gb2_undo.getData(), 'xTitleOverride'))));
+        const origFill = tc.bar ? await barFill() : null;
+        if (tc.bar) ok(tag + ': the ' + tc.bar.cat + '/' + tc.bar.grp + ' bar is on the chart (' + origFill + ')', !!origFill);
+        if (present && origTitle) {
+            // 1. A colour edit through the engine's own commit path (poke data,
+            //    then _setOption, the handler contract), left to settle past
+            //    the undo snapshot (250 ms) and the commit flush (1500 ms).
+            await page.evaluate(([k, v]) => {
+                window.gb2_undo.getData()[k] = v;
+                window.__gb2_setOption(k, v);
+            }, [tc.colorKey, tc.colorVal]);
+            await page.waitForTimeout(1900);
+            const s1 = await stackLen();
+            ok(tag + ': the colour edit is one undo step', s1 === 1);
+
+            // 2. Rename the X title through the inline editor.
+            const NEW = 'Treatment arm';
+            ok(tag + ': the inline editor renamed the X title', await rename(origTitle, NEW));
+            if (tc.bar) ok(tag + ': the bars wear the new colour', (await barFill()) === tc.colorVal[0].color);
+            ok(tag + ': the rename is one more undo step (stack ' + s1 + ' -> ' + (await stackLen()) + ')',
+                (await stackLen()) === s1 + 1);
+            ok(tag + ': the saved stack matches the live one (saved ' + (await savedStackLen()) + ', live ' + (await stackLen()) + ')',
+                (await savedStackLen()) === (await stackLen()));
+
+            // 3. ONE undo: the title reverts, the colour stays.
+            await page.keyboard.press('ControlOrMeta+z');
+            ok(tag + ': one undo puts the original X title back',
+                await waitFor(async () => (await shows(origTitle)) && !(await shows(NEW)), 2000));
+            ok(tag + ': the title options revert too', (await g('xTitleOverride')) !== true && (await g('xLabel')) === origTitle);
+            ok(tag + ': the same undo keeps the colour edit', eq(await g(tc.colorKey), tc.colorVal));
+            if (tc.bar) ok(tag + ': the bars keep the new colour', (await barFill()) === tc.colorVal[0].color);
+            ok(tag + ': the colour step is still on the stack', (await stackLen()) === s1);
+
+            // 4. A second undo reverts the colour, the title stays original.
+            await page.keyboard.press('ControlOrMeta+z');
+            await page.waitForTimeout(300);
+            ok(tag + ': a second undo reverts the colour', eq(await g(tc.colorKey), origColor));
+            if (tc.bar) ok(tag + ': the bars return to their first colour',
+                await waitFor(async () => (await barFill()) === origFill, 2000));
+            ok(tag + ': the X title is still the original', (await shows(origTitle)) && !(await shows(NEW)));
+
+            // 5. Redo walks forward: the colour, then the title.
+            await page.keyboard.press('ControlOrMeta+Shift+z');
+            await page.waitForTimeout(300);
+            ok(tag + ': redo brings the colour back first', eq(await g(tc.colorKey), tc.colorVal) && (await shows(origTitle)));
+            await page.keyboard.press('ControlOrMeta+Shift+z');
+            ok(tag + ': a second redo brings the new X title back', await waitFor(() => shows(NEW), 2000));
+
+            // 6. A title that already carries an override: rename, undo once.
+            const s2 = await stackLen();
+            ok(tag + ': renaming the renamed title again', await rename(NEW, 'Dose'));
+            ok(tag + ': the second rename is one more undo step', (await stackLen()) === s2 + 1);
+            await page.keyboard.press('ControlOrMeta+z');
+            ok(tag + ': one undo returns the previous rename',
+                await waitFor(async () => (await shows(NEW)) && !(await shows('Dose')), 2000));
+            ok(tag + ': ... with the colour untouched', eq(await g(tc.colorKey), tc.colorVal));
+        }
+    } catch (e) {
+        ok(tag + ': probe ran without exception (' + e.message + ')', false);
+    } finally { await ctx.close(); }
+}
+
 // Persistence across a re-mount: the undo stack must survive the IIFE
 // re-executing (jamovi re-runs .run() on every content-changed commit). This is
 // the path the elementId-keyed regression broke — the LS key must be STABLE
