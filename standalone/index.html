@@ -1206,7 +1206,27 @@ if (window.navigator.standalone === true) {
   .ps-lpage-edge[data-edge="sw"]::before, .ps-lpage-edge[data-edge="se"]::before {
     width: 10px; height: 10px; opacity: 0;
   }
-  #ps-lstage:hover .ps-lpage-edge::before, .ps-lpage-edge.ps-lpage-edge-active::before { opacity: 1; }
+  /* The corner grips show while the pointer is over the stage. Only where
+     there is a pointer that can hover: iPhone Safari spends a tap on a
+     hover that makes something appear, and no click follows. */
+  @media (hover: hover) {
+    #ps-lstage:hover .ps-lpage-edge::before { opacity: 1; }
+  }
+  .ps-lpage-edge.ps-lpage-edge-active::before { opacity: 1; }
+  /* Under a finger a grip is the pill that can be seen and nothing more.
+     Each edge grip was a strip as long as its edge, a browser hands a touch
+     to the nearest tappable thing within a finger's width, and a scroll
+     begun on the page beside its bottom edge resized the page (measured:
+     672 px tall became 525). So in touch mode an edge grip is as long as
+     its pill and a little more, and the corners, which a mouse sees on
+     hover, are always shown. A grip still moves its edge at once. */
+  body.ps-touch .ps-lpage-edge[data-edge="n"], body.ps-touch .ps-lpage-edge[data-edge="s"] {
+    left: calc(50% - 32px); right: auto; width: 64px;
+  }
+  body.ps-touch .ps-lpage-edge[data-edge="w"], body.ps-touch .ps-lpage-edge[data-edge="e"] {
+    top: calc(50% - 32px); bottom: auto; height: 64px;
+  }
+  body.ps-touch .ps-lpage-edge::before { opacity: 1; }
   .ps-lpage-edge:hover::before, .ps-lpage-edge.ps-lpage-edge-active::before { background: var(--ps-accent); }
   .ps-lstage-resizing, .ps-lstage-resizing * { user-select: none; }
   /* The selection box. Built from the accent already used for a selected

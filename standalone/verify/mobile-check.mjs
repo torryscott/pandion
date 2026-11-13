@@ -869,7 +869,7 @@ async function runDevice(browser, dev) {
             const r = vp.getBoundingClientRect(), D = 22;
             const x0 = Math.max(r.left, 0) + 30, x1 = Math.min(r.right, innerWidth) - 30;
             const y0 = Math.max(r.top, 0) + 30, y1 = Math.min(r.bottom, innerHeight) - 30;
-            const free = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && vp.contains(e) && !e.closest('.ps-litem, .ps-lhandle, .ps-lhandle-end, .ps-lbar, button, input, select'); };
+            const free = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && vp.contains(e) && !e.closest('[data-edge], .ps-litem, .ps-lhandle, .ps-lhandle-end, .ps-lbar, button, input, select'); };
             for (let y = y1; y >= y0; y -= 14) for (let x = x0; x <= x1; x += 14) {
                 let ok = true;
                 for (const dx of [-D, 0, D]) for (const dy of [-D, 0, D]) if (!free(x + dx, y + dy)) ok = false;
@@ -906,6 +906,84 @@ async function runDevice(browser, dev) {
         const cancelled = await page.evaluate(() => window.__mobCancel);
         result.touch.layoutItemDragMoves = !!b1 && cancelled === 0 &&
             Math.hypot(b1.x - b0.x, (b1.y - b0.y) + pan) >= 0.6 * Math.hypot(30, 24);
+    }
+
+    // 9b. the page's own edge grips. A finger on a grip moves that edge at
+    //     once, the way an item's handle answers; a swipe that starts beside
+    //     the page's edge and not on a grip scrolls the view and leaves the
+    //     page the size it was. A grip is a strip as long as the edge it
+    //     moves and a browser hands a touch to the nearest tappable thing
+    //     within a finger's width, so both halves are measured (the axis
+    //     range strips on the chart taught the same lesson).
+    result.touch.pageGripDragResizesAtOnce = false; result.touch.swipeBesidePageEdgeLeavesPage = false;
+    {
+        const pg = () => page.evaluate(() => {
+            const ls = window.PS_SHELL.charts().filter(d => Array.isArray(d.items)); const l = ls[ls.length - 1];
+            const cv = document.getElementById('ps-lcanvas'); if (!l || !cv) return null;
+            const m = /scale\(([\d.]+)\)/.exec(cv.style.transform || ''); const r = cv.getBoundingClientRect();
+            return { w: l.page.w, h: l.page.h, zoom: m ? Number(m[1]) : 1, l: r.left, t: r.top, r: r.right, b: r.bottom };
+        });
+        const gripAt = edge => page.evaluate(edge => {
+            const g = document.querySelector('#ps-lpage-edges [data-edge="' + edge + '"]'); if (!g) return null;
+            g.scrollIntoView({ block: 'center', inline: 'center' });
+            const r = g.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return null;
+            const x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y);
+            return { x, y, onGrip: !!hit && !!hit.closest && !!hit.closest('[data-edge]'), inView: x > 4 && x < innerWidth - 4 && y > 4 && y < innerHeight - 4 };
+        }, edge);
+        const p0 = await pg();
+        const grips = await page.evaluate(() => document.querySelectorAll('#ps-lpage-edges [data-edge]').length);
+        if (p0 && grips) {
+            // beside the bottom edge, clear of the grip itself: on the page
+            // a finger's width above the edge, and on the grey just below it
+            const sg = await gripAt('s'); await page.waitForTimeout(200);
+            const starts = await page.evaluate(() => {
+                const cv = document.getElementById('ps-lcanvas'), vp = document.getElementById('ps-lviewport'); if (!cv || !vp) return [];
+                const r = cv.getBoundingClientRect(), v = vp.getBoundingClientRect(), out = [];
+                const ok = (x, y) => { if (x < 6 || x > innerWidth - 6 || y < 6 || y > innerHeight - 6) return false; const e = document.elementFromPoint(x, y); return !!e && vp.contains(e) && !e.closest('[data-edge], .ps-litem, .ps-lhandle, .ps-lhandle-end, .ps-lbar, button, input, select'); };
+                const xs = [r.left + r.width * 0.25, r.left + r.width * 0.75];
+                for (const x of xs) {
+                    if (ok(x, r.bottom - 9)) out.push({ x, y: r.bottom - 9, where: 'on the page, above its bottom edge' });
+                    if (ok(x, r.bottom + 20) && r.bottom + 20 < Math.min(v.bottom, innerHeight) - 6) out.push({ x, y: r.bottom + 20, where: 'on the grey, below the bottom edge' });
+                }
+                const ys = [Math.max(r.top, v.top) + 60];
+                for (const y of ys) {
+                    if (ok(r.right - 9, y)) out.push({ x: r.right - 9, y, where: 'on the page, inside its right edge' });
+                    if (ok(r.left + 9, y)) out.push({ x: r.left + 9, y, where: 'on the page, inside its left edge' });
+                }
+                return out;
+            });
+            let kept = starts.length > 0; const moved = [];
+            for (const st of starts) {
+                const a = await pg();
+                await touchDrag(client, page, st.x, st.y, 10, -46); await page.waitForTimeout(450);
+                const z = await pg();
+                if (!z || Math.abs(z.w - a.w) > 0.5 || Math.abs(z.h - a.h) > 0.5) { kept = false; moved.push(st.where + ' (' + Math.round(a.w) + ' x ' + Math.round(a.h) + ' became ' + (z ? Math.round(z.w) + ' x ' + Math.round(z.h) : 'nothing') + ')'); }
+            }
+            result.touch.swipeBesidePageEdgeLeavesPage = kept;
+            check(dev.id + '/layout/page-swipe', kept, tag + 'a swipe that starts beside the page\'s edge leaves the page its size (' +
+                (starts.length ? starts.length + ' starting points' + (moved.length ? '; resized from: ' + moved.join('; ') : '') : 'no starting point was on screen') + ')');
+            // on the bottom grip itself: the edge comes with the finger
+            const g = await gripAt('s'); await page.waitForTimeout(200);
+            const b0 = await pg(); let grew = 0;
+            if (g && g.inView && g.onGrip && b0) {
+                await page.evaluate(() => { window.__mobCancel = 0; });
+                await touchDrag(client, page, g.x, g.y, 0, 34); await page.waitForTimeout(500);
+                const b1 = await pg(); const cancelledGrip = await page.evaluate(() => window.__mobCancel);
+                grew = b1 ? (b1.h - b0.h) * b0.zoom : 0;
+                result.touch.pageGripDragResizesAtOnce = cancelledGrip === 0 && grew >= 0.6 * 34;
+                // and back, so the page is the size the rest of the walk expects
+                const g2 = await gripAt('s'); await page.waitForTimeout(150);
+                if (g2 && g2.onGrip) { await touchDrag(client, page, g2.x, g2.y, 0, -34); await page.waitForTimeout(450); }
+            }
+            check(dev.id + '/layout/page-grip', result.touch.pageGripDragResizesAtOnce, tag + 'a finger on the page\'s bottom grip moves that edge at once (' +
+                (g && g.inView && g.onGrip ? Math.round(grew) + ' px of 34' : 'the grip was not under the finger') + ')');
+            // every grip a finger can use can be seen: none waits for a hover
+            const unseen = await page.evaluate(() => [...document.querySelectorAll('#ps-lpage-edges [data-edge]')].filter(g => {
+                const cs = getComputedStyle(g); if (cs.pointerEvents === 'none' || cs.display === 'none') return false;
+                const b = getComputedStyle(g, '::before'); return +b.opacity === 0 || b.display === 'none';
+            }).map(g => g.getAttribute('data-edge')));
+            check(dev.id + '/layout/page-grip-seen', unseen.length === 0, tag + 'no page grip answers a finger while it cannot be seen (' + (unseen.length ? unseen.join(', ') : 'none') + ')');
+        } else note(tag + 'this page has no page-edge grips, so they went unmeasured');
     }
 
     // 10. back on Charts: the "+" menu while the chart is zoomed out, which
