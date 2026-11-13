@@ -157,6 +157,34 @@ try {
   await page.waitForSelector('td[data-gc="Centered"][data-gr="0"]');
   close(Number(await page.locator('td[data-gc="Centered"][data-gr="0"]').textContent()), -999.505, 'newly mounted result');
   console.log('  ok virtualized grid, focus, scroll, and newly mounted results');
+
+  // A computed column holds full doubles, and the grid used to print them
+  // raw (6.3999999999999995 beside a formula preview that said 6.4). It now
+  // reads the way the preview does, while copy and saves keep the double.
+  await page.evaluate(() => {
+    const S = window.PS_SHELL;
+    S.loadTable('display audit', ['A', 'B', 'C'],
+      [['6.1', '6.4', '6.7'], ['3.4', '4.0', '4.4'], ['1000.1', '1000.495', '1000.89']],
+      { A: 'continuous', B: 'continuous', C: 'continuous' });
+    const r = S.saveComputedColumn('Mean', '(A + B + C) / 3');
+    if (!r.ok) throw Error(r.error);
+    S.setWorkspace('data');
+  });
+  await page.waitForSelector('td[data-gc="Mean"][data-gr="2"]');
+  const shown = await page.locator('td[data-gc="Mean"]').evaluateAll(cells =>
+    cells.map(td => td.textContent));
+  assert.deepEqual(shown, ['6.4', '3.93333', '1000.495']); checks++;
+  const typedAs = await page.locator('td[data-gc="A"]').evaluateAll(cells =>
+    cells.map(td => td.textContent));
+  assert.deepEqual(typedAs, ['6.1', '3.4', '1000.1'], 'typed data shows as typed'); checks++;
+  const stored = JSON.parse(await page.evaluate(() => window.PS_SHELL.projectText()))
+    .project.table.raw.Mean;
+  assert.equal(stored[0], String((6.1 + 6.4 + 6.7) / 3), 'the stored double keeps its precision'); checks++;
+  assert.notEqual(stored[0], shown[0]); checks++;
+  await page.locator('th[data-grid-col="Mean"]').click();
+  assert.equal((await page.evaluate(() => window.PS_SHELL.selectionText())).split(/\r?\n/)[1],
+    stored[0], 'copy carries the stored value'); checks++;
+  console.log('  ok computed values read like the preview and keep their precision');
   assert.deepEqual(errors, []);
   console.log(`COMPUTED GRID REFRESH PASS (${checks} checks)`);
 } finally { await browser.close(); }

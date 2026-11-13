@@ -4021,9 +4021,23 @@
   // unfolded; -1 = none. Reset when the dialog opens, kept across edits
   // so the trace follows the formula while it is being written.
   var FORMULA_EXPLAIN_ROW = -1;
+  // A computed number as a person reads it: six significant digits, with
+  // the whole-number part and three decimals always kept (3.9333333333333336
+  // reads 3.93333, 1000.495 stays 1000.495), and no more than the 15 digits
+  // a double holds faithfully, so float noise (6.3999999999999995) reads
+  // 6.4. The preview and the grid share it, so a value never reads one way
+  // in the dialog and another in the column. Display only: the stored
+  // double keeps full precision for charts, chained formulas, copy and
+  // saved files (recomputeFormulas).
+  function fmtComputedNumber(v) {
+    var a = Math.abs(v);
+    var whole = a >= 1 ? Math.floor(Math.log10(a)) + 1 : 0;
+    if (!isFinite(v) || whole > 15) return String(v);
+    return String(Number(v.toPrecision(Math.min(15, Math.max(6, whole + 3)))));
+  }
   function fmtPreviewValue(v) {
     return v == null ? "missing"
-      : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+      : typeof v === "number" ? fmtComputedNumber(v) : String(v);
   }
   // Why a sub-expression came out the way it did, in plain words, from
   // the facts the engine's explain mode returns. Only the lines that
@@ -18235,7 +18249,12 @@
     var note = (v == null && !excl)
       ? unreadReason(t, col, i) : "";
     if (note) note += ", so this cell is missing";
-    return { cls: cls, text: v == null ? "\u2014" : String(v),
+    // A computed column holds full doubles, so 6.4 arrives as
+    // 6.3999999999999995; it reads the way the formula preview showed it.
+    return { cls: cls,
+             text: v == null ? "\u2014"
+               : typeof v === "number" && isComputedColumn(t, col)
+               ? fmtComputedNumber(v) : String(v),
              note: note, tip: tip,
              title: note ? (tip ? note + ". " + tip : note) : tip };
   }
@@ -21961,13 +21980,13 @@
       var altLikert = null;
       if (summary.repeatedTimeNames)
         altLikert = choice("rm",
-          "Choose this instead if those columns are the same rating recorded at different times or sessions.");
+          "those columns are the same rating recorded at different times or sessions.");
       else if (num === 2)
         altLikert = choice("scatter",
-          "Choose this instead if the two numeric columns are different measurements whose relationship matters.");
+          "the two numeric columns are different measurements whose relationship matters.");
       else if (num >= 3)
         altLikert = choice("corr",
-          "Choose this instead if these are different measurements and you want their pairwise relationships.");
+          "these are different measurements and you want their pairwise relationships.");
       return { primary: primaryLikert, alternative: altLikert, warning: warning,
                batteryNames: summary.likertNames.slice() };
     }
@@ -21985,19 +22004,19 @@
       return { primary: choice("compare-all",
         "One numeric outcome plus categorical variables is a group-comparison design."),
         alternative: choice("dist",
-          "Choose this instead if the grouping variables are not part of the question and you only want the outcome's distribution."),
+          "the grouping variables are not part of the question and you only want the outcome's distribution."),
         warning: warning };
     if (num === 2) {
       if (summary.repeatedLikely)
         return { primary: choice("rm",
           "The two numeric columns have sequential names, suggesting the same measure at two occasions."),
           alternative: choice("scatter",
-            "Choose this instead if they are different measurements and the relationship between them is the question."),
+            "they are different measurements and the relationship between them is the question."),
           warning: warning };
       return { primary: choice("scatter",
         "Exactly two numeric variables naturally form the X and Y axes of a scatter plot."),
         alternative: choice("rm",
-          "Choose this instead if they are the same measure recorded at two times or conditions."),
+          "they are the same measure recorded at two times or conditions."),
         warning: warning };
     }
     if (num >= 3) {
@@ -22006,12 +22025,12 @@
           "Several numeric columns appear to be repeated occasions" +
           (cat ? ", with a categorical variable available for between-group comparison." : ".")),
           alternative: choice("corr",
-            "Choose this instead if the numeric columns are different measurements whose pairwise relationships matter."),
+            "the numeric columns are different measurements whose pairwise relationships matter."),
           warning: warning };
       return { primary: choice("corr",
         "Several numeric variables with no grouping variable are naturally summarized in a correlation matrix."),
         alternative: choice("rm",
-          "Choose this instead if the columns are one measure recorded at different times or conditions."),
+          "the columns are one measure recorded at different times or conditions."),
         warning: warning };
     }
     return { primary: null, alternative: null,
