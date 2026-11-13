@@ -132,7 +132,9 @@ echo "== sigma-panel parity (CI / cumulative % / all-pairs / per-level % / copy-
 GB2_VERIFY_OUT="$OUT" node "$HERE/sigma-parity-check.mjs"
 
 echo "== undo/redo completeness (generic tracking: edit->undo->redo per module + denylist)"
-GB2_VERIFY_OUT="$OUT" node "$HERE/undo-check.mjs"
+# The title Reset steps need charts that already carry renamed titles.
+GB2_TITLERESET_OUT="$OUT-titlereset" GB2_BUNDLE="$BUNDLE" Rscript "$HERE/titlereset-render.R"
+GB2_VERIFY_OUT="$OUT" GB2_TITLERESET_OUT="$OUT-titlereset" node "$HERE/undo-check.mjs"
 
 echo "== hover must not bake into an export (harvest fires each hovered element's leave twin)"
 GB2_VERIFY_OUT="$OUT" node "$HERE/hover-export-check.mjs"
