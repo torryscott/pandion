@@ -30,7 +30,7 @@
   "__stamp": {
     "marshalMd5": "e32f0cc924741f9c223476d470241f54",
     "marshalFiles": ["R/widget.R", "R/spec_explode.R", "R/utils.R", "R/plotbuilder.b.R", "R/distplotbuilder.b.R", "R/freqplotbuilder.b.R", "R/xyplotbuilder.b.R", "R/rmplotbuilder.b.R", "R/corrplotbuilder.b.R", "R/likertplotbuilder.b.R"],
-    "engineMd5": "dffe6825043e0cf80e38aeb3b3a2304a",
-    "generated": "2026-11-12"
+    "engineMd5": "f75799f31dfbfe785b85f43274ce19e5",
+    "generated": "2026-11-13"
   }
 }

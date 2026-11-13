@@ -38577,7 +38577,9 @@
                             tileEl.addEventListener("mouseenter", _tlMove);
                             tileEl.addEventListener("mousemove", _tlMove);
                             tileEl.addEventListener("mouseleave", function () {
-                                if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                                // The harvest's leave is not the pointer's: keep the
+                                // flag, so the leave that follows still hides it.
+                                if (_tlShown) { _xyTooltipHide(); if (window.__gb2_harvestUnhover !== true) _tlShown = false; }
                             });
                         })(_binEl, _bin);
                         _binEl.addEventListener("click", function (e) {
@@ -42863,7 +42865,9 @@
                         if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
                     });
                     barRect.addEventListener("mouseleave", function () {
-                        if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
+                        // The harvest's leave is not the pointer's: keep the
+                        // flag, so the leave that follows still hides it.
+                        if (_ctShown) { _xyTooltipHide(); if (window.__gb2_harvestUnhover !== true) _ctShown = false; }
                         // Read opacity at handler-call time, not at
                         // bar-creation time: the user can drag the
                         // opacity slider after this bar was created
