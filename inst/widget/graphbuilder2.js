@@ -12047,9 +12047,17 @@
                 // ancestor never hears them. The scatter points use exactly
                 // that, and a real pointer exit fires bubbling out as well, so
                 // send it from the innermost element too.
+                // These leaves are the harvest's own, and every attribute is
+                // put back a moment later. A handler that keeps what it lit in
+                // a variable of its own must not forget the mark because of
+                // them (the flag below): the snapshot restores the DOM, not
+                // the handler, and a forgotten mark that is lit again can
+                // never be switched off.
+                window.__gb2_harvestUnhover = true;
                 if (_hovEls.length) _hFire(_hovEls[0], "out", true);
                 for (var _hj = 0; _hj < _hovEls.length; _hj++) _hFire(_hovEls[_hj], "leave", false);
             } catch (_eHov1) {}
+            window.__gb2_harvestUnhover = false;
             var copy = svg.cloneNode(true);
             // put the live chart back before anything can paint
             if (_hovEls.length) _hRestore();
@@ -38866,7 +38874,13 @@
                                 if (!t || !t.__gb2pt || t !== _cur) return;
                                 if (e.relatedTarget === t) return;
                                 _hOff(t);
-                                _cur = null;
+                                // A leave sent by the export harvest is not
+                                // the pointer leaving: the harvest lights the
+                                // ring again as soon as it has its copy, so
+                                // this point is still the lit one. Forgetting
+                                // it here left a ring that nothing switched
+                                // off, and the next point lit a second.
+                                if (window.__gb2_harvestUnhover !== true) _cur = null;
                                 _xyTooltipHide();
                             });
                             dg.addEventListener("mousemove", function (e) {

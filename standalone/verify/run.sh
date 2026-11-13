@@ -57,7 +57,7 @@ probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-c
 reflow-accessibility-check \
 row-filters-check filter-formula-check filter-reasons-check filter-asformula-check filter-help-check \
 shape-plural-check statusbar-check stats-prefs-check density-check \
-textscale-check \
+textscale-check scatter-ring-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check toolbar-labels-check toolbar-scroll-cue-check typing-check units-check update-check void-honesty-check wizard-parity-check variable-levels-check visuals-check \
