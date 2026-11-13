@@ -36459,6 +36459,21 @@
         : "Assign variables to this chart first to use the chart help " +
           "panels.");
     })();
+    // The click that asked for this panel (a Help menu row, the status-line
+    // receipt, a palette row, a dialog's link) is still on its way up to the
+    // document when the first step returns, and the engine closes its panel
+    // on any click outside it. With a help panel already open the first step
+    // switches tabs at once, so that same click closed the tab it had just
+    // opened (Oct 1 2026 report, Which graph? over Check my graph and the
+    // receipt over Which graph? both left nothing open). The "?" route only
+    // looked right because the poll reopened the panel 60ms later. The engine
+    // keeps a suppression window for clicks that belong to a gesture rather
+    // than land outside it, as the splitters use it. Armed after the step, so
+    // the step's own work cannot use it up, and never shortened.
+    try {
+      window.__gb2_suppressOutsideClickUntil = Math.max(
+        window.__gb2_suppressOutsideClickUntil || 0, Date.now() + 400);
+    } catch (e) {}
   }
   // ---- punch list 4: the user guide ----
   // docs/user-guide.html is 2.46 MB with 15 screenshots, and was orphaned:
