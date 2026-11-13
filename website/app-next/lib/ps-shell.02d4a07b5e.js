@@ -552,6 +552,18 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "histogram-auto-bins-top-edge", since: "3.2.1",
+      label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
+    { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
+      label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
+    { id: "anova-effect-size-table-total", since: "3.2.1",
+      label: "eta squared and omega squared on two-way and three-way Compare Groups designs with unequal cell sizes match jamovi's ANOVA table" },
+    { id: "freq-pairwise-two-category-once", since: "3.2.1",
+      label: "the Frequencies Pairwise tab lists a two-category outcome once per pair of groups, so its Holm-adjusted p is no longer doubled" },
+    { id: "likert-means-own-codes", since: "3.2.1",
+      label: "survey item means, their intervals and Cronbach's alpha use the responses' own numbers (items coded from 0, or with an unused level, read differently)" },
+    { id: "corrections-follow-test-menu", since: "3.2.1",
+      label: "Compare Groups comparisons under Bonferroni, Holm or FDR keep a Welch's or Student's t picked by hand as each pair's own test" },
     { id: "ptukey-df-scaled-grid", since: "3.2.1",
       label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
@@ -1345,6 +1357,12 @@
   // Tuned against five real laptop geometries (panel-dock-check): a
   // 1366x768 laptop at 125% or 100% scaling goes beside; a 1080p laptop at
   // 125% and a MacBook Air stay below.
+  // In touch mode the same Bar panel is 358px (measured on an iPad: 40px
+  // tabs, 44px chips, a taller picker), so the panel is taken as 350
+  // there. With 280 a sideways iPad sat inside the hysteresis band and
+  // stayed below, and a tap on a bar scrolled the top third of the chart
+  // off the screen; with 350 it goes beside, an upright iPad and a 13 inch
+  // iPad held sideways stay below.
   function dockAutoBeside(cur) {
     var pane = document.querySelector(".ps-main-workspace");
     if (!pane) return cur;
@@ -1352,7 +1370,7 @@
     var lw = chartLogicalWidthPx(), lh = chartLogicalHeightPx();
     if (!(paneH > 0 && paneW > 0 && lw > 0 && lh > 0)) return cur;
     var chartH = lh * Math.min(1, (paneW - 4) / lw) + 64;
-    var frac = (paneH - 280) / chartH;
+    var frac = (paneH - (TOUCH_MODE ? 350 : 280)) / chartH;
     if (frac < 0.55) return true;
     if (frac > 0.65) return false;
     return cur;
@@ -1366,11 +1384,49 @@
     var want = pref === "beside" ? true
              : pref === "below" ? false
              : (STATS_WIDE != null ? DOCK_BESIDE : dockAutoBeside(DOCK_BESIDE));
+    // The dock's home is the settings column, and below 760px that column
+    // is a drawer: display none until its button is pressed. A panel docked
+    // there opens where nobody can see it. A phone held sideways is both
+    // narrow and short, so the automatic rule chose the column and a tap on
+    // a bar showed nothing at all (found by mobile-check, Nov 2026). The
+    // same media query the stylesheet uses decides it, so the two can never
+    // disagree, and a stored Beside preference waits for a wider window.
+    if (want && dockColumnIsDrawer()) want = false;
     var changed = want !== DOCK_BESIDE;
     DOCK_BESIDE = want;
     try { document.body.classList.toggle("ps-dock-beside", want); } catch (e) {}
     return changed;
   }
+  // The drawer frame's one condition, word for word the stylesheet's media
+  // query, so script and styles can never disagree: a window under 760px,
+  // OR a finger on a screen held upright. The second half is the upright
+  // tablet (Torry, Nov 11 2026: "give every upright tablet the phone
+  // frame"): at 820px an upright iPad had the three-column frame with the
+  // chart at 45% in a 345px column, while an upright iPad mini, a few
+  // pixels under the breakpoint, had the phone frame and a full-size
+  // chart. A tablet held sideways keeps the three columns, and so does a
+  // mouse at any width above 760.
+  // The last two clauses are the LARGE PHONE HELD SIDEWAYS (Torry, the
+  // same day: "Fix the large phone held sideways too"). An iPhone Pro Max
+  // is 814 by 380 that way and a Pixel 7 is 863 by 360: wider than 760, so
+  // they had three columns with the chart 252px wide in a pane about 330
+  // by 230, while an iPhone 13 (750 wide) had the phone frame. A phone is
+  // told from a tablet by its SCREEN, not by the window: the screen's
+  // short side is under 480 on every phone and over 600 on every tablet.
+  // The screen is asked rather than the window's height because an
+  // on-screen keyboard shrinks the window in some browsers, and a tablet
+  // held sideways must not turn into a phone while someone types. Two
+  // clauses because iOS reports the screen as held upright whichever way
+  // it is turned (the short side is the device WIDTH) and Android reports
+  // it as it is held (sideways, the short side is the device HEIGHT).
+  var NARROW_MQ = "(max-width: 760px), (pointer: coarse) and (orientation: portrait), (pointer: coarse) and (max-device-width: 480px), (pointer: coarse) and (max-device-height: 480px)";
+  function narrowFrame() {
+    try {
+      if (window.matchMedia) return !!window.matchMedia(NARROW_MQ).matches;
+    } catch (e) {}
+    return window.innerWidth <= 760;
+  }
+  function dockColumnIsDrawer() { return narrowFrame(); }
   function panelDockWanted() { return DOCK_BESIDE; }
   function dockSlot() { return el("ps-engine-dock-slot"); }
   // A panel showing under the chart right now (the engine keeps one
@@ -1860,6 +1916,61 @@
   }
   function inferType(rawVals, tokens) {
     return numericAudit(rawVals, tokens).numeric ? "continuous" : "nominal";
+  }
+  // An untyped column takes its type from the first data that lands in it
+  // (Nov 2026, a first-use walkthrough: quiz scores typed into a blank sheet
+  // stayed Nominal, and the chart then offered "none eligible" without
+  // naming the column or the cure). Two halves, because the question has to
+  // be asked BEFORE a write and answered AFTER it.
+  //
+  // firstDataWatch: should `col` take its type from what is about to be
+  // written into the cells in `rows`? Yes in exactly two situations, and
+  // never for a type somebody set by hand (setColTypes marks that).
+  //   1. The column is empty and untyped: it holds no readable value, and
+  //      its type is Nominal, which is what inference says of no data.
+  //   2. The column's type CAME from this rule earlier in the session
+  //      (t.typeAuto), and the write replaces every value it holds. That is
+  //      what lets someone type 14, think again, and type a name over it or
+  //      after deleting it, without the name going missing in a column the
+  //      first guess made Continuous. `emptyOnly` switches this half off.
+  // Any other column with data is never re-read: text typed or pasted over
+  // an imported Continuous column still goes missing and says so, which is
+  // the report that catches a misaligned paste. Both marks are session
+  // state on the table object and are never saved.
+  function firstDataWatch(t, col, rows, emptyOnly) {
+    if (!t || !t.types || !(col in t.types) || !t.raw[col]) return false;
+    if (t.typeByHand && t.typeByHand[col]) return false;
+    if (t.computed && t.computed[col] != null) return false;
+    var auto = !emptyOnly && !!(t.typeAuto && t.typeAuto[col]);
+    // The last audit is enough to say no cheaply: more readable values than
+    // cells being written means some of them are outside those cells.
+    var last = t.typeAudit && t.typeAudit[col];
+    if (last && last.seen > (auto ? rows.length : 0)) return false;
+    var tokens = tableMissingTokens(t, col), vals = t.raw[col];
+    var audit = numericAudit(vals, tokens);
+    if (!audit.seen) return t.types[col] === "nominal";
+    if (!auto) return false;
+    var inRows = Object.create(null), i;
+    for (i = 0; i < rows.length; i++) inRows[rows[i]] = 1;
+    for (i = 0; i < vals.length; i++) {
+      if (inRows[i]) continue;
+      if (!tokens[vals[i] == null ? "" : String(vals[i]).trim()]) return false;
+    }
+    return true;
+  }
+  // typeFromFirstData: after the write, give a watched column the type its
+  // values say, and remember that the type came from here. A column left
+  // with no readable value goes back to Nominal, which is what an untyped
+  // empty column is. Returns the new type when it changed, "" otherwise.
+  // The caller retypes.
+  function typeFromFirstData(t, col) {
+    if (!t.typeAuto) t.typeAuto = dataMap();
+    t.typeAuto[col] = 1;
+    var now = numericAudit(t.raw[col], tableMissingTokens(t, col));
+    var next = now.numeric ? "continuous" : "nominal";
+    if (next === t.types[col]) return "";
+    t.types[col] = next;
+    return next;
   }
   // A numeric missing-value CODE passes every gate the audit above has. It
   // reads as a number, so bad === 0, the column types Continuous, and the
@@ -5774,6 +5885,16 @@
   function saveProjectDownload(text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, projectFileName(), "application/json").then(flashSaved, function (e) {
+          if (e && e.name === "AbortError") {
+            showToast("Save cancelled \u00b7 your work is still autosaved here");
+            return;
+          }
+          showToast(String((e && e.message) || "Could not save the project file."), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = projectFileName();
@@ -5811,8 +5932,11 @@
   var EXPORT_PIN_SCOPE = null;
 
   function exportPrefs() {
-    var out = { format: "svg", dpi: 300, background: "shown",
-                pinRecord: true };
+    // A phone's picture format is PNG: Photos cannot hold an SVG and
+    // Messages shows one as a nameless file. Only the DEFAULT moves; a
+    // format the person chose before is still theirs.
+    var out = { format: phoneOn() ? "png" : "svg", dpi: 300,
+                background: "shown", pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
       if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
@@ -6351,7 +6475,9 @@
       // whole record - and every choice lands in the SAME export dialog
       // charts use. Anchored under the Export button - the accelerator
       // and File menu land here too, so every route gets the same choice.
-      var eb = el("ps-export").getBoundingClientRect();
+      var ebEl = (phoneOn() && document.getElementById("ps-phone-export")) ||
+        el("ps-export");
+      var eb = ebEl.getBoundingClientRect();
       var act = activePinBoard();
       var pbs = pinBoards().filter(function (b) { return b.pins.length; });
       var total = allPins().length;
@@ -8658,7 +8784,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast("Exported " + base + ".xlsx" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast(exportedNotice(base + ".xlsx", notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       if (e && e.name === "AbortError") {
         showToast("Export cancelled \u00b7 nothing was written");
@@ -8680,7 +8806,7 @@
       var exCols = t.excluded ? Object.keys(t.excluded).length : 0;
       if (exCols || rowExclCount(t))
         notes.push("excluded values are included as they appear in the grid");
-      showToast("Exported " + base + ".csv" + (notes.length ? " (" + notes.join("; ") + ")" : ""));
+      showToast(exportedNotice(base + ".csv", notes.length ? " (" + notes.join("; ") + ")" : ""));
     }, function (e) {
       // Swallowing a deliberate cancel is right, saying nothing at all is
       // not: a cancelled save and a dead button looked identical.
@@ -8691,9 +8817,92 @@
       showToast("Could not export the data: " + String(e && e.message || e), true);
     });
   }
+  // "Exported" claims the file exists. With the browser's own Save dialog
+  // that is known. With a download link it is known on a computer, where
+  // the browser simply saves. On a phone or tablet the browser asks first
+  // (Safari: "Do you want to download...?"), and the notice was already on
+  // screen saying Exported while that question stood unanswered. There the
+  // app says only what it knows: the file is ready and the browser has it.
+  // ---- Files out of an installed app (the iPad pass, Nov 2026). On an
+  // iPhone or iPad, a page opened from the home screen has no downloads: a
+  // download link on a blob REPLACES THE APP with "Safari can't open the
+  // page" (WebKitBlobResource error 1, measured on iPadOS 27), and the work
+  // on screen is gone with it. The one way out for a file there is the
+  // share sheet (Save to Files, Save Image, AirDrop, Mail), and the share
+  // sheet may only be raised from inside a tap. So there the file is made
+  // first and a small dialog offers it; the tap on its button hands the
+  // file straight over. Closing the dialog is a cancelled save, exactly
+  // like closing the browser's own Save dialog. navigator.standalone is
+  // Safari's own word for "opened from the home screen"; an installed app
+  // on Android or a computer still has downloads and never comes here.
+  var HANDOVER = null;
+  function installedNoDownloads() {
+    try {
+      return window.navigator.standalone === true &&
+        typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" && typeof File === "function";
+    } catch (e) { return false; }
+  }
+  function handOverAbort() {
+    var e = new Error("The file was not saved."); e.name = "AbortError"; return e;
+  }
+  function handOverFile(blob, name, mime) {
+    return new Promise(function (resolve, reject) {
+      var file = null, ok = false;
+      try {
+        file = new File([blob], name, { type: mime || blob.type || "application/octet-stream" });
+        ok = navigator.canShare({ files: [file] });
+      } catch (e) {}
+      if (!ok) {
+        reject(new Error("An app on the home screen cannot hand over this " +
+          "kind of file. Open Pandion Plots in Safari to save " + name + "."));
+        return;
+      }
+      if (HANDOVER) { try { HANDOVER.reject(handOverAbort()); } catch (e2) {} }
+      HANDOVER = { file: file, name: name, resolve: resolve, reject: reject };
+      try {
+        el("ps-handover-name").textContent = name;
+        el("ps-handover-status").textContent = "";
+      } catch (e3) {}
+      openShellDialog("ps-handover-dialog");
+    });
+  }
+  function handOverGo() {
+    var h = HANDOVER;
+    if (!h) return;
+    var p;
+    // Straight from the tap, with nothing awaited before it.
+    try { p = navigator.share({ files: [h.file] }); }
+    catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function () {
+      if (HANDOVER === h) HANDOVER = null;
+      closeShellDialog("ps-handover-dialog");
+      h.resolve("shared");
+    }, function (e) {
+      var st = el("ps-handover-status");
+      if (!st) return;
+      st.textContent = (e && e.name === "AbortError")
+        ? "Not saved yet. The file is still here."
+        : "The share sheet did not open. Try again, or open Pandion Plots in Safari to save this file.";
+    });
+  }
+  function handOverClose() {
+    var h = HANDOVER; HANDOVER = null;
+    closeShellDialog("ps-handover-dialog");
+    if (h) h.reject(handOverAbort());
+  }
+  var EXPORT_LAST_HOW = "";
+  function exportedNotice(filename, tail) {
+    if (EXPORT_LAST_HOW === "shared") return "Shared " + filename + (tail || "");
+    if (EXPORT_LAST_HOW === "downloaded" && touchModeOn())
+      return filename + " is ready. If your browser asks, choose Download." +
+        (tail || "");
+    return "Exported " + filename + (tail || "");
+  }
   function saveExportBlob(blob, filename, ext) {
     var framed = false;
     try { framed = window.top !== window; } catch (e) { framed = true; }
+    EXPORT_LAST_HOW = "";
     if (nativeSaveAvailable()) {
       return window.showSaveFilePicker({
         suggestedName: filename,
@@ -8705,8 +8914,12 @@
         return h.createWritable().then(function (w) {
           return w.write(blob).then(function () { return w.close(); });
         });
-      }).then(function () { return "saved"; });
+      }).then(function () { EXPORT_LAST_HOW = "saved"; return "saved"; });
     }
+    if (installedNoDownloads())
+      return handOverFile(blob, filename, exportMime(ext)).then(function () {
+        EXPORT_LAST_HOW = "shared"; return "shared";
+      });
     return new Promise(function (resolve, reject) {
       try {
         var url = URL.createObjectURL(blob);
@@ -8714,6 +8927,7 @@
         a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        EXPORT_LAST_HOW = "downloaded";
         resolve("downloaded");
       } catch (e) { reject(e); }
     });
@@ -8748,7 +8962,7 @@
         EXPORT_BUSY = false;
         el("ps-export-go").textContent = "Export";
         closeExporter();
-        showToast("Exported " + filename, false);
+        showToast(exportedNotice(filename), false);
       })
       .catch(function (e) {
         EXPORT_BUSY = false;
@@ -9105,6 +9319,31 @@
       }
     return false;
   }
+  // distNormality over each cell's values with the hidden (excluded) points
+  // removed. The entry shape is ps-data's own, which is R's: {group, facet,
+  // n, w, p}, W rounded to 3 dp on the producing side.
+  function normalityWithoutHidden(bars, hidden) {
+    var S = window.PSStat, drop = Object.create(null), out = [], i, v;
+    var keyOf = function (cat, group, idx) {
+      return String(cat == null ? "" : cat) + "\u0000" +
+             String(group == null ? "" : group) + "\u0000" + idx;
+    };
+    for (i = 0; i < hidden.length; i++)
+      drop[keyOf(hidden[i].cat, hidden[i].group, hidden[i].idx)] = 1;
+    for (i = 0; i < bars.length; i++) {
+      var b = bars[i], srcVals = b.values || [], vals = [];
+      for (v = 0; v < srcVals.length; v++)
+        if (!drop[keyOf(b.x, b.group, v)]) vals.push(srcVals[v]);
+      var sw = S && S.shapiroWilk ? S.shapiroWilk(vals) : null;
+      if (!sw) continue;
+      out.push({ group: b.group == null ? "" : String(b.group),
+                 facet: b.facet == null ? "" : String(b.facet),
+                 n: sw.n,
+                 w: Math.round(sw.w * 1000) / 1000,
+                 p: S.sigR(sw.p) });
+    }
+    return out;
+  }
   function dataHiddenPoints(payload) {
     var t = activeDataTable(), out = [];
     if (!t || !payload || !Array.isArray(payload.bars)) return out;
@@ -9210,6 +9449,13 @@
       var renderSpec = parseSpec(payload.chartSpec);
       renderSpec.hiddenPoints = derivedHidden;
       payload.chartSpec = JSON.stringify(renderSpec);
+      // The data layer computed the normality test from the values the
+      // builder was handed, and those still hold the excluded ones (they ride
+      // along so the chart can show where they were). An excluded value is
+      // out of every number, so the test is taken again over what remains.
+      if (derivedHidden.length && Array.isArray(payload.distNormality) &&
+          Array.isArray(payload.bars))
+        payload.distNormality = normalityWithoutHidden(payload.bars, derivedHidden);
     }
     // t4-19. An excluded cell reads as null everywhere downstream, which is
     // the whole point of the feature - but it means the builders count it into
@@ -9274,6 +9520,11 @@
     // The editing panel may dock beside the chart; the host published in
     // __gb2_inspectorDockHost answers per placement (see applyPanelDock).
     payload.inspectorDock = "host";
+    // Touch presses are arbitrated by this host (wireTouch): the engine
+    // reads __gb2_touchCancelAt and __gb2_touchPressConsumed in its
+    // selection entry point only when this key says a host is writing
+    // them. jamovi never ships it.
+    payload.touchHost = true;
     // Scatter-overlay re-ship: harvested engine-computed arrays return
     // to the payload while the data fingerprint still matches (R
     // parity - jamovi recomputes and ships them every run). A stale
@@ -9600,7 +9851,7 @@
     // Narrow layout first: the inspector is display:none behind a drawer
     // there, so the old code decorated a 0x0 element. skipFocus, because
     // the focus target below is ours, not the drawer's first tabbable.
-    if (window.innerWidth <= 760) narrowSet("inspector", true);
+    if (narrowFrame()) narrowSet("inspector", true);
     var miss = firstUnsatisfiedRole();
     var def = miss && miss.def;
     if (!def) {
@@ -9697,10 +9948,19 @@
     if (!pins.length) {
       scroll.removeAttribute("role");
       scroll.removeAttribute("aria-label");
-      var empty = mkEl("div", "ps-pinboard-empty",
-        "Nothing kept yet. Right-click a chart, or press Keep on a " +
-        "comparison in the \u03a3 Statistics panel. Each lands here " +
-        "as a page.");
+      // A finger has no right-click. A phone has a Keep button; a tablet
+      // reaches the same menu by touching and holding the chart.
+      var empty = mkEl("div", "ps-pinboard-empty", phoneOn()
+        ? "Nothing kept yet. In Charts, tap Keep, or press Keep on a " +
+          "comparison in the \u03a3 Statistics panel. Each lands here " +
+          "as a page."
+        : touchModeOn()
+        ? "Nothing kept yet. Touch and hold a chart and choose Keep, or " +
+          "press Keep on a comparison in the \u03a3 Statistics panel. " +
+          "Each lands here as a page."
+        : "Nothing kept yet. Right-click a chart, or press Keep on a " +
+          "comparison in the \u03a3 Statistics panel. Each lands here " +
+          "as a page.");
       scroll.appendChild(empty);
       // "New here?" under the empty state, until the tour has been taken.
       if (window.PS_TOURS && !window.PS_TOURS.seen("notebook")) {
@@ -10659,7 +10919,7 @@
       EXPORT_BUSY = false;
       el("ps-export-go").textContent = "Export";
       closeExporter();
-      showToast("Exported " + filename + (tail || ""));
+      showToast(exportedNotice(filename, tail));
     }
     function fail(e) {
       EXPORT_BUSY = false;
@@ -11124,6 +11384,20 @@
       window.innerWidth - w - 12));
     c.style.left = left + "px";
     c.style.top = Math.min(box.top + 44, window.innerHeight - 150) + "px";
+    // On a phone the note is nearly as wide as the chart, and sitting on
+    // the chart it hid about two fifths of the thing it is describing
+    // (mobile-check, Nov 2026); on a tablet's narrow middle column it hid
+    // more. In touch mode it goes under the chart instead, or as low as
+    // the screen allows.
+    if (touchModeOn()) {
+      var chart = host.querySelector('svg[data-role="gb2-chart-svg"]');
+      if (chart) {
+        var cb = chart.getBoundingClientRect();
+        var h = c.offsetHeight || 150;
+        c.style.top = Math.max(8, Math.min(cb.bottom + 10,
+          window.innerHeight - h - 34)) + "px";
+      }
+    }
   }
   function maybeShowCoach() {
     if (COACH_SHOWN || coachSeen()) return;
@@ -11142,6 +11416,11 @@
     COACH_SHOWN = true;
     var c = document.getElementById("ps-coach");
     if (!c) return;
+    // A finger taps to style a part and drags to move it.
+    var say = document.getElementById("ps-coach-say");
+    if (say && touchModeOn())
+      say.textContent = "Tap a bar, an axis, a label or the legend to " +
+        "style just that part. To move a part, drag it.";
     c.hidden = false;
     coachPlace();
   }
@@ -13025,6 +13304,16 @@
     });
   }
   function applyViewZoom() {
+    var zHost = hostEl();
+    var zWas = zHost ? zHost.style.zoom : "";
+    applyViewZoomCore();
+    // The touch text floor measured its sizes under the old zoom.
+    try {
+      if (zHost && zHost.style.zoom !== zWas) touchFloorRecheck(zHost);
+    } catch (eTf) {}
+    try { touchTipRoom(); } catch (eTr) {}
+  }
+  function applyViewZoomCore() {
     var host = hostEl();
     if (!host) return;
     var doc = activeChartTab();
@@ -13082,6 +13371,28 @@
     S = Math.max(0.35, Math.min(2, S));
     host.style.zoom = Math.abs(S - 1) < 0.005
       ? "" : String(Math.round(S * 1000) / 1000);
+    if (mode === "fit" && phoneSheetFit()) {
+      // A phone with chart setup open as a sheet: the pane ends where the
+      // sheet begins, and the point of the sheet is to watch the chart
+      // change while variables are chosen. Width alone left the chart's
+      // lower half behind the sheet, so trim until its bottom edge is in
+      // the pane. Measured on the drawing itself, because an editing panel
+      // may be open under it and that panel is not what has to fit.
+      var shPane = document.querySelector(".ps-main-workspace");
+      var shSvg = host.querySelector('svg[data-role="gb2-chart-svg"]');
+      var shH = chartLogicalHeightPx();
+      try { if (shPane) shPane.scrollTop = 0; } catch (eSc) {}
+      for (var sp = 0; shPane && shSvg && shH > 0 && sp < 5 && S > 0.35; sp++) {
+        var shOver = shSvg.getBoundingClientRect().bottom -
+          (shPane.getBoundingClientRect().bottom - 8);
+        if (shOver <= 1) break;
+        var shNext = Math.max(0.35, S - (shOver + 2) / shH);
+        if (shNext >= S) break;
+        S = shNext;
+        host.style.zoom = Math.abs(S - 1) < 0.005
+          ? "" : String(Math.round(S * 1000) / 1000);
+      }
+    }
     if (mode === "fit" && panelDockWanted() && !dockPanelBelow()) {
       // Beside the panel the whole chart has to stay on screen, and the
       // chart's chrome (tab strip, toolbar, note) is not in the logical
@@ -13460,6 +13771,18 @@
       : Math.max(clickY, chartTop + 80);
     var cap = Math.floor(anchorY - (Math.max(sr.top, 0) + 44));
     var by = Math.min(needed, Math.max(0, cap));
+    // A short pane cannot keep the tapped part in view AND show the panel.
+    // A phone held sideways leaves about 150px of pane in Safari, the
+    // anchor bound won every time, and the editor opened entirely below
+    // the fold: a tap on a bar looked like it had done nothing. There the
+    // panel is owed its header and first row: 96px of it, or six tenths
+    // of the pane. Taller panes keep the anchor rule untouched.
+    var paneH = viewBottom - Math.max(sr.top, 0);
+    if (paneH < 320) {
+      var minShow = Math.min(pr.height, Math.max(96, Math.round(paneH * 0.6)));
+      if (viewBottom - (pr.top - by) < minShow)
+        by = Math.min(needed, Math.ceil(pr.top - (viewBottom - minShow)));
+    }
     if (by < 4) return 0;
     var reduce = false;
     try {
@@ -13921,6 +14244,10 @@
   // code writes one, and it clears any title so the browser's cannot double up.
   var TIP_DELAY_MS = 420;
   var TIP_TIMER = null, TIP_FOR = null, TIP_WATCH = null;
+  // A tip raised by a held finger (wireTouch): it is not a hover tip, so a
+  // finger lifting or a focus change does not take it down; it leaves a
+  // moment after the lift, or on the next press.
+  var TIP_HELD = false, TIP_HELD_TIMER = 0;
   function setTip(node, text) {
     if (!node) return;
     if (text == null || text === "") {
@@ -13934,6 +14261,8 @@
     if (TIP_FOR === node) showTipFor(node);
   }
   function hideTip() {
+    TIP_HELD = false;
+    if (TIP_HELD_TIMER) { window.clearTimeout(TIP_HELD_TIMER); TIP_HELD_TIMER = 0; }
     if (TIP_TIMER) { window.clearTimeout(TIP_TIMER); TIP_TIMER = null; }
     if (TIP_WATCH) { window.clearInterval(TIP_WATCH); TIP_WATCH = null; }
     var t = document.getElementById("ps-tip");
@@ -13943,9 +14272,10 @@
       TIP_FOR.removeAttribute("aria-describedby");
     TIP_FOR = null;
   }
-  function showTipFor(node) {
+  function showTipFor(node, heldText) {
     var t = document.getElementById("ps-tip");
-    var text = node && node.getAttribute && node.getAttribute("data-tip");
+    var text = heldText ||
+      (node && node.getAttribute && node.getAttribute("data-tip"));
     if (!t || !text) return;
     TIP_FOR = node;
     t.textContent = text;
@@ -13978,8 +14308,15 @@
   // What a press last landed on, so the focus it causes does not re-summon
   // the tip it just dismissed.
   var TIP_PRESSED = null, TIP_PRESSED_AT = 0;
+  // A finger has no hover and never leaves: a tip raised by a tap stays up
+  // until the next tap somewhere else. Tapping a chart tab rebuilt the tab
+  // strip and focused the new tab, and its tip then sat across the chart
+  // toolbar (seen in the iPhone simulator, Nov 2026). So a touch press
+  // raises no tip, by hover or by the focus it causes.
+  var TIP_TOUCH_AT = 0;
   function wireTooltips() {
     document.addEventListener("pointerover", function (e) {
+      if (e.pointerType === "touch") return;
       var target = tipTarget(e.target);
       if (!target) return;
       if (TIP_TIMER) window.clearTimeout(TIP_TIMER);
@@ -13989,6 +14326,8 @@
       }, TIP_DELAY_MS);
     });
     document.addEventListener("pointerout", function (e) {
+      // A finger "leaves" the moment it lifts; a held tip outlasts that.
+      if (e.pointerType === "touch") return;
       var target = tipTarget(e.target);
       if (!target) return;
       var to = tipTarget(e.relatedTarget);
@@ -14005,9 +14344,11 @@
     // first item of the menu it had opened. Keyboard focus is untouched, and
     // so is a programmatic focus() call, because neither carries a press.
     document.addEventListener("focusin", function (e) {
+      if (TIP_HELD) return;
       var target = tipTarget(e.target);
       if (target && target === TIP_PRESSED &&
           Date.now() - TIP_PRESSED_AT < 400) { hideTip(); return; }
+      if (Date.now() - TIP_TOUCH_AT < 900) { hideTip(); return; }
       if (target) showTipFor(target);
       else hideTip();
     });
@@ -14027,6 +14368,7 @@
     document.addEventListener("pointerdown", function (e) {
       TIP_PRESSED = tipTarget(e.target);
       TIP_PRESSED_AT = Date.now();
+      if (e.pointerType === "touch") TIP_TOUCH_AT = TIP_PRESSED_AT;
       hideTip();
     }, true);
     window.addEventListener("scroll", hideTip, true);
@@ -15031,6 +15373,16 @@
     var t = PROJECT.table;
     type = normType(type);
     if (!type || !t || !t.types) return;
+    // Chosen by hand: typing into this column never re-reads its type again
+    // (firstDataWatch). Marked even when the type does not change, because
+    // picking Nominal for an empty column that already says Nominal is still
+    // a choice. Session state on the table object, never saved.
+    if (!t.typeByHand) t.typeByHand = dataMap();
+    (cols || []).forEach(function (c) {
+      if (!(c in t.types)) return;
+      t.typeByHand[c] = 1;
+      if (t.typeAuto) delete t.typeAuto[c];
+    });
     cols = (cols || []).filter(function (c) {
       return (c in t.types) && t.types[c] !== type;
     });
@@ -15494,6 +15846,14 @@
       t.excluded[next] = t.excluded[oldName];
       delete t.excluded[oldName];
     }
+    if (t.typeByHand && t.typeByHand[oldName]) {
+      t.typeByHand[next] = 1;
+      delete t.typeByHand[oldName];
+    }
+    if (t.typeAuto && t.typeAuto[oldName]) {
+      t.typeAuto[next] = 1;
+      delete t.typeAuto[oldName];
+    }
     // The per-column missing labels were the one keyed store this did not
     // carry, and losing them is not cosmetic. The column silently falls back
     // to the dataset labels, so a code that WAS missing comes back as real
@@ -15593,6 +15953,8 @@
       if (t.declaredLevels) delete t.declaredLevels[col];
       if (t.levelOrderDefaults) delete t.levelOrderDefaults[col];
       if (t.excluded) delete t.excluded[col];
+      if (t.typeByHand) delete t.typeByHand[col];
+      if (t.typeAuto) delete t.typeAuto[col];
       if (t.computed) delete t.computed[col];
       if (t.importedFormulas) delete t.importedFormulas[col];
       if (t.sourceNames) delete t.sourceNames[col];
@@ -16206,6 +16568,15 @@
       if (lwBefore > 0 && lwBefore <= 8)
         levelWatch.push({ col: lwCol, before: lwBefore });
     }
+    // Empty, untyped columns among the targets take their type from this
+    // block (firstDataWatch): numbers pasted into an empty column are
+    // numbers. A column that already holds data never does, so text pasted
+    // over a Continuous column is still reported below as values lost.
+    var firstDataCols = [], firstDataRows = [];
+    for (var fdr = 0; fdr < targetRows; fdr++) firstDataRows.push(r.r0 + fdr);
+    for (var fdc = 0; fdc < targetCols && r.c0 + fdc < visCols.length; fdc++)
+      if (firstDataWatch(t, visCols[r.c0 + fdc], firstDataRows, true))
+        firstDataCols.push(visCols[r.c0 + fdc]);
     for (var y = 0; y < targetRows; y++) {
       for (var x = 0; x < targetCols; x++) {
         var srcRow = fillSelection ? 0 : y;
@@ -16216,6 +16587,8 @@
       }
     }
     t.edited = true;
+    for (var fdt = 0; fdt < firstDataCols.length; fdt++)
+      typeFromFirstData(t, firstDataCols[fdt]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     gridSetSelection(visCols[r.c0], r.r0,
@@ -16272,8 +16645,17 @@
     if (!t || !cells.length) return;
     dataMark("clearing the cells");
     var undoDepth = DATA_ACTION_SEQ;
+    // A column that the first-data rule typed this session goes back to
+    // untyped when its values are all cleared, so the next thing typed is
+    // read afresh. An imported column that is cleared keeps its type.
+    var clearRows = Object.create(null), clearWatch = [], cw;
+    for (cw = 0; cw < cells.length; cw++)
+      (clearRows[cells[cw].col] = clearRows[cells[cw].col] || []).push(cells[cw].row);
+    for (cw in clearRows)
+      if (firstDataWatch(t, cw, clearRows[cw])) clearWatch.push(cw);
     for (var i = 0; i < cells.length; i++) t.raw[cells[i].col][cells[i].row] = "";
     t.edited = true;
+    for (cw = 0; cw < clearWatch.length; cw++) typeFromFirstData(t, clearWatch[cw]);
     retype(t); validateRoles();
     persist(); syncAll(); render();
     offerDataUndo("Cleared " + cells.length +
@@ -17401,7 +17783,10 @@
       '<span id="ps-grid-selection-status" role="status" aria-live="polite"></span>' +
       '<span class="ps-grid-shape">' + shapeText(n, t.order.length, "\u00d7", true) +
       (gridShouldVirtualize(t)
-       ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>";
+       ? " \u00b7 windowed view; the chart uses all of them" : "") + "</span>" +
+      // Touch mode only: a finger has no Enter or F2 to be told about.
+      (touchModeOn()
+       ? '<span class="ps-grid-touchhint">Double tap a cell to edit it</span>' : "");
   }
 
   // ---- data undo/redo (Cmd/Ctrl+Z, Cmd/Ctrl+Y or Shift+Z) ----
@@ -17645,6 +18030,7 @@
   function dataCellPatch(col, row) {
     var t = PROJECT.table;
     return { col: col, row: row, raw: String(t.raw[col][row]), edited: !!t.edited,
+             type: t.types[col],
              roles: JSON.stringify(PROJECT.charts.map(function (c) {
                return { id: c.id, roles: c.roles || {} };
              })) };
@@ -17666,6 +18052,11 @@
     bigDirtyCol(p.col);
     t.raw[p.col][p.row] = p.raw;
     t.edited = p.edited;
+    // The column's type as it stood at this point in the history. A first
+    // value typed into an untyped column sets its type (firstDataWatch), so
+    // undoing that value has to take the type back with it, and redo has to
+    // bring it forward again.
+    if (p.type && t.types && (p.col in t.types)) t.types[p.col] = p.type;
     try {
       var roles = JSON.parse(p.roles);
       for (var ri = 0; ri < roles.length; ri++) {
@@ -17986,11 +18377,16 @@
         gridNextEditAnnouncement(next));
       return;
     }
+    // Asked before the mark and the write, answered after them.
+    var firstData = firstDataWatch(t, ge.col, [ge.row]);
     dataMarkCell(ge.col, ge.row, "the cell edit");
     t.raw[ge.col][ge.row] = newRaw;
     t.edited = true;
+    var typedAs = firstData ? typeFromFirstData(t, ge.col) : "";
     var previousFilterMask = t.filterMask;
     retype(t, false, [ge.col]);
+    // A changed type can change which roles the column may hold.
+    if (typedAs) validateRoles();
     // The typed value is what every chart and statistic downstream will see.
     // When nothing could read the text, the cell is missing, and announcing
     // "Saved score, row 1 as sixty one" tells a screen reader user the value
@@ -18003,7 +18399,9 @@
     syncDataCommandBar();
     gridApplySelection();
     persist();
-    syncDataRow();
+    // The header's type mark and the variable panel show the type, so a
+    // column that just took one needs the whole Data row redrawn.
+    if (typedAs) syncAll(); else syncDataRow();
     render();
     if (next) gridOpenEditor(next.col, next.row, { mode: "enter" });
     else {
@@ -18014,6 +18412,7 @@
       ? gridEditTarget(ge.col, ge.row) + " is missing. " + voided + "."
       : "Saved " + gridEditTarget(ge.col, ge.row) +
         " as " + gridEditValue(t, ge.col, newRaw) + ".") +
+      (typedAs ? " " + ge.col + " is now " + typeLabel(typedAs) + "." : "") +
       gridNextEditAnnouncement(next));
     // The sighted half of the same report. This is not a toast on every
     // edit. An ordinary edit lands, and only a value that was destroyed
@@ -19133,6 +19532,25 @@
     CELL_MENU = { col: col, row: row, cells: cells, on: on,
                   rowOn: !rowExcluded };
     var m = el("ps-cellmenu");
+    // Edit value leads the menu in touch mode, where a double tap was the
+    // only way into a cell and nothing said so. A mouse has the double
+    // click, Enter and F2, and its menu is left exactly as it was.
+    var editRow = document.getElementById("ps-cellmenu-edit");
+    if (touchModeOn()) {
+      if (!editRow) {
+        editRow = document.createElement("button");
+        editRow.type = "button";
+        editRow.id = "ps-cellmenu-edit";
+        editRow.textContent = "Edit value";
+        editRow.addEventListener("click", function () {
+          if (!CELL_MENU) return;
+          var cm = CELL_MENU;
+          hideCellMenu();
+          gridOpenEditor(cm.col, cm.row);
+        });
+        m.insertBefore(editRow, m.firstChild);
+      }
+    } else if (editRow) editRow.parentNode.removeChild(editRow);
     var valueToggle = el("ps-cellmenu-toggle");
     valueToggle.disabled = rowExcluded;
     valueToggle.textContent = rowExcluded
@@ -19143,8 +19561,14 @@
       (rowExcluded ? "Include" : "Exclude") + " row " + (row + 1);
     el("ps-cellmenu-fill").disabled = cells.length < 2;
     m.style.display = "block";
-    m.style.left = Math.min(x, window.innerWidth - 170) + "px";
-    m.style.top = Math.min(y, window.innerHeight - 142) + "px";
+    // Kept on screen by its measured size: the 170 by 142 this used to
+    // assume is the mouse-sized menu, and in touch mode, where its rows
+    // are finger-sized, it ran 48 pixels off the right edge of a phone.
+    var mr = m.getBoundingClientRect();
+    var mw = Math.max(170, Math.ceil(mr.width) + 6);
+    var mh = Math.max(142, Math.ceil(mr.height) + 6);
+    m.style.left = Math.max(0, Math.min(x, window.innerWidth - mw)) + "px";
+    m.style.top = Math.max(0, Math.min(y, window.innerHeight - mh)) + "px";
   }
   function hideCellMenu() {
     el("ps-cellmenu").style.display = "none";
@@ -24117,6 +24541,7 @@
     if (!ct || !host) return;
     var bar = host.querySelector('[data-role="chart-toolbar"]');
     if (bar && !bar.contains(ct)) bar.appendChild(ct);
+    try { phoneDockMore(bar); } catch (eMore) {}
     syncToolbarTight();
   }
   // Narrow bars COMPRESS the labels back to icons (Torry, Aug 6 2026):
@@ -26919,7 +27344,7 @@
   }
   function layFocusSelectionInspector() {
     if (!laySelectedIds().length) return;
-    if (window.innerWidth <= 760) narrowSet("inspector");
+    if (narrowFrame()) narrowSet("inspector");
     window.setTimeout(function () {
       var input = el("ps-ctx-lx");
       try { input.focus(); input.select(); } catch (ignore) {}
@@ -28834,6 +29259,26 @@
     var doc = chartById(PROJECT.activeChart);
     return doc && isLayoutTab(doc) === (mode === "layout") ? doc : null;
   }
+  // A workspace no longer opens wherever the last one was left (Nov 2026).
+  // The scrolling pane is one element shared by all four: on a phone,
+  // where Charts scrolls to show a part's editor, Layouts then opened with
+  // its tab row and its Properties button above the top of the screen.
+  // Each workspace now opens at its own last place when the page is
+  // already that tall (Data and the Notebook usually are), and at its top
+  // otherwise (a chart is drawn after this runs, so Charts comes back at
+  // its top). Called from syncAppShell, the one place every route into a
+  // workspace passes (the switcher, a new layout, a document tab, a link).
+  var WORKSPACE_SCROLL = {}, WORKSPACE_SCROLL_AT = "";
+  function workspaceScrollSync(ws) {
+    var pane = el("ps-main-workspace");
+    if (!pane || !ws) return;
+    if (WORKSPACE_SCROLL_AT && WORKSPACE_SCROLL_AT !== ws) {
+      WORKSPACE_SCROLL[WORKSPACE_SCROLL_AT] = pane.scrollTop;
+      var want = WORKSPACE_SCROLL[ws] || 0;
+      if (pane.scrollTop !== want) pane.scrollTop = want;
+    }
+    WORKSPACE_SCROLL_AT = ws;
+  }
   function setAppWorkspace(mode) {
     if (["data", "chart", "pinboard", "layout"].indexOf(mode) === -1) return;
     hideTip();   // the whole surface changes; no tip may ride across
@@ -30625,6 +31070,7 @@
   }
   function syncAppShell() {
     var ws = appWorkspace(), c = workspaceDocument(ws), t = PROJECT.table;
+    workspaceScrollSync(ws);
     // The coach mark teaches "click the chart"; when the chart leaves the
     // screen, the note goes with it (it lingered over the Layouts toolbar,
     // intercepting clicks at a spot whose chart was parked offscreen).
@@ -30750,6 +31196,7 @@
     syncProjectNavigator();
     updateDocumentState();
     syncChartCheck();
+    try { syncPhoneFrame(); } catch (ePhone) {}
   }
 
   // Punch list 37: real instrumentation for the chart workspace, read from the
@@ -30958,6 +31405,13 @@
       else if (Array.isArray(p.xyPoints)) { cells = 0; n = p.xyPoints.length; }
       var bits = [];
       var repeated = c.module === "rmplotbuilder";
+      // Values excluded in Data ride the payload as hidden points, so the
+      // chart can show where they were. They are not cases the chart uses:
+      // the status bar said 34 cases over a chart whose bars and tests ran
+      // on 33 (a first-use walkthrough, Nov 2026). Repeated Measures already
+      // leaves them out in repeatedCaseCounts.
+      var excludedPts = Array.isArray(p.hiddenPoints) ? p.hiddenPoints.length : 0;
+      if (excludedPts && cells && !repeated) n = Math.max(0, n - excludedPts);
       var measures = repeated ? (rolesFor(c.module).measures || []) : [];
       var rmCounts = repeated ? repeatedCaseCounts(p, measures) : null;
       if (rmCounts)
@@ -31012,6 +31466,8 @@
             (rmCounts.complete === 1 ? "" : "s"));
       }
       if (p.missingNote) bits.push(p.missingNote);
+      if (excludedPts)
+        bits.push(excludedPts + (excludedPts === 1 ? " value excluded" : " values excluded"));
       return bits.length ? bits.join(" \u00b7 ") : "Ready";
     } catch (e) { return "Ready"; }
   }
@@ -32552,6 +33008,7 @@
   }
   var WELCOME_LAST_FOCUS = null;
   function showWelcome(force) {
+    try { phoneStartSync(); } catch (ePs) {}
     if (BIG_BOOT && !force) return;      // shown once the large project is in
     // Recovery must never be silent, even if this tab previously dismissed
     // the start center or the preference normally resumes immediately.
@@ -32624,6 +33081,9 @@
     });
     el("ps-welcome-find").addEventListener("click", function () {
       hideWelcome();
+      // On the phone start centre this card is the search half; pasting
+      // a link has a card of its own.
+      if (PHONE_START && FIND_SOURCE === "link") FIND_SOURCE = "rdatasets";
       openFindData();
     });
     // Punch list 20: three cards, one handler. The first still carries
@@ -32689,10 +33149,19 @@
   // load anything on its own, and the fetched file rides the ordinary
   // import path (formats, size gate, the replaced-project offer).
   function linkRequestFromLocation() {
+    // A page with no address at all (the headless DOM smoke) has no link.
+    try {
+      return linkRequestFromParts(window.location.search, window.location.hash, window.location.href);
+    } catch (e) { return null; }
+  }
+  // The same reading for a link that was PASTED (the phone start centre's
+  // Open a shared link): a link to the app carries what to open in the
+  // same words the address bar would.
+  function linkRequestFromParts(search, hash, base) {
     var params, hashParams;
     try {
-      params = new URLSearchParams(window.location.search || "");
-      hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#/, ""));
+      params = new URLSearchParams(search || "");
+      hashParams = new URLSearchParams(String(hash || "").replace(/^#/, ""));
     } catch (e) { return null; }
     // Share a link: #pand=<packed project> carries the whole project after
     // the #, and #key=<key> unlocks a locked ?project= file.
@@ -32714,7 +33183,7 @@
       var raw = params.get(kinds[i]);
       if (!raw) continue;
       var u = null;
-      try { u = new URL(raw, window.location.href); } catch (e2) { u = null; }
+      try { u = new URL(raw, base); } catch (e2) { u = null; }
       if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
       var req = { kind: kinds[i], url: u.href };
       if (kinds[i] === "project" && hashParams.get("key")) req.key = hashParams.get("key");
@@ -32968,6 +33437,27 @@
     try { u = new URL(raw); } catch (e) { u = null; }
     if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) {
       findStatus("Enter a full link that starts with https://", true);
+      return;
+    }
+    // A link to the app itself (Share a link, a course page's link) is
+    // not a file: it says what to open. It goes to the same card a tapped
+    // link gets, which names the host before anything is fetched. Only a
+    // link that plainly is one: a project carried after the #, a chart
+    // setup, a ?project= or ?data= that is itself a full link, or an
+    // example on this app's own address. A data file whose address
+    // happens to have a "data" in it is still a data file.
+    var appReq = null;
+    try {
+      var q = new URLSearchParams(u.search || "");
+      var full = function (v) { return /^https?:\/\//i.test(String(v || "")); };
+      var own = u.host === window.location.host || /(^|\.)pandionplots\.com$/i.test(u.host);
+      if (/[#&](pand|setup)=/.test(u.hash) || q.get("config") || full(q.get("project")) ||
+          full(q.get("data")) || (own && q.get("example")))
+        appReq = linkRequestFromParts(u.search, u.hash, u.href);
+    } catch (eApp) { appReq = null; }
+    if (appReq) {
+      closeShellDialog("ps-finddata-dialog");
+      offerOpenLink(appReq);
       return;
     }
     var kind = /\.(pand|pnd|pandion|json)$/i.test(u.pathname) ? "project" : "data";
@@ -33448,6 +33938,13 @@
   }
   function shareDownloadText(name, text) {
     var blob = new Blob([text], { type: "text/plain" });
+    if (installedNoDownloads()) {
+      handOverFile(blob, name, "text/plain").then(function () {}, function (e) {
+        if (e && e.name === "AbortError") return;
+        showToast(String((e && e.message) || "Could not save the file."), true);
+      });
+      return;
+    }
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -34554,6 +35051,15 @@
   function saveSetupDownload(name, text) {
     try {
       var blob = new Blob([text], { type: "application/json" });
+      if (installedNoDownloads()) {
+        handOverFile(blob, name, "application/json").then(function () {
+          showToast("Chart setup shared as " + name);
+        }, function (e) {
+          if (e && e.name === "AbortError") return;
+          showToast(String((e && e.message) || "Could not save the chart setup"), true);
+        });
+        return;
+      }
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -34945,6 +35451,8 @@
     if (item.command === "duplicate-document" &&
         appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
         laySelectedIds().length) return "";
+    // A touch screen has no keys to press (keyHintsOn).
+    if (!keyHintsOn()) return "";
     return item.shortcut || "";
   }
   // ---- punch list t3-55: the shortcuts sheet ----
@@ -35528,6 +36036,18 @@
       el("ps-update-close").addEventListener("click", function () {
         closeShellDialog("ps-update-dialog");
       });
+    if (el("ps-handover-dialog")) {
+      el("ps-handover-go").addEventListener("click", handOverGo);
+      el("ps-handover-close").addEventListener("click", handOverClose);
+      // The backdrop and Escape close every dialog (the loop below); for
+      // this one a close is also a cancelled save.
+      el("ps-handover-dialog").addEventListener("pointerdown", function (e) {
+        if (e.target === this) handOverClose();
+      });
+      el("ps-handover-dialog").addEventListener("keydown", function (e) {
+        if (e.key === "Escape") handOverClose();
+      });
+    }
     if (el("ps-update-open"))
       el("ps-update-open").addEventListener("click", function () {
         var target = psUpdatePageUrl(psUpdateState());
@@ -36957,7 +37477,7 @@
         // rather than to the document-level one of the same name. Without
         // rendering it the property was dead data and the key was advertised
         // in no menu at all at the moment the Edit menu withdrew it.
-        if (item.shortcut)
+        if (item.shortcut && keyHintsOn())
           b.appendChild(mkEl("span", "ps-menu-shortcut", item.shortcut));
         b.type = "button";
         // item.action: a direct callback for dynamic targets (the group
@@ -36995,7 +37515,11 @@
     }
     menu.style.display = "block";
     menu.style.left = Math.min(x, window.innerWidth - 200) + "px";
-    menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 8) + "px";
+    // Never above the top edge. On a phone held sideways a long menu is
+    // taller than the window (the stylesheet caps it and lets it scroll),
+    // and the subtraction went negative: the first rows opened off screen.
+    menu.style.top = Math.max(6, Math.min(y, window.innerHeight - menu.offsetHeight - 8)) + "px";
+    menu.scrollTop = 0;
     var first = menu.querySelector("button:not([disabled])");
     if (first) first.focus();
   }
@@ -37269,6 +37793,7 @@
     add(document.querySelector(".ps-bypass"));
     add(document.querySelector(".ps-commandbar"));
     add(document.querySelector(".ps-statusbar"));
+    add(document.getElementById("ps-phone-nav"));
     if (which === "menu") {
       add(document.querySelector(".ps-app-body"));
       var appbar = document.querySelector(".ps-appbar");
@@ -37349,6 +37874,14 @@
       if (priorOpen && !skipFocus) shellRestoreFocus(NARROW_LAST_FOCUS);
       NARROW_LAST_FOCUS = null;
     }
+    if (PHONE) {
+      try { syncPhoneFrame(); } catch (ePh) {}
+      // The sheet takes the lower half: the chart is fitted into what is
+      // left above it, and back again when the sheet goes.
+      if (which === "inspector" || priorOpen === "inspector") {
+        try { applyViewZoom(); } catch (eZ) {}
+      }
+    }
   }
   function narrowToggle(which) {
     narrowSet(NARROW_OPEN === which ? null : which);
@@ -37357,6 +37890,1274 @@
   // drawer; leaving it over their chart would be the drawer's own fault.
   function narrowCloseAfterNavigation() {
     if (NARROW_OPEN === "nav" || NARROW_OPEN === "menu") narrowSet(null, true);
+  }
+  // ===================================================================== touch
+  // Phones and tablets (mobile step 1, Nov 2026). Two separate things live
+  // here, on purpose:
+  //
+  //   TOUCH MODE is a layout density, on when the PRIMARY pointer is a
+  //   finger ((pointer: coarse)): body.ps-touch, read by the stylesheet for
+  //   bigger controls and by the text floor below.
+  //
+  //   TOUCH GESTURES are judged per event, by pointerType, on any device,
+  //   so a touchscreen laptop with a mouse gets them for its finger and
+  //   keeps its mouse exactly as it was.
+  //
+  // What a finger did before this (measured by mobile-check): every drag on
+  // the chart died after about three moves, because the browser took the
+  // touch for a page scroll and cancelled it; the parts that had moved
+  // stayed moved; the engine read the cancel as a click, so swiping the
+  // page past a bar opened that bar's editor; and a tap that wobbled more
+  // than five pixels counted as a drag and did nothing. The rule now, on
+  // the chart surface:
+  //
+  //   a tap edits, wobble included;
+  //   a drag that starts on a part that can move, moves it, at once (see
+  //   GRAB below; the first version of this rule made every drag wait for
+  //   a hold, and on a real phone the wait read as lag);
+  //   a swipe anywhere else scrolls the page and touches nothing;
+  //   touch and hold, then drag, starts a drag from any spot, any way;
+  //   touch and hold still opens the part's menu (iOS never sends the
+  //   browser's own menu event, so right-click menus were out of reach).
+  //
+  // Mechanics. A press is ARMED when its moves may reach the engine: at
+  // once on a part that moves any way, once the finger has picked the
+  // part's own line on a part that moves along one, and after
+  // TOUCH_HOLD_MS held still anywhere else. Until then its pointermoves are
+  // withheld from everything below window, so an unarmed press can never
+  // move a part or trip a drag threshold. Once armed, the host's
+  // non-passive touchmove listener refuses the browser's pan and the
+  // moves flow; the engine's own drag systems do the rest unchanged. The
+  // engine reads two globals this block writes (its only part in this, and
+  // only when the payload carries touchHost): __gb2_touchCancelAt, so a
+  // cancelled press is not a click, and __gb2_touchPressConsumed, so the
+  // finger lifting off an open menu does not select what is under it.
+  var TOUCH_MODE = false;
+  var TOUCH_HOLD_MS = 250, TOUCH_MENU_MS = 650, TOUCH_SLOP = 10;
+  var TP = null;                        // the one tracked touch press
+  var TOUCH_SWALLOW_CLICK_UNTIL = 0;
+  function touchPrimary() {
+    try {
+      return !!(window.matchMedia &&
+        window.matchMedia("(pointer: coarse)").matches);
+    } catch (e) { return false; }
+  }
+  function touchModeOn() { return TOUCH_MODE; }
+  // Key hints beside menu rows ("Cmd/Ctrl+S"). A phone has no keys to press,
+  // so in touch mode a row says only what it does. A tablet may have a
+  // keyboard, and nothing reports one, so a keyboard is believed when it
+  // shows itself: a modifier, Escape, an arrow or a function key, none of
+  // which an on-screen keyboard sends. Tab is NOT in that list: an iPad's
+  // on-screen keyboard has a Tab key and it sends a trusted keydown
+  // (measured in the simulator, where it also moves the cell editor on).
+  // From then on the hints are back for the rest of the visit. The
+  // Keyboard shortcuts sheet lists every key either way.
+  var KEYS_SEEN = false;
+  function keyHintsOn() { return !TOUCH_MODE || KEYS_SEEN; }
+  function wireKeysSeen() {
+    window.addEventListener("keydown", function (e) {
+      if (KEYS_SEEN || !e || e.isTrusted === false) return;
+      var k = String(e.key || "");
+      if (e.metaKey || e.ctrlKey || e.altKey || k === "Escape" ||
+          k.indexOf("Arrow") === 0 || /^F\d{1,2}$/.test(k))
+        KEYS_SEEN = true;
+    }, true);
+  }
+  // How wide a value readout may be. The engine draws a readout as one
+  // unbroken line per fact, sized for a mouse on a wide chart, and on a
+  // phone a long category or item name ran it past the right edge of the
+  // screen. The stylesheet lets it wrap in touch mode; this hands it the
+  // screen's width in the chart's OWN units, because the readout lives
+  // inside the zoomed chart and a length written there paints at the zoom
+  // times its value. Kept on the body, not the host: the host's style is
+  // watched for zoom changes and a write there would call this again.
+  function touchTipRoom() {
+    var host = hostEl();
+    var want = "";
+    if (TOUCH_MODE && host) {
+      var z = parseFloat(host.style.zoom) || 1;
+      var pane = document.querySelector(".ps-main-workspace");
+      var vis = Math.min(window.innerWidth || 0,
+        pane && pane.clientWidth > 0 ? pane.clientWidth : Infinity);
+      if (vis > 60 && isFinite(vis)) want = Math.floor((vis - 16) / z) + "px";
+    }
+    var bs = document.body.style;
+    if (bs.getPropertyValue("--ps-tip-max") === want) return;
+    if (want) bs.setProperty("--ps-tip-max", want);
+    else bs.removeProperty("--ps-tip-max");
+  }
+  // The editing panel's title bar is one row drawn for a 700px panel: what
+  // is being edited, the Applies to switch, the eye. In a narrow panel the
+  // switch took the room and the title was cut to "BAR C..." or to one
+  // letter. The stylesheet wraps the bar for a panel marked data-ps-narrow,
+  // and this marks it by the PANEL's own width, not the screen's: a tablet
+  // held upright has a chart column as narrow as a phone's, and the panel
+  // is as wide as the chart above it. The engine builds a new panel with
+  // every render, so each one found is watched for its own size.
+  var PANEL_RO = null, PANEL_RAF = 0, PANEL_WATCHED = [];
+  var PANEL_NARROW_PX = 560;
+  // The engine's color strips end "or use the HSV picker on the right."
+  // In a narrow panel the picker is stacked BELOW the strip (measured on a
+  // phone: the hint at 565, the picker from 705, full width), so the hint
+  // pointed at nothing. The words follow where the picker really is.
+  function touchPickerWords(p) {
+    var pk = p.querySelector('[data-role="color-picker"]');
+    var els = p.querySelectorAll("span, div, p");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.children.length) continue;
+      if (e.__psPick == null) {
+        if (!/HSV picker on the right/.test(e.textContent)) continue;
+        e.__psPick = e.textContent;
+      }
+      var want = e.__psPick;
+      if (TOUCH_MODE && pk && e.offsetParent !== null && pk.offsetParent !== null) {
+        var hr = e.getBoundingClientRect(), kr = pk.getBoundingClientRect();
+        if (kr.left < hr.right - 8 && kr.top >= hr.bottom - 4)
+          want = e.__psPick.replace("on the right", "below");
+      }
+      if (e.textContent !== want) e.textContent = want;
+    }
+  }
+  function touchPanelMark(p) {
+    try { touchPickerWords(p); } catch (ePk) {}
+    var w = 0;
+    try { w = p.getBoundingClientRect().width; } catch (eW) {}
+    var narrow = TOUCH_MODE && w > 0 && w < PANEL_NARROW_PX;
+    if (narrow === p.hasAttribute("data-ps-narrow")) return;
+    if (narrow) p.setAttribute("data-ps-narrow", "");
+    else p.removeAttribute("data-ps-narrow");
+  }
+  function touchPanelWatch() {
+    PANEL_RAF = 0;
+    if (!window.ResizeObserver) return;
+    if (!PANEL_RO) PANEL_RO = new window.ResizeObserver(function (entries) {
+      for (var i = 0; i < entries.length; i++) touchPanelMark(entries[i].target);
+    });
+    // A panel the engine has since replaced is let go, or every redraw
+    // would leave one more held here for the rest of the visit.
+    var kept = [];
+    for (var k = 0; k < PANEL_WATCHED.length; k++) {
+      if (PANEL_WATCHED[k].isConnected) kept.push(PANEL_WATCHED[k]);
+      else { try { PANEL_RO.unobserve(PANEL_WATCHED[k]); } catch (eU) {} }
+    }
+    PANEL_WATCHED = kept;
+    var ps = document.querySelectorAll(".gb2-panel");
+    for (var j = 0; j < ps.length; j++) {
+      if (PANEL_WATCHED.indexOf(ps[j]) < 0) {
+        PANEL_WATCHED.push(ps[j]);
+        PANEL_RO.observe(ps[j]);
+      }
+      touchPanelMark(ps[j]);
+    }
+  }
+  function touchPanelSoon() {
+    if (PANEL_RAF) return;
+    PANEL_RAF = window.requestAnimationFrame(touchPanelWatch);
+  }
+  function touchModeSync() {
+    var on = touchPrimary();
+    var had = document.body.classList.contains("ps-touch");
+    TOUCH_MODE = on;
+    if (had === on) return false;
+    document.body.classList.toggle("ps-touch", on);
+    try { touchGridWords(); } catch (eW) {}
+    try { touchStaticWords(); } catch (eSw) {}
+    try { phoneStartSync(); } catch (ePs) {}
+    try { touchTipRoom(); } catch (eTr) {}
+    try { touchPanelSoon(); } catch (eTp) {}
+    // The dock rule takes a taller panel in touch mode (dockAutoBeside).
+    try { dockResizeCheck(); } catch (eDk) {}
+    return true;
+  }
+  // The chart SURFACE: the drawing and the engine's handles laid over it.
+  // Its toolbar, panel, menus and form fields are ordinary controls and
+  // keep their immediate response (a slider must not wait for a hold).
+  function touchChartSurface(t) {
+    if (!t || !t.closest) return false;
+    if (!t.closest(".graphbuilder2-host")) return false;
+    if (t.closest('.gb2-panel, [data-role="chart-toolbar"], ' +
+        '[data-role="graphtype-flyout"], [data-role="palette-flyout"], ' +
+        '[data-role="add-ann-menu"], [data-role="setting-search"], ' +
+        '[data-role="inline-text-editor"], [data-role="color-picker"], ' +
+        // Drawing a shape IS a drag from the first pixel (touch-action
+        // none on the sheet, in the stylesheet).
+        '[data-role="draw-capture"], ' +
+        "input, textarea, select, button, a[href]")) return false;
+    return true;
+  }
+  // The layout page is the same kind of surface: before this a finger could
+  // not move a layout item at all (the browser cancelled the drag about
+  // thirteen pixels in, and the item stayed nudged). Same rule there: a
+  // swipe scrolls the page view, a hold then a drag moves the item, drags
+  // a handle, or draws the selection box. Text being edited is left alone.
+  function touchLayoutSurface(t) {
+    if (!t || !t.closest || !t.closest("#ps-lcanvas")) return false;
+    if (t.closest("input, textarea, select, button, [contenteditable]"))
+      return false;
+    return true;
+  }
+  // GRAB (Nov 2026). Which parts a finger moves at once, and which way,
+  // is written in one place, the stylesheet, as touch-action: it has to be
+  // in force before the finger lands, and it is the one thing Safari and
+  // Chromium both honor on SVG parts. (Measured in the iPhone simulator:
+  // once a script refuses one touchmove, Safari never scrolls that gesture,
+  // so a script cannot wait ten pixels to see which way the finger went.)
+  // This reads the same values back, from the pressed element up to the
+  // surface, so the script and the browser cannot disagree:
+  //   "any"  the browser pans neither way here: the part moves freely;
+  //   "x"    it pans up and down only: the part moves sideways (bars on
+  //          an upright chart), and an up or down swipe still scrolls;
+  //   "y"    the mirror (bars on a chart lying down);
+  //   ""     an ordinary spot: a swipe scrolls, a hold then a drag moves.
+  function touchGrabAxis(t, root) {
+    var panX = true, panY = true, n = t, hops = 0;
+    while (n && n.nodeType === 1 && hops++ < 48) {
+      var ta = "";
+      try { ta = String(getComputedStyle(n).touchAction || ""); } catch (e) {}
+      if (ta && ta !== "auto" && ta !== "manipulation") {
+        ta = " " + ta + " ";
+        if (ta.indexOf(" pan-x ") < 0) panX = false;
+        if (ta.indexOf(" pan-y ") < 0) panY = false;
+      }
+      if (n === root) break;
+      n = n.parentNode;
+    }
+    if (!panX && !panY) return "any";
+    if (!panX) return "x";
+    if (!panY) return "y";
+    return "";
+  }
+  // Which way this chart's bars reorder, read off the drawing, because the
+  // engine settles orientation itself, per chart type (a raincloud lies
+  // down unasked): the category ticks say which axis the categories are
+  // on, and the category labels say it when the ticks are hidden. The
+  // segments of a stacked bar also restack along the value axis, so those
+  // move both ways. The stylesheet turns the answer into touch-action.
+  var TOUCH_BAR_AXIS_RAF = 0;
+  function touchBarAxis() {
+    var host = hostEl();
+    var svg = host && host.querySelector('svg[data-role="gb2-chart-svg"]');
+    if (!svg || !svg.querySelector("[data-bar-cat]")) return "";
+    var axis = "x", i;
+    if (svg.querySelector('line[data-role="y-tick"][data-bar-cat]')) axis = "y";
+    else if (!svg.querySelector('line[data-role="x-tick"][data-bar-cat]')) {
+      var labs = svg.querySelectorAll("text[data-bar-cat]"), a = null, b = null;
+      for (i = 0; i < labs.length && !b; i++) {
+        var r = labs[i].getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        if (!a) a = { cat: labs[i].getAttribute("data-bar-cat"), r: r };
+        else if (labs[i].getAttribute("data-bar-cat") !== a.cat) b = { r: r };
+      }
+      if (a && b && Math.abs((a.r.top + a.r.bottom) - (b.r.top + b.r.bottom)) >
+          Math.abs((a.r.left + a.r.right) - (b.r.left + b.r.right))) axis = "y";
+    }
+    var bars = svg.querySelectorAll("path[data-bar-cat][data-bar-group]"), p0 = null;
+    for (i = 0; i < bars.length; i++) {
+      var rb = bars[i].getBoundingClientRect();
+      if (!rb.width || !rb.height) continue;
+      var c = bars[i].getAttribute("data-bar-cat");
+      var g = bars[i].getAttribute("data-bar-group");
+      if (!p0) { p0 = { c: c, g: g, r: rb }; continue; }
+      if (c !== p0.c) break;            // the first category tells it
+      if (g === p0.g) continue;
+      // Two groups of one category: side by side they are dodged, on the
+      // same stretch of the category axis they are stacked.
+      var lo = axis === "x" ? Math.max(p0.r.left, rb.left) : Math.max(p0.r.top, rb.top);
+      var hi = axis === "x" ? Math.min(p0.r.right, rb.right) : Math.min(p0.r.bottom, rb.bottom);
+      var span = axis === "x" ? Math.min(p0.r.width, rb.width) : Math.min(p0.r.height, rb.height);
+      if (span > 0 && hi - lo > span * 0.5) return "any";
+      break;
+    }
+    return axis;
+  }
+  function touchBarAxisSync() {
+    TOUCH_BAR_AXIS_RAF = 0;
+    var host = hostEl(), v = "";
+    if (!host) return;
+    try { v = touchBarAxis(); } catch (e) {}
+    if ((host.getAttribute("data-ps-bar-drag") || "") === v) return;
+    if (v) host.setAttribute("data-ps-bar-drag", v);
+    else host.removeAttribute("data-ps-bar-drag");
+  }
+  // The empty title strips (chart title, a cleared axis or legend title)
+  // carry a hint that waited for a hovering mouse and said Click. On a touch
+  // screen the stylesheet shows the hint at rest; this gives it the word.
+  // Engine text, rewritten after each redraw like the bar axis above, and
+  // put back when touch mode leaves.
+  function touchZoneWords() {
+    var host = hostEl();
+    if (!host) return;
+    var on = touchModeOn();
+    var hints = host.querySelectorAll('div[aria-hidden="true"] > div');
+    for (var i = 0; i < hints.length; i++) {
+      var h = hints[i], z = h.parentNode;
+      if (!z || !z.style || z.style.cursor !== "text") continue;
+      var txt = h.textContent || "";
+      if (on && txt.indexOf("Click to add ") === 0)
+        h.textContent = "Tap to add " + txt.slice(13);
+      else if (!on && txt.indexOf("Tap to add ") === 0)
+        h.textContent = "Click to add " + txt.slice(11);
+    }
+  }
+  // The grid's spoken instructions name keys; in touch mode they lead with
+  // what a finger does. The key sentences stay for a phone with a keyboard.
+  function touchGridWords() {
+    var p = document.getElementById("ps-grid-instructions");
+    if (!p) return;
+    if (!p.hasAttribute("data-ps-keys"))
+      p.setAttribute("data-ps-keys", p.textContent.replace(/\s+/g, " ").trim());
+    var keys = p.getAttribute("data-ps-keys");
+    var want = touchModeOn()
+      ? "Double tap a cell to edit it, or touch and hold it and choose " +
+        "Edit value. " + keys
+      : keys;
+    if (p.textContent !== want) p.textContent = want;
+  }
+  function touchBarAxisSoon() {
+    if (TOUCH_BAR_AXIS_RAF) return;
+    try {
+      TOUCH_BAR_AXIS_RAF = requestAnimationFrame(function () {
+        touchBarAxisSync();
+        try { touchZoneWords(); } catch (eZ) {}
+      });
+    }
+    catch (e) { TOUCH_BAR_AXIS_RAF = 0; }
+  }
+  function touchCue(on, x, y) {
+    var c = document.getElementById("ps-touch-cue");
+    if (!on) { if (c) c.hidden = true; return; }
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "ps-touch-cue";
+      c.setAttribute("aria-hidden", "true");
+      document.body.appendChild(c);
+    }
+    c.style.left = x + "px"; c.style.top = y + "px";
+    c.hidden = false;
+    // Restart the arrive animation for this press.
+    c.classList.remove("ps-touch-cue-in");
+    void c.offsetWidth;
+    c.classList.add("ps-touch-cue-in");
+  }
+  function touchClearTimers(tp) {
+    if (!tp) return;
+    if (tp.holdTimer) { clearTimeout(tp.holdTimer); tp.holdTimer = 0; }
+    if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
+  }
+  function touchPressDrop() {
+    touchClearTimers(TP);
+    touchCue(false);
+    TP = null;
+  }
+  // Touch and hold on an ordinary control asks what it does. A finger has
+  // no hover, so on a touch screen no control could say: the shell's own
+  // tips are off for touch (a tip raised by a tap never leaves), and the
+  // browser never shows the engine's title attributes there. What is shown
+  // is the control's own words: the shell's data-tip, the engine's title,
+  // or the accessible name where that says more than the visible label
+  // (an eye, a trash can, an arrow). The walk stops at the first control
+  // with nothing more to say, so a labelled button stays silent.
+  var TOUCH_TIP_CONTROLS = "button, a[href], summary, label, [role=button], " +
+    "[role=tab], [role=menuitem], [role=switch], [role=checkbox], [role=radio]";
+  function touchTipText(t) {
+    var n = t, hops = 0;
+    while (n && n.nodeType === 1 && n !== document.body && hops++ < 6) {
+      var tip = n.getAttribute("data-tip") || n.getAttribute("title") || "";
+      if (!tip && n.matches && n.matches(TOUCH_TIP_CONTROLS)) {
+        var name = String(n.getAttribute("aria-label") || "")
+          .replace(/\s+/g, " ").trim();
+        var seen = String(n.innerText || n.textContent || "")
+          .replace(/\s+/g, " ").trim();
+        if (!name || name.toLowerCase() === seen.toLowerCase()) return null;
+        tip = name;
+      }
+      tip = String(tip).replace(/\s+/g, " ").trim();
+      if (tip) return { node: n, text: tip };
+      n = n.parentNode;
+    }
+    return null;
+  }
+  // A tip or a hint written for a mouse, said for a finger. The same four
+  // swaps the tours make (touchWords in ps-tours.js); nothing else in a
+  // sentence changes.
+  function touchSay(text) {
+    if (!text || !TOUCH_MODE) return text;
+    return String(text)
+      .replace(/\bRight-click\b/g, "Touch and hold").replace(/\bright-click\b/g, "touch and hold")
+      .replace(/\bDouble-click\b/g, "Double-tap").replace(/\bdouble-click\b/g, "double-tap")
+      .replace(/\bClicking\b/g, "Tapping").replace(/\bclicking\b/g, "tapping")
+      .replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap");
+  }
+  // Static hints in the page that name the mouse are marked
+  // data-ps-touchwords; their own words are kept on the element and put
+  // back when touch mode goes off. Only marked elements are touched, so
+  // nothing a person typed can ever be reworded.
+  function touchStaticWords() {
+    var els = document.querySelectorAll("[data-ps-touchwords]");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.__psWords == null) e.__psWords = e.textContent;
+      var want = touchSay(e.__psWords);
+      if (e.textContent !== want) e.textContent = want;
+    }
+  }
+  function touchTipFire(tp, t) {
+    var hit = null;
+    try { hit = touchTipText(t); } catch (e) {}
+    if (!hit) return;
+    showTipFor(hit.node, touchSay(hit.text));
+    if (TIP_FOR !== hit.node) return;      // nothing was shown
+    TIP_HELD = true;
+    // The lift is the end of a question, not a press of the control.
+    tp.consumed = true; tp.tip = true;
+    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e3) {}
+  }
+  function touchTipLinger() {
+    if (!TIP_HELD) return;
+    if (TIP_HELD_TIMER) window.clearTimeout(TIP_HELD_TIMER);
+    TIP_HELD_TIMER = window.setTimeout(function () {
+      TIP_HELD_TIMER = 0;
+      if (TIP_HELD) hideTip();
+    }, 2200);
+  }
+  // The app's own long-press: the same contextmenu event a right-click
+  // sends, at the same place, so every menu the app already has answers it.
+  function touchMenuFire(tp) {
+    if (TP !== tp || tp.dead || tp.early || tp.dragging) return;
+    var t = null;
+    try { t = document.elementFromPoint(tp.x, tp.y); } catch (e) {}
+    t = t || tp.target;
+    if (!t || !t.dispatchEvent) return;
+    // Form fields keep the system's own long-press (select, paste, look up).
+    if (t.closest && t.closest("input, textarea, select, [contenteditable]"))
+      return;
+    // Only where the app has a menu worth a held finger: the chart, a
+    // layout page, the data grid, a Notebook page, a document tab, the
+    // navigator. A slow, firm press on an ordinary button has to stay a
+    // press of that button; the catch-all menu a right-click gets there
+    // would swallow it.
+    if (!tp.chart && !(t.closest && t.closest("#ps-datagrid, #ps-datacard, " +
+        "#ps-lviewport, #ps-pinpane, .ps-tab, [data-chart-tab], " +
+        ".ps-project-panel"))) { touchTipFire(tp, t); return; }
+    var ev;
+    try {
+      ev = new MouseEvent("contextmenu", {
+        bubbles: true, cancelable: true, view: window, button: 2,
+        clientX: tp.x, clientY: tp.y, screenX: tp.x, screenY: tp.y });
+    } catch (e2) { return; }
+    var unhandled = t.dispatchEvent(ev);
+    if (unhandled) return;              // nothing here has a menu
+    touchPressConsumed(tp);
+  }
+  function touchPressConsumed(tp) {
+    tp.consumed = true; tp.menuOpen = true;
+    touchCue(false);
+    try { window.__gb2_touchPressConsumed = true; } catch (e) {}
+    try { if (navigator.vibrate) navigator.vibrate(8); } catch (e3) {}
+  }
+  // The text floor. In touch mode no interface text renders under
+  // TOUCH_TEXT_FLOOR pixels. A stylesheet cannot express "at least 13px"
+  // about sizes it did not set, and most of the engine's panel text is
+  // sized inline, so this reads what each text-bearing element really
+  // renders at (its computed size times any CSS zoom above it) and lifts
+  // only the ones below the floor. It runs from a MutationObserver, which
+  // fires before the next paint, so text never shows small and then jumps.
+  // Skipped on purpose: SVG (the chart's text is the figure, not the
+  // interface), the layout canvas and Notebook pages (content at the
+  // document's own scale), and the data grid (thousands of cells, sized
+  // by one stylesheet rule instead).
+  var TOUCH_TEXT_FLOOR = 13;
+  var TOUCH_FLOOR_SKIP = "svg, script, style, #ps-lcanvas, #ps-datagrid, " +
+    ".ps-pinpage-canvas, .ps-visually-hidden, #ps-touch-cue";
+  function touchFloorOne(p) {
+    if (!p || p.nodeType !== 1 || p.hasAttribute("data-ps-tf")) return;
+    var cs;
+    try { cs = window.getComputedStyle(p); } catch (e) { return; }
+    if (!cs) return;
+    var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
+      ? p.currentCSSZoom : 1;
+    var px = parseFloat(cs.fontSize) * z;
+    if (!(px > 0) || px >= TOUCH_TEXT_FLOOR - 0.25) return;
+    // Remember the inline size it had, so leaving touch mode restores it,
+    // and the zoom this was measured under, so a later zoom is noticed.
+    p.setAttribute("data-ps-tf", p.style.fontSize || "");
+    p.setAttribute("data-ps-tfz", String(z));
+    p.style.setProperty("font-size",
+      (Math.round(TOUCH_TEXT_FLOOR / z * 100) / 100) + "px", "important");
+  }
+  // A lifted size is right only at the zoom it was measured under, and the
+  // chart host's zoom moves: Fit follows the window, the chart's own size
+  // and a phone being turned. A size pinned under a 0.53 zoom stood at
+  // 24.6px once the zoom went back to 1, which drew the "This chart needs
+  // variables" card at nearly double size with its buttons off the screen
+  // (seen in the iPhone simulator, Nov 2026). So anything whose zoom has
+  // moved since its lift is put back as it was and measured again, and the
+  // host is swept for text the new zoom has pushed under the floor.
+  function touchFloorRecheck(root) {
+    if (!TOUCH_MODE) return;
+    var lifted = document.querySelectorAll("[data-ps-tf]");
+    for (var i = 0; i < lifted.length; i++) {
+      var p = lifted[i];
+      var z = (typeof p.currentCSSZoom === "number" && p.currentCSSZoom > 0)
+        ? p.currentCSSZoom : 1;
+      var at = parseFloat(p.getAttribute("data-ps-tfz")) || 1;
+      if (Math.abs(z - at) < 0.01) continue;
+      var orig = p.getAttribute("data-ps-tf");
+      p.style.removeProperty("font-size");
+      if (orig) p.style.fontSize = orig;
+      p.removeAttribute("data-ps-tf");
+      p.removeAttribute("data-ps-tfz");
+      touchFloorOne(p);
+    }
+    if (root) touchFloorSweep(root);
+  }
+  function touchFloorSweep(root) {
+    if (!root) return;
+    if (!TOUCH_MODE) {
+      // Back to a mouse: put every lifted size back as it was.
+      var lifted = document.querySelectorAll("[data-ps-tf]");
+      for (var i = 0; i < lifted.length; i++) {
+        var was = lifted[i].getAttribute("data-ps-tf");
+        lifted[i].style.removeProperty("font-size");
+        if (was) lifted[i].style.fontSize = was;
+        lifted[i].removeAttribute("data-ps-tf");
+        lifted[i].removeAttribute("data-ps-tfz");
+      }
+      return;
+    }
+    if (root.nodeType === 3) root = root.parentNode;
+    if (!root || root.nodeType !== 1) return;
+    if (root.closest && root.closest(TOUCH_FLOOR_SKIP)) return;
+    var walker;
+    try {
+      walker = document.createTreeWalker(root, 5 /* elements + text */, {
+        acceptNode: function (n) {
+          if (n.nodeType === 1)
+            return (n.matches && n.matches(TOUCH_FLOOR_SKIP)) ? 2 : 3;
+          return (n.nodeValue && /\S/.test(n.nodeValue)) ? 1 : 2;
+        }
+      });
+    } catch (eW) { return; }
+    var seen = [];
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+      var par = n.parentNode;
+      if (par && seen.indexOf(par) === -1) seen.push(par);
+    }
+    for (var k = 0; k < seen.length; k++) touchFloorOne(seen[k]);
+  }
+  function wireTouchFloor() {
+    if (!window.MutationObserver) return;
+    var obs = new MutationObserver(function (records) {
+      if (!TOUCH_MODE) return;
+      for (var i = 0; i < records.length; i++) {
+        var added = records[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var nd = added[j];
+          if (nd.nodeType === 1 || nd.nodeType === 3) touchFloorSweep(nd);
+        }
+      }
+      touchPanelSoon();
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    // The chart host's zoom is also written directly: every engine render
+    // clears and restores it, and leaving the Charts workspace clears it
+    // while the chrome's counter-zoom stays. So the floor follows the
+    // host's style itself, not only the one function that usually sets it.
+    try {
+      var zHostEl = hostEl();
+      if (zHostEl) {
+        var zPending = false;
+        new MutationObserver(function () {
+          if (!TOUCH_MODE || zPending) return;
+          zPending = true;
+          window.setTimeout(function () {
+            zPending = false;
+            try { touchFloorRecheck(hostEl()); } catch (eR) {}
+            try { touchTipRoom(); } catch (eTr) {}
+          }, 0);
+        }).observe(zHostEl, { attributes: true, attributeFilter: ["style"] });
+      }
+    } catch (eZh) {}
+    touchFloorSweep(document.body);
+  }
+  // ---- The phone start centre (Nov 11 2026, Torry from a mockup: "Build
+  // the phone start centre as drawn ... phones only, with Open a project
+  // file leading on a first visit"). The start centre leads with ways to
+  // build from nothing, and a phone is for viewing, sharing and editing.
+  // On a PHONE SCREEN the same cards are put in another order:
+  //   Continue        the autosaved project, filled (absent on a first visit)
+  //   Open            Open a project file, Open a shared link
+  //   Try an example  the three examples
+  //   Start from scratch   Blank data sheet, Paste data, Search open data
+  // The cards are the SAME buttons, moved, so each keeps its one handler
+  // and its id; the moves are real DOM moves, not a visual order, so a
+  // screen reader and the Tab key meet them in the order they are seen.
+  // One card is new, Open a shared link, which opens Open data from the
+  // web on its paste-a-link tab; the old fourth card keeps the search
+  // half. A phone is told by its SCREEN (the short side under 480), not by
+  // the phone frame: an upright tablet has the phone frame and room to
+  // build from scratch, so it keeps the start centre it had.
+  var PHONE_START = false, PHONE_START_KEEP = null;
+  function phoneScreen() {
+    try {
+      return TOUCH_MODE && !!window.matchMedia &&
+        window.matchMedia("(max-device-width: 480px), (max-device-height: 480px)").matches;
+    } catch (e) { return false; }
+  }
+  function phoneStartSync() {
+    var want = phoneScreen();
+    if (want === PHONE_START) return;
+    var body = document.querySelector(".ps-welcome-body");
+    var open = el("ps-welcome-open"), blank = el("ps-welcome-new"),
+        paste = el("ps-welcome-paste"), find = el("ps-welcome-find");
+    var recent = el("ps-recent-section"), examples = el("ps-examples-section");
+    if (!body || !open || !blank || !paste || !find || !recent || !examples) return;
+    var K = PHONE_START_KEEP;
+    if (!K) {
+      K = PHONE_START_KEEP = { start: open.parentNode.parentNode, acts: open.parentNode, wrap: recent.parentNode };
+      K.sec = document.createElement("section");
+      K.sec.className = "ps-welcome-section"; K.sec.id = "ps-scratch-section";
+      K.sec.innerHTML = "<h2>Start from scratch</h2><div class=\"ps-launch-actions\"></div>";
+      K.list = K.sec.lastChild;
+      K.link = document.createElement("button");
+      K.link.type = "button"; K.link.className = "ps-launch-action"; K.link.id = "ps-welcome-link";
+      K.link.innerHTML = "<span class=\"ps-launch-icon\"><svg class=\"ps-icn\" width=\"17\" height=\"17\" " +
+        "viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" " +
+        "stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71\"/>" +
+        "<path d=\"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71\"/></svg></span>" +
+        "<span class=\"ps-launch-copy\"><strong>Open a shared link</strong><span>Paste a link someone sent you</span></span>";
+      K.link.addEventListener("click", function () {
+        hideWelcome();
+        FIND_SOURCE = "link";
+        openFindData();
+      });
+    }
+    function say(node, sel, text) {
+      var n = node.querySelector(sel);
+      if (!n) return;
+      if (n.__psWas == null) n.__psWas = n.textContent;
+      n.textContent = text == null ? n.__psWas : text;
+    }
+    if (want) {
+      body.insertBefore(recent, K.start);
+      K.acts.insertBefore(K.link, open.nextSibling);
+      body.insertBefore(examples, K.start.nextSibling);
+      K.list.appendChild(blank); K.list.appendChild(paste); K.list.appendChild(find);
+      body.insertBefore(K.sec, examples.nextSibling);
+    } else {
+      K.acts.appendChild(blank); K.acts.appendChild(paste); K.acts.appendChild(find);
+      if (K.link.parentNode) K.link.parentNode.removeChild(K.link);
+      if (K.sec.parentNode) K.sec.parentNode.removeChild(K.sec);
+      K.wrap.appendChild(recent); K.wrap.appendChild(examples);
+    }
+    say(K.start, "h2", want ? "Open" : null);
+    say(recent, "h2", want ? "Continue" : null);
+    say(examples, "h2", want ? "Try an example" : null);
+    say(open, "strong", want ? "Open a project file" : null);
+    say(find, "strong", want ? "Search open data" : null);
+    say(find, ".ps-launch-copy span", want ? "Search teaching datasets or Zenodo" : null);
+    // The wrapper the two sections came out of holds only a comment now;
+    // out of the grid, so it leaves no gap.
+    K.wrap.style.display = want ? "none" : "";
+    PHONE_START = want;
+    document.body.classList.toggle("ps-handheld", want);
+  }
+  function wireTouch() {
+    touchModeSync();
+    try { phoneStartSync(); } catch (ePs0) {}
+    wireTouchFloor();
+    wireKeysSeen();
+    try { touchTipRoom(); } catch (eTr0) {}
+    try { touchPanelSoon(); } catch (eTp0) {}
+    try {
+      var mq = window.matchMedia("(pointer: coarse)");
+      var onMq = function () {
+        if (!touchModeSync()) return;
+        try { phoneSync(); } catch (eP) {}
+        try { touchFloorSweep(document.body); } catch (e) {}
+        try { syncAppShell(); } catch (eS) {}
+        try { render(); } catch (e2) {}
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onMq);
+      else if (mq.addListener) mq.addListener(onMq);
+    } catch (eMq) {}
+
+    window.addEventListener("pointerdown", function (e) {
+      if (e.pointerType !== "touch") return;
+      if (e.isPrimary === false) {
+        // A second finger: this is a pinch, and nothing here is a press.
+        // Judged by isPrimary, not by "a press is already tracked": every
+        // touch gets a new pointer id, so a press whose lift was somehow
+        // never seen would have made every later press look like a pinch.
+        if (TP) { touchClearTimers(TP); touchCue(false); TP.dead = true; }
+        return;
+      }
+      try {
+        window.__gb2_touchPressConsumed = false;
+        window.__gb2_touchCancelAt = 0;
+      } catch (eG) {}
+      // A new press owns its own click: only the lift of the press that
+      // opened a menu (or swiped) is ever swallowed.
+      TOUCH_SWALLOW_CLICK_UNTIL = 0;
+      touchPressDrop();
+      var surf = touchChartSurface(e.target)
+        ? e.target.closest(".graphbuilder2-host")
+        : (touchLayoutSurface(e.target) ? el("ps-lcanvas") : null);
+      var grab = surf ? touchGrabAxis(e.target, surf) : "";
+      var tp = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, target: e.target,
+        chart: !!surf, grab: grab,
+        // A part that moves any way is ready the moment it is touched.
+        armed: grab === "any", early: false, dragging: false, dead: false,
+        consumed: false, menuOpen: false, holdTimer: 0, menuTimer: 0
+      };
+      TP = tp;
+      if (tp.chart && !tp.armed) tp.holdTimer = setTimeout(function () {
+        tp.holdTimer = 0;
+        if (TP !== tp || tp.dead || tp.early) return;
+        tp.armed = true;
+        touchCue(true, tp.x, tp.y);
+      }, TOUCH_HOLD_MS);
+      tp.menuTimer = setTimeout(function () {
+        tp.menuTimer = 0;
+        touchMenuFire(tp);
+      }, TOUCH_MENU_MS);
+    }, true);
+
+    window.addEventListener("pointermove", function (e) {
+      var tp = TP;
+      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId || tp.dead)
+        return;
+      var far = Math.abs(e.clientX - tp.x) > TOUCH_SLOP ||
+                Math.abs(e.clientY - tp.y) > TOUCH_SLOP;
+      if (!tp.chart) {
+        // Shell surfaces move on their own terms (a layout item drags at
+        // once); here a move only means this press is not a long-press.
+        if (far && !tp.early) { tp.early = true; touchClearTimers(tp); }
+        return;
+      }
+      if (!tp.armed) {
+        if (far && !tp.early) {
+          // A part that moves along one line: the first ten pixels say
+          // which the finger meant. Along the line it is a drag from here
+          // on; across it, a swipe, and the page scrolls (touch-action
+          // left that pan with the browser).
+          var ax = Math.abs(e.clientX - tp.x), ay = Math.abs(e.clientY - tp.y);
+          if ((tp.grab === "x" && ax >= ay) || (tp.grab === "y" && ay >= ax))
+            tp.armed = true;
+          else { tp.early = true; touchClearTimers(tp); }
+        }
+        if (!tp.armed) { e.stopImmediatePropagation(); return; }
+      }
+      if (!tp.dragging) {
+        if (!far) { e.stopImmediatePropagation(); return; }
+        // Moved while armed: a drag. A menu that opened while the finger
+        // rested gives way to it, the way a held home-screen icon does.
+        tp.dragging = true;
+        touchClearTimers(tp);
+        touchCue(false);
+        if (tp.menuOpen) {
+          tp.menuOpen = false; tp.consumed = false;
+          try { hideContextMenu(); } catch (eH) {}
+          try { window.__gb2_touchPressConsumed = false; } catch (eG2) {}
+        }
+      }
+    }, true);
+
+    // The browser's own long-press menu event (Android sends one): the
+    // app's menus answer it as they answer a right-click, so the timer
+    // above stands down and the lift is told not to select.
+    window.addEventListener("contextmenu", function (e) {
+      var tp = TP;
+      if (!e.isTrusted || !tp || tp.dead) return;
+      if (tp.menuTimer) { clearTimeout(tp.menuTimer); tp.menuTimer = 0; }
+      setTimeout(function () {
+        if (TP === tp && e.defaultPrevented && !tp.dragging)
+          touchPressConsumed(tp);
+      }, 0);
+    }, true);
+
+    window.addEventListener("pointerup", function (e) {
+      var tp = TP;
+      if (e.pointerType !== "touch" || !tp || tp.id !== e.pointerId) return;
+      if (!e.isTrusted) return;
+      touchPressDrop();
+      if (tp.dead) return;
+      if (tp.tip) touchTipLinger();
+      var swiped = tp.chart && tp.early && !tp.armed;
+      if (tp.consumed || swiped)
+        TOUCH_SWALLOW_CLICK_UNTIL = Date.now() + 450;
+      if (!swiped) return;
+      // A swipe the browser did not take for a scroll (nothing to scroll
+      // that way). The engine saw a press and no movement, and would read
+      // this lift as a click on the part the swipe STARTED on. Give it the
+      // cancel the browser would have sent.
+      e.stopImmediatePropagation();
+      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG3) {}
+      try {
+        var t = tp.target && tp.target.isConnected ? tp.target : document.body;
+        t.dispatchEvent(new PointerEvent("pointercancel", {
+          bubbles: true, cancelable: false, composed: true,
+          pointerId: tp.id, pointerType: "touch", isPrimary: true,
+          clientX: e.clientX, clientY: e.clientY }));
+      } catch (eS) {}
+    }, true);
+
+    window.addEventListener("pointercancel", function (e) {
+      if (e.pointerType !== "touch") return;
+      try { window.__gb2_touchCancelAt = Date.now(); } catch (eG4) {}
+      if (!e.isTrusted) return;
+      if (TP && TP.id === e.pointerId) touchPressDrop();
+    }, true);
+
+    window.addEventListener("click", function (e) {
+      if (!e.isTrusted || !TOUCH_SWALLOW_CLICK_UNTIL) return;
+      if (Date.now() > TOUCH_SWALLOW_CLICK_UNTIL) {
+        TOUCH_SWALLOW_CLICK_UNTIL = 0; return;
+      }
+      TOUCH_SWALLOW_CLICK_UNTIL = 0;
+      // The lift after a long-press menu, or after a swipe: not a click.
+      // No exception for the menu itself: on a short screen it opens
+      // right under the finger, and lifting would choose whichever item
+      // happened to be there. Choosing an item takes a fresh tap, and a
+      // fresh press clears this window before its own click arrives.
+      e.stopImmediatePropagation(); e.preventDefault();
+    }, true);
+
+    // Refuse the browser's pan for an armed press. Non-passive, and only on
+    // the two drag surfaces (the chart host and the layout page view), so
+    // page scrolling everywhere else never waits on it.
+    var holdPan = function (e) {
+      var tp = TP;
+      if (!tp || !tp.chart || !tp.armed || tp.dead) return;
+      if (e.touches && e.touches.length !== 1) return;
+      if (e.cancelable) e.preventDefault();
+    };
+    var surfaces = [hostEl(), el("ps-lviewport")];
+    for (var si = 0; si < surfaces.length; si++) {
+      if (!surfaces[si]) continue;
+      surfaces[si].addEventListener("touchstart", function () {}, { passive: true });
+      surfaces[si].addEventListener("touchmove", holdPan, { passive: false });
+    }
+    // Keep the bars' drag direction current: the engine rebuilds the
+    // drawing on every render and redraw, and touch-action has to be
+    // right before the next finger lands, not when it does.
+    try {
+      if (hostEl() && window.MutationObserver) {
+        new MutationObserver(touchBarAxisSoon)
+          .observe(hostEl(), { childList: true, subtree: true });
+        touchBarAxisSoon();
+      }
+    } catch (eMo) {}
+  }
+  // =============================================================== phone frame
+  // The find-your-way pass (Nov 2026). On a phone the three unnamed icons
+  // were the only way to the menu, the other workspaces and chart setup, half
+  // the chart toolbar sat off the right edge, and nothing on screen kept a
+  // chart to the Notebook. PHONE is touch mode AND the drawer frame
+  // (narrowFrame: under 760px, or a finger on a screen held upright, which
+  // since Nov 11 2026 takes in every upright tablet). A narrow desktop
+  // window and a tablet held sideways keep the frame they had. Everything here is a second handle on something that already
+  // exists (the workspace switch, the drawers, the Export button, the
+  // toolbar's own buttons), so there is one behavior behind each and the
+  // phone frame cannot drift from the desktop one.
+  var PHONE = false;
+  var PHONE_MORE_NODE = null;
+  var PHONE_SHEET_FOCUS = null;
+  function phoneWanted() {
+    try {
+      return TOUCH_MODE && narrowFrame();
+    } catch (e) { return false; }
+  }
+  function phoneOn() { return PHONE; }
+  function phoneSync() {
+    var on = phoneWanted();
+    if (on === PHONE && document.body.classList.contains("ps-phone") === on)
+      return false;
+    PHONE = on;
+    document.body.classList.toggle("ps-phone", on);
+    return true;
+  }
+  // Chart setup is open as a sheet: the chart is refitted into the room
+  // above it (see applyViewZoomCore).
+  function phoneSheetFit() {
+    // Upright only. Sideways the panel stands beside the chart, and the
+    // width fit already shows what the narrower pane can hold.
+    return PHONE && NARROW_OPEN === "inspector" && appWorkspace() === "chart" &&
+      (window.innerHeight || 0) > 480;
+  }
+  function syncPhoneStatus() {
+    var st = document.getElementById("ps-phone-status");
+    if (!st || !PHONE) return;
+    var save = document.getElementById("ps-save-state");
+    var chk = document.getElementById("ps-status-check");
+    var a = save ? save.textContent : "";
+    var hasCheck = !!chk && !chk.hidden && appWorkspace() === "chart";
+    var b = hasCheck ? chk.textContent : "";
+    var text = a + (b ? " · " + b : "");
+    // The line is one short row beside two buttons, and on a 390px phone
+    // "Autosaved locally \u00b7 Checks passed" does not fit. The button is a
+    // flex box, where text-overflow does nothing, so the line was cut
+    // mid-word ("1 not", "Chec"). The words sit in a span of their own and
+    // the line is the longest of these that fits whole: both parts; both
+    // with the save state's last word "locally" gone (on a phone there is
+    // nowhere else the work could be saved); then one part alone, the save
+    // state unless the chart check has something to fix and saving is
+    // working. Only a single part too long for the row ends in an ellipsis.
+    var line = st.firstElementChild;
+    if (!line || line.className !== "ps-phone-status-line") {
+      st.textContent = "";
+      line = document.createElement("span");
+      line.className = "ps-phone-status-line";
+      st.appendChild(line);
+    }
+    var aShort = a.replace(/\s+locally$/, "");
+    var cands = [text];
+    if (aShort !== a) cands.push(aShort + (b ? " \u00b7 " + b : ""));
+    if (b) cands.push(AUTOSAVE_HEALTH !== "error" && chk.getAttribute("data-state") === "warn"
+      ? b : aShort);
+    var fitKey = cands.join("\n") + "\n" + line.clientWidth;
+    if (line.__psFit !== fitKey) {
+      for (var ci = 0; ci < cands.length; ci++) {
+        if (line.textContent !== cands[ci]) line.textContent = cands[ci];
+        if (!line.clientWidth || line.scrollWidth <= line.clientWidth + 1) break;
+      }
+      // Not laid out yet: nothing was measured, so measure at the next sync.
+      line.__psFit = line.clientWidth ? fitKey : null;
+    }
+    st.disabled = !hasCheck;
+    if (hasCheck) st.setAttribute("data-state", chk.getAttribute("data-state") || "ok");
+    else st.removeAttribute("data-state");
+    st.setAttribute("aria-label", text + (hasCheck ? ". Open the chart check" : ""));
+  }
+  function syncPhoneFrame() {
+    if (!PHONE) return;
+    var ws = appWorkspace(), c = workspaceDocument(ws);
+    var keep = document.getElementById("ps-phone-keep");
+    var exp = document.getElementById("ps-phone-export");
+    var real = document.getElementById("ps-export");
+    var setup = document.getElementById("ps-phone-setup");
+    if (keep) keep.style.display =
+      (ws === "chart" && c && !isLayoutTab(c)) ? "" : "none";
+    if (exp && real) {
+      exp.disabled = real.disabled;
+      exp.setAttribute("aria-label", real.textContent || "Export");
+    }
+    // The tabs carry their own attribute, not data-ps-workspace: there is
+    // one of those per workspace in the document, and code that looks one
+    // up by name must keep finding exactly one.
+    var tabs = document.querySelectorAll("#ps-phone-nav [data-ps-phone-ws]");
+    for (var ti = 0; ti < tabs.length; ti++) {
+      if (tabs[ti].getAttribute("data-ps-phone-ws") === ws)
+        tabs[ti].setAttribute("aria-current", "page");
+      else tabs[ti].removeAttribute("aria-current");
+    }
+    if (setup) {
+      setup.textContent = ws === "pinboard" ? "Details"
+        : ws === "layout" ? "Properties" : "Setup";
+      setup.setAttribute("aria-expanded", NARROW_OPEN === "inspector" ? "true" : "false");
+    }
+    syncPhoneStatus();
+  }
+  function phoneMoreNode() {
+    if (!PHONE_MORE_NODE) {
+      var b = document.createElement("button");
+      b.type = "button"; b.id = "ps-phone-more"; b.textContent = "More";
+      b.setAttribute("aria-haspopup", "dialog");
+      b.setAttribute("aria-expanded", "false");
+      b.addEventListener("click", function (e) {
+        e.stopPropagation(); phoneSheetOpen();
+      });
+      PHONE_MORE_NODE = b;
+    }
+    return PHONE_MORE_NODE;
+  }
+  // The engine rebuilds its toolbar on every render; the same hook that
+  // puts the Zoom group back puts More back.
+  function phoneDockMore(bar) {
+    if (PHONE && bar) {
+      var m = phoneMoreNode();
+      if (m.parentNode !== bar) bar.appendChild(m);
+    } else if (PHONE_MORE_NODE && PHONE_MORE_NODE.parentNode) {
+      PHONE_MORE_NODE.parentNode.removeChild(PHONE_MORE_NODE);
+    }
+  }
+  function phoneSheetOpen() {
+    var sh = document.getElementById("ps-phone-sheet");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    if (!sh || !sc) return;
+    // The zoom choices are the real control's own, copied at the moment of
+    // opening so the two can never list different sizes.
+    var mine = document.getElementById("ps-phone-zoom");
+    var ct = chartZoomNode();
+    var real = ct && ct.querySelector ? ct.querySelector("select") : null;
+    if (mine && real) {
+      mine.innerHTML = real.innerHTML;
+      mine.value = real.value;
+    }
+    PHONE_SHEET_FOCUS = document.activeElement;
+    sh.classList.add("ps-open"); sc.classList.add("ps-open");
+    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "true");
+    window.setTimeout(function () {
+      var first = sh.querySelector(".ps-phone-row");
+      try { if (first) first.focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
+  }
+  function phoneSheetClose(restore) {
+    var sh = document.getElementById("ps-phone-sheet");
+    var share = document.getElementById("ps-phone-share");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    var wasOpen = (sh && sh.classList.contains("ps-open")) ||
+      (share && share.classList.contains("ps-open"));
+    if (!wasOpen) return;
+    if (sh) sh.classList.remove("ps-open");
+    if (share) share.classList.remove("ps-open");
+    // A picture still being drawn for a sheet that has gone is dropped.
+    PHONE_SHARE_SEQ++; PHONE_SHARE = null;
+    if (sc) sc.classList.remove("ps-open");
+    if (PHONE_MORE_NODE) PHONE_MORE_NODE.setAttribute("aria-expanded", "false");
+    var back = PHONE_SHEET_FOCUS; PHONE_SHEET_FOCUS = null;
+    if (restore !== false && back && back.isConnected) {
+      try { back.focus({ preventScroll: true }); } catch (e) {}
+    }
+  }
+  // ---- Sharing (the sharing pass, Nov 2026). On a phone the way to get a
+  // chart to someone is the share sheet: Messages, Mail, AirDrop, Save
+  // Image. The app only knew how to download a file, which on an iPhone
+  // means a browser prompt, the Files app, and a search for the file. So on
+  // a phone Export offers Share first and Save a file second.
+  //
+  // The picture is drawn when the sheet OPENS, not when Share is tapped:
+  // the share sheet may only be raised from inside a tap, and a browser
+  // gives that permission up if anything slow happens first. By the time
+  // Share can be tapped the file exists, and the tap hands it straight
+  // over. "Shared" is said when the phone reports the hand-over done, and
+  // a share sheet the person dismissed says nothing was shared.
+  var PHONE_SHARE = null, PHONE_SHARE_SEQ = 0;
+  function phoneShareSupported() {
+    try {
+      return PHONE && typeof navigator.share === "function" &&
+        typeof navigator.canShare === "function" && typeof File === "function";
+    } catch (e) { return false; }
+  }
+  function phoneExportTap() {
+    var ws = appWorkspace(), c = workspaceDocument(ws);
+    if ((ws === "chart" || ws === "layout") && c && phoneShareSupported()) {
+      phoneShareOpen();
+      return;
+    }
+    // Data and the Notebook keep their own flows (a sheet of numbers and a
+    // set of pages are not one picture), and so does a phone whose browser
+    // cannot share a file.
+    var b = document.getElementById("ps-export");
+    if (b) b.click();
+  }
+  function phoneShareOpen() {
+    var sh = document.getElementById("ps-phone-share");
+    var sc = document.getElementById("ps-phone-sheet-scrim");
+    var go = document.getElementById("ps-phone-share-go");
+    var sub = document.getElementById("ps-phone-share-sub");
+    var st = document.getElementById("ps-phone-share-status");
+    if (!sh || !sc || !go || !sub) return;
+    var layout = isLayoutTab(activeChart());
+    var what = layout ? "layout" : "chart";
+    document.getElementById("ps-phone-share-title").textContent = "Export " + what;
+    go.disabled = true;
+    sub.textContent = "Preparing the picture";
+    if (st) st.textContent = "";
+    PHONE_SHARE = null;
+    var token = ++PHONE_SHARE_SEQ;
+    PHONE_SHEET_FOCUS = document.activeElement;
+    sh.classList.add("ps-open"); sc.classList.add("ps-open");
+    window.setTimeout(function () {
+      try { document.getElementById("ps-phone-share-save").focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
+    var prefs = exportPrefs();
+    var name = defaultExportBase() + ".png";
+    // A shared picture always has a background, the chart's own or white:
+    // a transparent PNG dropped into a dark message thread is black text
+    // on black.
+    var bg = (prefs.background === "white" ||
+              !effectiveExportBackground("shown", layout)) ? "white" : "shown";
+    collectExportSource(bg)
+      .then(function (source) { return exportBlobFor("png", source, prefs.dpi); })
+      .then(function (blob) {
+        if (token !== PHONE_SHARE_SEQ) return;
+        var file = new File([blob], name, { type: "image/png" });
+        var ok = false;
+        try { ok = navigator.canShare({ files: [file] }); } catch (e) {}
+        if (!ok) throw new Error("This browser cannot share a picture.");
+        PHONE_SHARE = { file: file, name: name };
+        go.disabled = false;
+        sub.textContent = "Send the picture to another app, or save it to your photos";
+      })
+      .catch(function (e) {
+        if (token !== PHONE_SHARE_SEQ) return;
+        go.disabled = true;
+        sub.textContent = "Not available for this " + what + ". Use Save a file.";
+        if (st) st.textContent = String((e && e.message) || "");
+      });
+  }
+  function phoneShareGo() {
+    var s = PHONE_SHARE;
+    var st = document.getElementById("ps-phone-share-status");
+    if (!s) return;
+    var p;
+    // Straight from the tap, with nothing awaited before it.
+    try { p = navigator.share({ files: [s.file] }); }
+    catch (e) { p = Promise.reject(e); }
+    Promise.resolve(p).then(function () {
+      phoneSheetClose(false);
+      showToast("Shared " + s.name);
+    }, function (e) {
+      if (e && e.name === "AbortError") {
+        if (st) st.textContent = "Not shared.";
+        return;
+      }
+      if (st) st.textContent = "Sharing did not work here. Use Save a file.";
+    });
+  }
+  // A panel opened from the sheet has no tapped part for the reveal to keep
+  // in view: bring the panel itself up, as far as its own top allows.
+  function phoneRevealPanel() {
+    var tries = 0, lastH = -1, still = 0;
+    (function watch() {
+      if (++tries > 40) return;
+      var host = hostEl();
+      var panel = host ? host.querySelector(".gb2-panel") : null;
+      var h = panel ? panel.getBoundingClientRect().height : 0;
+      if (panel && h > 40 && Math.abs(h - lastH) < 1) still++; else still = 0;
+      lastH = h;
+      if (still < 3) { window.setTimeout(watch, 40); return; }
+      var pane = document.getElementById("ps-main-workspace");
+      if (!pane) return;
+      var pr = panel.getBoundingClientRect(), sr = pane.getBoundingClientRect();
+      var bottom = Math.min(sr.bottom, window.innerHeight || sr.bottom);
+      var by = Math.min(Math.ceil(pr.bottom - bottom) + 10,
+                        Math.floor(pr.top - sr.top - 8));
+      if (by > 4) {
+        try { pane.scrollBy({ top: by, behavior: "auto" }); }
+        catch (e) { pane.scrollTop += by; }
+      }
+    })();
+  }
+  var PHONE_MORE_BUTTONS = {
+    hide: 'button[aria-label$="hide elements"]',
+    settings: 'button[aria-label="Chart settings"]',
+    find: '[data-role="setting-search-trigger"]',
+    add: 'button[aria-label="Add to chart"]'
+  };
+  function phoneMoreRun(which) {
+    var host = hostEl();
+    var bar = host ? host.querySelector('[data-role="chart-toolbar"]') : null;
+    var btn = bar && PHONE_MORE_BUTTONS[which]
+      ? bar.querySelector(PHONE_MORE_BUTTONS[which]) : null;
+    phoneSheetClose(false);
+    if (!btn) return;
+    window.setTimeout(function () {
+      try { btn.click(); } catch (e) {}
+      if (which === "hide" || which === "settings") phoneRevealPanel();
+    }, 30);
+  }
+  function phoneRefresh() {
+    if (!phoneSync()) return;
+    try { phoneSheetClose(false); } catch (e) {}
+    try { if (NARROW_OPEN) narrowSet(null, true); } catch (e2) {}
+    try { syncAppShell(); } catch (e3) {}
+    try { render(); } catch (e4) {}
+  }
+  function wirePhoneFrame() {
+    phoneSync();
+    var on = function (id, fn) {
+      var n = document.getElementById(id);
+      if (n) n.addEventListener("click", fn);
+    };
+    on("ps-phone-open", function () {
+      narrowSet(null, true);
+      var b = document.getElementById("ps-load"); if (b) b.click();
+    });
+    on("ps-phone-save", function () {
+      narrowSet(null, true);
+      var b = document.getElementById("ps-save"); if (b) b.click();
+    });
+    on("ps-phone-docs", function (e) { e.stopPropagation(); narrowSet("nav"); });
+    on("ps-phone-setup", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
+    on("ps-phone-setup-data", function (e) { e.stopPropagation(); narrowToggle("inspector"); });
+    on("ps-phone-setup-done", function (e) { e.stopPropagation(); narrowSet(null); });
+    on("ps-phone-keep", function (e) {
+      e.stopPropagation();
+      // One section: keep, as the mockup did. Several: the same list of
+      // sections the chart's own menu offers, under the button.
+      if (pinBoards().length <= 1) { pinChartToPinboard(null); return; }
+      var r = this.getBoundingClientRect();
+      showKeepToNotebookMenu(Math.round(r.left), Math.round(r.bottom + 4));
+    });
+    on("ps-phone-export", function (e) { e.stopPropagation(); phoneExportTap(); });
+    on("ps-phone-share-go", function () { phoneShareGo(); });
+    on("ps-phone-share-save", function () {
+      phoneSheetClose(false);
+      exportCurrentWorkspace();
+    });
+    on("ps-phone-share-done", function () { phoneSheetClose(); });
+    on("ps-phone-status", function () {
+      var b = document.getElementById("ps-status-check");
+      if (b && !b.hidden) b.click();
+    });
+    var nav = document.getElementById("ps-phone-nav");
+    if (nav) nav.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-ps-phone-ws]") : null;
+      if (b) setAppWorkspace(b.getAttribute("data-ps-phone-ws"));
+    });
+    on("ps-phone-sheet-done", function () { phoneSheetClose(); });
+    on("ps-phone-sheet-scrim", function () { phoneSheetClose(); });
+    var sheet = document.getElementById("ps-phone-sheet");
+    var sheetKeys = function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); phoneSheetClose(); return; }
+      if (e.key !== "Tab") return;
+      var list = this.querySelectorAll("button:not([disabled]), select");
+      if (!list.length) return;
+      var first = list[0], last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    if (sheet) {
+      sheet.addEventListener("click", function (e) {
+        var row = e.target.closest ? e.target.closest("[data-phone-more]") : null;
+        if (row) phoneMoreRun(row.getAttribute("data-phone-more"));
+      });
+      sheet.addEventListener("keydown", sheetKeys);
+    }
+    var shareSheet = document.getElementById("ps-phone-share");
+    if (shareSheet) shareSheet.addEventListener("keydown", sheetKeys);
+    var zoom = document.getElementById("ps-phone-zoom");
+    if (zoom) zoom.addEventListener("change", function () {
+      setViewZoom(this.value); phoneSheetClose();
+    });
+    // The state line repeats two things written elsewhere, at their own
+    // times (the chart check runs on a timer): follow them.
+    if (typeof MutationObserver === "function") {
+      var mo = new MutationObserver(function () { try { syncPhoneStatus(); } catch (e) {} });
+      ["ps-save-state", "ps-status-check"].forEach(function (id) {
+        var n = document.getElementById(id);
+        if (n) mo.observe(n, { childList: true, characterData: true, subtree: true,
+                               attributes: true, attributeFilter: ["hidden", "data-state"] });
+      });
+    }
+    // The line is fitted to its row (syncPhoneStatus), so a row that
+    // changes width (the phone is turned) is fitted again.
+    if (typeof ResizeObserver === "function") {
+      var stRow = document.getElementById("ps-phone-status");
+      if (stRow) new ResizeObserver(function () { try { syncPhoneStatus(); } catch (e) {} }).observe(stRow);
+    }
+    try {
+      var mq = window.matchMedia(NARROW_MQ);
+      if (mq.addEventListener) mq.addEventListener("change", phoneRefresh);
+      else if (mq.addListener) mq.addListener(phoneRefresh);
+    } catch (eMq) {}
+    window.addEventListener("orientationchange", function () {
+      window.setTimeout(phoneRefresh, 120);
+    });
   }
   function wireNarrowChrome() {
     var ids = [["ps-narrow-nav", "nav"], ["ps-narrow-inspector", "inspector"],
@@ -37386,7 +39187,7 @@
     // Widening the window puts everything back in the grid, so a drawer left
     // open would sit on top of the panel it IS.
     window.addEventListener("resize", function () {
-      if (NARROW_OPEN && window.innerWidth > 760) narrowSet(null, true);
+      if (NARROW_OPEN && !narrowFrame()) narrowSet(null, true);
     });
   }
   function wireBypassLinks() {
@@ -37403,7 +39204,7 @@
     if (settingsLink && settings)
       settingsLink.addEventListener("click", function (e) {
         e.preventDefault();
-        if (window.innerWidth <= 760) narrowSet("inspector", true);
+        if (narrowFrame()) narrowSet("inspector", true);
         window.requestAnimationFrame(function () { settings.focus(); });
       });
   }
@@ -37491,6 +39292,8 @@
     wireLayoutImagePaste();
     wireNarrowChrome();
     wireBypassLinks();
+    wireTouch();
+    wirePhoneFrame();
     wireCoach();
     wireTooltips();
     wireFitToPane();
@@ -37854,6 +39657,14 @@
       // Resource load failures (img, script) also land here and carry no
       // message; they are not what this is for.
       if (!e || !e.message) return;
+      // "Script error." with no file, no line and no error object is how a
+      // browser reports a failure in a script that is not the page's: an
+      // extension, or the browser's own. Safari raises one in the page the
+      // first time its Share button is tapped (measured on iPadOS 27), so
+      // the way to Add to Home Screen began with a red "Something went
+      // wrong". Nothing of the app's can produce it: every script here is
+      // the page's own and reports its real message.
+      if (e.message === "Script error." && !e.filename && !e.lineno && !e.error) return;
       reportGlobalError("error", e.message);
     });
     window.addEventListener("unhandledrejection", function (e) {
@@ -38081,6 +39892,21 @@
             action: function () { pasteChartFormatting(); } },
           { label: "Reset chart styling", command: "reset" }
         ]);
+        // A drawn shape, a note, a reference line or a bracket under the
+        // press: Duplicate. It was Cmd/Ctrl+D or Alt-drag only, so a touch
+        // screen had no way to it at all. The engine makes the copy.
+        var annEl = t.closest("[data-ann-id]");
+        var annId = annEl && annEl.getAttribute("data-ann-id");
+        if (annId && typeof window.__gb2_duplicateAnnotation === "function") {
+          items = [
+            { label: "Duplicate", key: "ann-duplicate",
+              shortcut: "Cmd/Ctrl+D",
+              action: function () {
+                window.__gb2_duplicateAnnotation(annId);
+              } },
+            "separator"
+          ].concat(items);
+        }
       } else if (t.closest(".ps-controls, .ps-project-panel")) {
         items = [
           { label: "Rename document\u2026", command: "rename-document" },
