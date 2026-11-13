@@ -222,8 +222,37 @@ async function runCase(fixture, sel, label, strategy) {
                 if (a[k] !== q[k]) drift.push([i, k, a[k], q[k]]);
         }
 
+        // 3. and the pointer must still be able to LEAVE. The harvest sends a
+        //    leave to un-hover the mark and then puts every attribute back; a
+        //    handler that keeps what it lit in a variable of its own (the
+        //    scatter points share one) has by then forgotten the mark, so the
+        //    real leave that follows was ignored and the ring stayed for good
+        //    (a second point then lit a second ring). After the harvest, move
+        //    the pointer away: the chart must be back as it was at rest and
+        //    the readout gone.
+        await page.mouse.move(5, 5, { steps: 3 });
+        await page.waitForTimeout(450);
+        const away = await page.evaluate(`(${SNAP})(document.querySelector('svg[data-role="gb2-chart-svg"]'))`);
+        const tipUp = await page.evaluate(`(() => { const t = document.querySelector('[data-role="xy-tooltip"]');
+          return !!t && t.style.display !== 'none' && t.getBoundingClientRect().width > 0; })()`);
+        // What "back at rest" means is measured, not assumed: a hover leaves
+        // bookkeeping behind by design (the remembered base opacity, a
+        // readout box parked where it last stood). So hover and leave once
+        // more with NO harvest in between and compare the two rests.
+        await page.mouse.move(pt.x, pt.y, { steps: 3 });
+        await page.waitForTimeout(450);
+        await page.mouse.move(5, 5, { steps: 3 });
+        await page.waitForTimeout(450);
+        const rest = await page.evaluate(`(${SNAP})(document.querySelector('svg[data-role="gb2-chart-svg"]'))`);
+        const stuck = [];
+        for (const i of Object.keys(rest)) {
+            const b = rest[i], w = away[i] || {};
+            for (const k of new Set([...Object.keys(b), ...Object.keys(w)]))
+                if (norm(b[k]) !== norm(w[k])) stuck.push([i, k, b[k], w[k]]);
+        }
+
         ran++;
-        const ok = leaks.length === 0 && born === 0 && drift.length === 0;
+        const ok = leaks.length === 0 && born === 0 && drift.length === 0 && stuck.length === 0 && !tipUp;
         if (!ok) fail++;
         let note = `changed=${String(changed.length).padStart(2)}  stack=${String(pt.depth).padStart(2)}`;
         if (!changed.length) note += '  (hover did not arm: weak assertion)';
@@ -233,6 +262,9 @@ async function runCase(fixture, sel, label, strategy) {
         if (born) problems.push(`${tag}: ${born} element(s) created by the hover survived into the clone`);
         for (const [i, k, a, q] of drift.slice(0, 4))
             problems.push(`${tag}: live chart drifted on el#${i} ${k}: ${JSON.stringify(a)} -> ${JSON.stringify(q)}`);
+        for (const [i, k, b, w] of stuck.slice(0, 3))
+            problems.push(`${tag}: still hovered after the pointer left, el#${i} ${k}: a plain hover and leave gives ${JSON.stringify(b)}, after a harvest ${JSON.stringify(w)}`);
+        if (tipUp) problems.push(`${tag}: the readout is still up after the pointer left`);
     } finally {
         await page.close();
     }

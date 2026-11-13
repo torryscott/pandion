@@ -10474,6 +10474,7 @@
         // would extend past the wrap's right edge.
         var _xyWrapRect = null, _xyWrapRectAt = 0, _xyWrapScale = 1;
         function _xyTooltipPosition(clientX, clientY) {
+            if (_xyTipPin) { _xyTipPlace(); return; }
             // Both reads below force a layout flush and this runs per
             // pointermove (60 Hz): cache the wrap rect briefly (150 ms
             // TTL keeps it honest across scroll/resize) and the
@@ -10515,9 +10516,11 @@
             _xyTooltip.style.display = "block";
             _xyTooltip.__gb2w = 0;
             _xyTooltip.__gb2h = 0;
+            if (_xyTipSynth) _xyTipPinNow();
             _xyTooltipPosition(clientX, clientY);
         }
         function _xyTooltipHide() {
+            if (_xyTipPin) return;
             _xyTooltip.style.display = "none";
         }
         // ---- Readouts for bars, markers, boxes and heatmap tiles ---------
@@ -10629,6 +10632,321 @@
             return "<div style='font-weight:600;margin-bottom:2px;'>Count = " + String(Math.round(bin.count)) + "</div>" +
                 _tipLine(_nmEsc(xn) + ":", _tipNum(bin.x_lo) + " to " + _tipNum(bin.x_hi)) +
                 _tipLine(_nmEsc(yn) + ":", _tipNum(bin.y_lo) + " to " + _tipNum(bin.y_hi));
+        }
+
+        // ---- Touch readout pin (data.touchHost, standalone only) --------
+        // On a touch screen a tap is also a hover: the browser sends the
+        // mouse hover events and then the click, so a value readout shows
+        // up together with the part's editor. It had no rule of its own
+        // there. A scatter point's was hidden a quarter second later by the
+        // point's own click handler; a pie slice's stayed where the finger
+        // had been, on the slice's own label, until the next tap anywhere;
+        // tapping the same part twice showed nothing the second time,
+        // because no browser sends a second hover for a part it still takes
+        // to be hovered.
+        //
+        // With the host key set, a finger TAP on a chart part asks that
+        // part's own hover handlers for the readout (the same events a
+        // mouse would send, replayed on the release), and the readout is
+        // PINNED: hide requests are ignored, it sits clear of the tapped
+        // part instead of under the finger, and it leaves when the next
+        // press lands on the chart or the selection moves on. When the
+        // chart is redrawn or rebuilt the same part is asked again, so the
+        // values never go stale. Only a replay pins, so a readout a drag
+        // shows for itself is untouched. jamovi never ships the key: the
+        // listeners are not registered there and every function below is
+        // unreachable or returns at its first line.
+        var _xyTipPin = null;      // { el, fx, fy, at, selKey, own, w, h }
+        var _xyTipSynth = false;   // true while a replay is dispatching
+        var _xyTipTarget = null, _xyTipX = 0, _xyTipY = 0;
+        var _xyTipDown = null;     // the touch press being watched
+        var _xyTipDead = false;    // a later render has replaced this one
+        var _xyTipWatching = false;
+        function _xyTipTouchOn() {
+            return !!(data && data.touchHost === true);
+        }
+        function _xyTipSelKey() {
+            try {
+                return (inspector && inspector.selection)
+                    ? inspector.selection.join("|") : "";
+            } catch (_eK) { return ""; }
+        }
+        function _xyTipRoleEls(role) {
+            var out = [];
+            try {
+                var all = svg.querySelectorAll("[data-role]");
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i].getAttribute("data-role") === role) out.push(all[i]);
+                }
+            } catch (_eR) {}
+            return out;
+        }
+        // What a rebuild needs to find the same part again: a role, a place
+        // among the parts of that role, and how the tapped element relates
+        // to that part. The finger usually lands on a hit shape that has no
+        // role of its own (a scatter point's is the circle drawn right after
+        // the point), so the nearest named part stands for it: itself, the
+        // element before or after it, or the named group it sits in.
+        function _xyTipIdentify(el) {
+            try {
+                var base = null, rel = "self", k = 0;
+                var pv = el.previousElementSibling, nx = el.nextElementSibling;
+                if (el.getAttribute("data-role")) base = el;
+                else if (pv && pv.getAttribute("data-role")) { base = pv; rel = "next"; }
+                else if (nx && nx.getAttribute("data-role")) { base = nx; rel = "prev"; }
+                else {
+                    base = (el.parentNode && el.parentNode.closest)
+                        ? el.parentNode.closest("[data-role]") : null;
+                    if (!base || base === svg || !svg.contains(base)) return null;
+                    rel = "in";
+                    k = Array.prototype.indexOf.call(base.getElementsByTagName(el.tagName), el);
+                    if (k < 0) return null;
+                }
+                var role = base.getAttribute("data-role");
+                var els = _xyTipRoleEls(role);
+                var idx = els.indexOf(base);
+                if (idx < 0) return null;
+                return { role: role, idx: idx, n: els.length, rel: rel, tag: el.tagName, k: k };
+            } catch (_eI) { return null; }
+        }
+        function _xyTipResolve(rec) {
+            try {
+                var els = _xyTipRoleEls(rec.role);
+                if (els.length !== rec.n) return null;
+                var base = els[rec.idx];
+                if (!base) return null;
+                var el = base;
+                if (rec.rel === "next") el = base.nextElementSibling;
+                else if (rec.rel === "prev") el = base.previousElementSibling;
+                else if (rec.rel === "in") el = base.getElementsByTagName(rec.tag)[rec.k];
+                return (el && el.tagName === rec.tag) ? el : null;
+            } catch (_eS) { return null; }
+        }
+        // A window global because the rebuild is a new closure; never written
+        // to storage.
+        function _xyTipRemember() {
+            var pin = _xyTipPin, rec = null;
+            if (pin && pin.el) rec = _xyTipIdentify(pin.el);
+            if (rec) {
+                rec.selKey = pin.selKey;
+                // Where on the part the finger was, as a share of its box:
+                // a part that answers by position (the canvas of a very
+                // large scatter, a cumulative line) is asked at the same
+                // spot again, not at its centre.
+                rec.rx = 0.5; rec.ry = 0.5;
+                try {
+                    var wrR = wrap.getBoundingClientRect(), vsR = _gb2ViewScale(svg) || 1;
+                    var bR = pin.el.getBoundingClientRect();
+                    if (bR.width > 0 && bR.height > 0) {
+                        rec.rx = Math.max(0, Math.min(1, (wrR.left + pin.fx * vsR - bR.left) / bR.width));
+                        rec.ry = Math.max(0, Math.min(1, (wrR.top + pin.fy * vsR - bR.top) / bR.height));
+                    }
+                } catch (_eRr) {}
+            }
+            try { window.__gb2_touchReadout = rec; } catch (_eW) {}
+        }
+        function _xyTipPinNow() {
+            // The finger's point is kept relative to the chart: opening the
+            // editor scrolls the page, and a point remembered in window
+            // coordinates would then describe somewhere else.
+            var wr0 = wrap.getBoundingClientRect(), vs0 = 1;
+            try { vs0 = _gb2ViewScale(svg) || 1; } catch (_eV0) {}
+            _xyTipPin = { el: _xyTipTarget,
+                          fx: (_xyTipX - wr0.left) / vs0, fy: (_xyTipY - wr0.top) / vs0,
+                          at: Date.now(), selKey: _xyTipSelKey() };
+            // A readout is never a target. Its own rule says so, but the
+            // Label parts sweep that hands pointer events back to the chart's
+            // chrome hands them to the readout too, and a pinned readout
+            // sits close enough to the finger to take the tap's click.
+            try { _xyTooltip.style.pointerEvents = "none"; } catch (_ePe) {}
+            _xyTipRemember();
+            if (!_xyTipWatching) {
+                _xyTipWatching = true;
+                requestAnimationFrame(_xyTipWatch);
+            }
+        }
+        function _xyTipUnpin() {
+            _xyTipPin = null;
+            try { window.__gb2_touchReadout = null; } catch (_eU) {}
+            _xyTooltip.style.display = "none";
+        }
+        // Clear of the tapped part and of any label drawn on it. The places,
+        // in order: above the part, below it, then above, below and beside
+        // the finger; the first one that fits inside the chart and covers
+        // none of the part's own labels is taken. A part that fills most of
+        // the chart (a long line, a band, half a pie) has no useful box, so
+        // for it only the places around the finger are tried.
+        function _xyTipOwnLabels(pin, wr, vs) {
+            var out = [];
+            try {
+                if (!pin.el || !pin.el.isConnected) return out;
+                var r = pin.el.getBoundingClientRect();
+                var texts = svg.querySelectorAll("text");
+                for (var i = 0; i < texts.length && out.length < 12; i++) {
+                    var tr = texts[i].getBoundingClientRect();
+                    if (!(tr.width > 0)) continue;
+                    var cx = tr.left + tr.width / 2, cy = tr.top + tr.height / 2;
+                    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) continue;
+                    // On the part itself, not merely inside its box: a
+                    // slice's box holds its neighbours' labels too.
+                    if (document.elementsFromPoint(cx, cy).indexOf(pin.el) < 0) continue;
+                    out.push({ l: (tr.left - wr.left) / vs, t: (tr.top - wr.top) / vs,
+                               r: (tr.right - wr.left) / vs, b: (tr.bottom - wr.top) / vs });
+                }
+            } catch (_eO) {}
+            return out;
+        }
+        function _xyTipPlace() {
+            var pin = _xyTipPin;
+            if (!pin) return;
+            var wr = wrap.getBoundingClientRect();
+            var vs = 1;
+            try { vs = _gb2ViewScale(svg) || 1; } catch (_eV) {}
+            var wW = wr.width / vs, wH = wr.height / vs;
+            var w = _xyTooltip.offsetWidth || 120;
+            var h = _xyTooltip.offsetHeight || 40;
+            var r = null;
+            try { if (pin.el && pin.el.isConnected) r = pin.el.getBoundingClientRect(); } catch (_eB) {}
+            if (!pin.own) pin.own = _xyTipOwnLabels(pin, wr, vs);
+            var fx = pin.fx, fy = pin.fy;
+            var cand = [];
+            if (r && r.width > 0 && r.height > 0 &&
+                r.height < wr.height * 0.55 && r.width < wr.width * 0.7) {
+                var mid = ((r.left + r.right) / 2 - wr.left) / vs;
+                cand.push([mid - w / 2, (r.top - wr.top) / vs - h - 8]);
+                cand.push([mid - w / 2, (r.bottom - wr.top) / vs + 8]);
+            }
+            cand.push([fx - w / 2, fy - 22 - h]);
+            cand.push([fx - w / 2, fy + 22]);
+            cand.push([fx + 22, fy - h / 2]);
+            cand.push([fx - 22 - w, fy - h / 2]);
+            var best = null;
+            for (var i = 0; i < cand.length && !best; i++) {
+                var x = Math.max(4, Math.min(cand[i][0], wW - w - 4)), y = cand[i][1];
+                if (y < 4 || y + h > wH - 4) continue;
+                var covers = false;
+                for (var j = 0; j < pin.own.length; j++) {
+                    var o = pin.own[j];
+                    if (!(x + w < o.l - 2 || x > o.r + 2 || y + h < o.t - 2 || y > o.b + 2)) { covers = true; break; }
+                }
+                if (!covers) best = [x, y];
+            }
+            if (!best) {
+                best = [Math.max(4, Math.min(cand[0][0], wW - w - 4)),
+                        Math.max(4, Math.min(cand[0][1], wH - h - 4))];
+            }
+            _xyTooltip.style.left = best[0] + "px";
+            _xyTooltip.style.top = best[1] + "px";
+            pin.w = w; pin.h = h;
+        }
+        // The hover a mouse would have sent, on the part itself. The leave
+        // first: it resets a handler that still believes it is hovered,
+        // which is what made a second tap on the same part show nothing.
+        function _xyTipReplay(el, x, y) {
+            if (!el || !el.isConnected) return;
+            var one = { bubbles: false, cancelable: false, view: window, clientX: x, clientY: y };
+            var up = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+            try {
+                el.dispatchEvent(new MouseEvent("mouseout", up));
+                el.dispatchEvent(new MouseEvent("mouseleave", one));
+            } catch (_eL) {}
+            _xyTipSynth = true;
+            try {
+                el.dispatchEvent(new MouseEvent("mouseenter", one));
+                el.dispatchEvent(new MouseEvent("mouseover", up));
+                el.dispatchEvent(new MouseEvent("mousemove", up));
+            } catch (_eE) {}
+            _xyTipSynth = false;
+        }
+        // After a redraw or a rebuild: the same part, asked again. No record,
+        // another selection, or a different number of parts of that role
+        // means the readout no longer describes what is on screen.
+        function _xyTipRestore(isRetry) {
+            if (!_xyTipTouchOn() || _xyTipDead) return;
+            var rec = null;
+            try { rec = window.__gb2_touchReadout; } catch (_eG) {}
+            if (!rec) { if (_xyTipPin) _xyTipUnpin(); return; }
+            if (isRetry && _xyTipPin && _xyTipPin.el && _xyTipPin.el.isConnected) return;
+            var key = _xyTipSelKey();
+            if (key !== rec.selKey) {
+                // The selection is put back a moment after a rebuild draws.
+                if (!isRetry && key === "" && rec.selKey !== "") {
+                    setTimeout(function () { try { _xyTipRestore(true); } catch (_eT) {} }, 90);
+                    return;
+                }
+                _xyTipUnpin();
+                return;
+            }
+            var el = _xyTipResolve(rec);
+            if (!el) { _xyTipUnpin(); return; }
+            var r = el.getBoundingClientRect();
+            _xyTipTarget = el;
+            _xyTipX = r.left + r.width * (typeof rec.rx === "number" ? rec.rx : 0.5);
+            _xyTipY = r.top + r.height * (typeof rec.ry === "number" ? rec.ry : 0.5);
+            _xyTipPin = null;
+            _xyTipReplay(el, _xyTipX, _xyTipY);
+            if (!_xyTipPin) _xyTipUnpin();
+        }
+        // A redraw replaces the part under a pinned readout without telling
+        // anyone, and the readout's own size can change after it is placed.
+        // One check a frame, only while a readout is pinned.
+        function _xyTipWatch() {
+            if (_xyTipDead || !wrap.isConnected) { _xyTipWatching = false; _xyTipPin = null; return; }
+            if (!_xyTipPin) { _xyTipWatching = false; return; }
+            if (!_xyTipPin.el || !_xyTipPin.el.isConnected) {
+                try { _xyTipRestore(false); } catch (_eW2) {}
+                if (!_xyTipPin) { _xyTipWatching = false; return; }
+            }
+            // The host raises small text on a touch screen a moment after it
+            // is written, so the readout can grow under a placement already
+            // made for its first size.
+            try {
+                if (_xyTooltip.offsetWidth !== _xyTipPin.w ||
+                    _xyTooltip.offsetHeight !== _xyTipPin.h) _xyTipPlace();
+            } catch (_eW3) {}
+            requestAnimationFrame(_xyTipWatch);
+        }
+        // The readout belongs to the selection it appeared with. The tap's
+        // own selection lands a moment before or after the readout and is
+        // adopted; any later change of selection ends it.
+        function _xyTipOnSelection(sel) {
+            var pin = _xyTipPin;
+            if (!pin) return;
+            var k = "";
+            if (typeof sel === "string") k = sel;
+            else if (sel && typeof sel.join === "function") k = sel.join("|");
+            if ((Date.now() - pin.at) < 700) { pin.selKey = k; _xyTipRemember(); return; }
+            if (k !== pin.selKey) _xyTipUnpin();
+        }
+        if (_xyTipTouchOn()) {
+            __disposables.push(function () { _xyTipDead = true; });
+            onDoc("pointerdown", function (e) {
+                if (!wrap.contains(e.target)) return;
+                // Any press on the chart ends the old readout: a finger
+                // starting a tap or a drag, or a mouse on a screen that
+                // has both.
+                if (_xyTipPin) _xyTipUnpin();
+                if (e.pointerType !== "touch" || e.isPrimary === false) { _xyTipDown = null; return; }
+                _xyTipDown = { t: e.target, x: e.clientX, y: e.clientY, at: Date.now() };
+            }, true);
+            onDoc("pointerup", function (e) {
+                var d = _xyTipDown;
+                _xyTipDown = null;
+                if (!d || e.pointerType !== "touch" || !e.isTrusted) return;
+                // A drag or a swipe, a hold the host answered with its menu,
+                // or Label parts (which explains a part in its panel).
+                if (Math.abs(e.clientX - d.x) > 8 || Math.abs(e.clientY - d.y) > 8) return;
+                if ((Date.now() - d.at) > 600) return;
+                if (window.__gb2_touchPressConsumed === true) return;
+                if (window.__gb2_anatomyOn) return;
+                if (!d.t || !d.t.isConnected || !svg.contains(d.t)) return;
+                _xyTipTarget = d.t; _xyTipX = d.x; _xyTipY = d.y;
+                _xyTipReplay(d.t, d.x, d.y);
+            }, true);
+            onDoc("pointercancel", function () { _xyTipDown = null; }, true);
+            onDoc("pointermove", function (e) {
+                if (_xyTipPin && e.pointerType === "mouse" && wrap.contains(e.target)) _xyTipUnpin();
+            }, true);
         }
 
         // A flex-column "card" holds the toolbar (top), chart wrap
@@ -12387,9 +12705,17 @@
                 // ancestor never hears them. The scatter points use exactly
                 // that, and a real pointer exit fires bubbling out as well, so
                 // send it from the innermost element too.
+                // These leaves are the harvest's own, and every attribute is
+                // put back a moment later. A handler that keeps what it lit in
+                // a variable of its own must not forget the mark because of
+                // them (the flag below): the snapshot restores the DOM, not
+                // the handler, and a forgotten mark that is lit again can
+                // never be switched off.
+                window.__gb2_harvestUnhover = true;
                 if (_hovEls.length) _hFire(_hovEls[0], "out", true);
                 for (var _hj = 0; _hj < _hovEls.length; _hj++) _hFire(_hovEls[_hj], "leave", false);
             } catch (_eHov1) {}
+            window.__gb2_harvestUnhover = false;
             var copy = svg.cloneNode(true);
             // put the live chart back before anything can paint
             if (_hovEls.length) _hRestore();
@@ -39327,7 +39653,13 @@
                                 if (!t || !t.__gb2pt || t !== _cur) return;
                                 if (e.relatedTarget === t) return;
                                 _hOff(t);
-                                _cur = null;
+                                // A leave sent by the export harvest is not
+                                // the pointer leaving: the harvest lights the
+                                // ring again as soon as it has its copy, so
+                                // this point is still the lit one. Forgetting
+                                // it here left a ring that nothing switched
+                                // off, and the next point lit a second.
+                                if (window.__gb2_harvestUnhover !== true) _cur = null;
                                 _xyTooltipHide();
                             });
                             dg.addEventListener("mousemove", function (e) {
@@ -49990,6 +50322,30 @@
                     return;
                 }
             } catch (_eSS) {}
+            // Touch presses the HOST has already ruled on (data.touchHost,
+            // standalone only; jamovi never ships the key, so every line
+            // here is dead there). The element resolvers run their release
+            // branch on pointercancel exactly as on pointerup, which made
+            // two wrong selections on a touch screen, and they are refused
+            // HERE for the same reason as the stats choke above:
+            //   1. a press the browser CANCELLED because it took the touch
+            //      for a page scroll counted as a click, so swiping the page
+            //      past a bar opened that bar's editor;
+            //   2. a press the host answered with its long-press menu
+            //      selected the part again when the finger lifted.
+            // The host stamps both from its own window-level listeners and
+            // clears them on the next press; this only reads them. Clearing
+            // a selection (null) always passes.
+            try {
+                if (data && data.touchHost === true && typeof sel === "string" &&
+                    (window.__gb2_touchPressConsumed === true ||
+                     (Date.now() - (window.__gb2_touchCancelAt || 0)) < 400)) {
+                    return;
+                }
+            } catch (_eTH) {}
+            // A pinned touch readout follows the selection (data.touchHost;
+            // the pin is never set without the host key).
+            try { if (_xyTipPin) _xyTipOnSelection(sel); } catch (_eTp) {}
             opts = opts || {};
             // Blur any element currently focused inside the inspector
             // panel before we rebuild its contents. The panel content
@@ -106698,6 +107054,22 @@
             e.stopPropagation();
             _gb2PasteAnnotations(payload.annPayloads);
         }, true);
+        // The same duplicate for a host that has neither key nor Alt-drag
+        // to offer (a touch screen): its own menu calls this with the id of
+        // the annotation under the press. The selection is left alone on the
+        // way in; the paste selects the copy as it always does. Reassigned
+        // every render so it reaches the live closure.
+        try {
+            window.__gb2_duplicateAnnotation = function (id) {
+                try {
+                    if (typeof id !== "string" || !id) return false;
+                    var plD = _gb2GetSelectionPayload("annotation:" + id);
+                    if (!plD || !plD.annPayload) return false;
+                    _gb2PasteAnnotations([plD.annPayload]);
+                    return true;
+                } catch (_eDup) { return false; }
+            };
+        } catch (_eDupW) {}
         // Cmd/Ctrl+A selects every visible annotation (the user-added
         // objects: text notes, shapes, reference lines, brackets) so
         // they can be bulk-nudged (arrows), hidden (Delete) or
@@ -109746,6 +110118,11 @@
                 requestAnimationFrame(step);
             } catch (_eMc) {}
         })();
+
+        // A pinned touch readout (data.touchHost) survives the rebuild: the
+        // same part of the new chart is asked for a fresh one. Returns at
+        // its first line without the host key.
+        try { _xyTipRestore(false); } catch (_eTr) {}
 
         // Stamp the data hash now that the render has completed
         // successfully. Done last so an exception thrown anywhere

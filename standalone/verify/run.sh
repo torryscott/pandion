@@ -46,7 +46,7 @@ grid-accessibility-check \
 help-me-choose-check chooser-target-check menu-pointer-check import-errors-check layout-image-check modal-accessibility-check \
 layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check layout-page-edges-check library-bridge-check \
 layout-accessibility-check layout-text-check layout-font-check layout-figure-check layout-parts-check layout-timeline-check layout-parts-polish-check arrow-nudge-check \
-linked-selection-check motion-check narrow-check novice-affordances-check \
+linked-selection-check motion-check narrow-check mobile-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check panelcap-check panel-dock-check hover-webkit-check gap-seam-check percol-missing-check \
 pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-check preferences-check \
  title-squeeze-check \
@@ -57,7 +57,7 @@ probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-c
 reflow-accessibility-check \
 row-filters-check filter-formula-check filter-reasons-check filter-asformula-check filter-help-check \
 shape-plural-check statusbar-check stats-prefs-check density-check \
-textscale-check \
+textscale-check scatter-ring-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check toolbar-labels-check toolbar-scroll-cue-check typing-check units-check update-check void-honesty-check wizard-parity-check variable-levels-check visuals-check \
