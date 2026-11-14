@@ -262,7 +262,7 @@ column header; with several columns selected, the badge changes all of them
 at once), exclude individual values
 or whole rows without deleting them, declare codes like 999 as missing so
 they leave every chart and statistic (with a live count of what each code
-excludes), and search with <kbd>Cmd/Ctrl+F</kbd>. The File menu exports the
+excludes), and search with <kbd>Cmd/Ctrl+F</kbd>: Find matches cell values and column names alike, a column-name match selects that column, and Replace changes cells only. The File menu exports the
 sheet back out as CSV or Excel. Computed variables live here too - see
 <a href="#computed">Computed variables</a> below.</p>
 <p><b>Typing in cells</b> works the way it does in a spreadsheet. Click a
@@ -354,7 +354,14 @@ A page whose chart was deleted reads "source chart is gone".</p>
 <h3 id="app-layouts">Layouts</h3>
 <p>Multi-panel figure assembly: place live chart panels (they follow their
 source chart), kept Notebook pages, images, and text on a page sized for
-slides or paper, then export the whole page. Right-click any placed panel for
+slides or paper, then export the whole page. The page is sized from the
+rail's <b>Page</b> section: a preset, a typed width and height, or the
+orientation, each of which scales the arrangement to fit the new page. To
+size the page to the figure instead, drag any edge or corner of the page
+itself: that edge moves alone, the items keep their size and place, it stops
+at the outermost item, and it snaps to the item plus the margin. <b>Fit page
+to content</b> does the same in one click, trimming the page to the items
+plus the margin. Right-click any placed panel for
 <b>Open source chart</b>. The <b>Insert</b> menu adds a <b>Chart panel</b>,
 <b>Text</b>, a <b>Panel label</b>, or an <b>Image...</b> to the page, and
 <b>Insert &gt; New layout</b> starts another. With an item selected, the
@@ -1279,7 +1286,7 @@ control, is identical in both.</div>
 <ol>
 <li><b>Compare</b> (grouped charts): "Both (recommended)" lists simple effects in both directions and drops hard-to-interpret diagonal pairs ("Every pair" restores them). On a faceted chart a third option, "Every pair, across panels too", also lists pairs that span panels.</li>
 <li><b>Test:</b> Auto (recommended) / Welch's t / Student's t / Mann-Whitney U, plus Paired t and Wilcoxon signed-rank on Repeated Measures.</li>
-<li><b>Correct:</b> None / Bonferroni / Holm / Benjamini-Hochberg (FDR), plus Tukey on Compare Groups and on Repeated Measures without a Group By variable, and Games-Howell and Dunnett (vs control) on Compare Groups. On Repeated Measures, Tukey takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does; with a correction on, every pair runs on the subjects complete across all occasions, the statistic, the unadjusted p and the adjusted p alike, and the table foot and the readout say how many subjects a missing occasion left out; with Correct set to None each bracket keeps everyone who has both occasions, like jamovi's Paired Samples T-Test. On Compare Groups the same rule governs the error term: with any correction on except Games-Howell (Tukey, Dunnett, Bonferroni, Holm or FDR), each row's statistic and unadjusted p use the one-way ANOVA's pooled error term over every group in the panel, and Cohen's d divides by that model's pooled SD (what jamovi's ANOVA post hoc prints in its uncorrected and Cohen's d columns); Games-Howell runs each pair as Welch's t, and with Correct set to None each pair is its own two-group test with its own d. The chosen correction is chart-wide, shared with on-chart brackets.</li>
+<li><b>Correct:</b> None / Bonferroni / Holm / Benjamini-Hochberg (FDR), plus Tukey on Compare Groups and on Repeated Measures without a Group By variable, and Games-Howell and Dunnett (vs control) on Compare Groups. On Repeated Measures, Tukey takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does; with a correction on, every pair runs on the subjects complete across all occasions, the statistic, the unadjusted p and the adjusted p alike, and the table foot and the readout say how many subjects a missing occasion left out; with Correct set to None each bracket keeps everyone who has both occasions, like jamovi's Paired Samples T-Test. On Compare Groups the same rule governs the error term: under Tukey and Dunnett, and under Bonferroni, Holm or FDR while Test is left on Auto, each row's statistic and unadjusted p use the one-way ANOVA's pooled error term over every group in the panel, and Cohen's d divides by that model's pooled SD (what jamovi's ANOVA post hoc prints in its uncorrected and Cohen's d columns). Pooling assumes the groups share one spread, so a Welch's or Student's t picked by hand under Test stays each pair's own test under Bonferroni, Holm and FDR, which only rescale p values, and a line under the table says so whenever the largest SD is more than twice the smallest. A group with a single value joins the pooled comparisons; with no pooling it has no test of its own and the footnote names it. Games-Howell runs each pair as Welch's t, and with Correct set to None each pair is its own two-group test with its own d. The chosen correction is chart-wide, shared with on-chart brackets.</li>
 <li><b>Tick the rows you want on the figure</b>, then click <b>Place brackets</b>: brackets are drawn collision-free, tiered above the data, expanding the axis if needed. The ▾ half of the button picks the label style (Asterisks, p value, p + effect size, or Full APA) and re-labels already-placed brackets live. <b>Clear placed</b> removes only the auto-placed set; hand-made brackets are never touched.</li>
 </ol>
 <p>Rows are grouped into sections ("Within Ctrl", "Across x", "Mixed pairs") with per-section significant counts; section headers fold; sorting by chart order or by p is one click on the column headers.</p>
@@ -1496,9 +1503,9 @@ control, is identical in both.</div>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>eta-squared</b> <span style="color:#666;font-weight:400">(eta2)</span><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
-<p style="margin:2px 0">Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the total corrected sum of squares. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.</p>
-<p style="margin:2px 0"><b>How to read it.</b> For example, .10 means that the term's sum of squares is 10% of the total corrected sum of squares under this ANOVA calculation.</p>
-<p style="margin:2px 0"><b>Common misread.</b> In a factorial Type III ANOVA, adjusted terms can overlap, so their eta-squared values do not have to add to 1. Eta-squared also tends to overestimate the corresponding population effect.</p>
+<p style="margin:2px 0">Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.</p>
+<p style="margin:2px 0"><b>How to read it.</b> For example, .10 means that the term's sum of squares is 10% of the table's total under this ANOVA calculation.</p>
+<p style="margin:2px 0"><b>Common misread.</b> In a factorial Type III ANOVA with unequal cell sizes, the table's rows do not add up to the data's total variation, so eta-squared is a share of the table's own total, not of all the variation in the data. Eta-squared also tends to overestimate the corresponding population effect.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Partial eta-squared</b> <span style="color:#666;font-weight:400">(partial eta2)</span><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
@@ -1551,7 +1558,7 @@ control, is identical in both.</div>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Which test?</b><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
-<p style="margin:2px 0">Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.</p>
+<p style="margin:2px 0">Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test does not hold the error rate that Welch's t holds when used every time (the pretest misses unequal variances in small samples, exactly where Student's t then goes wrong), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.</p>
 <p style="margin:2px 0"><b>Common misread.</b> Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not.</p>
 </div>
@@ -1672,7 +1679,7 @@ control, is identical in both.</div>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Tukey (studentized range)</b><span style="color:#666;font-size:.85em"> · Compare, RM</span></p>
-<p style="margin:2px 0">Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does.</p>
+<p style="margin:2px 0">Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does. On Repeated Measures that control is approximate: with few subjects and several occasions the family-wise rate runs somewhat above alpha, and Holm on the same paired tests holds it.</p>
 <p style="margin:2px 0"><b>How to read it.</b> Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.</p>
 <p style="margin:2px 0"><b>Common misread.</b> Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead.</p>
 </div>
@@ -1889,7 +1896,7 @@ control, is identical in both.</div>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Reverse-scored item</b> <span style="color:#666;font-weight:400">((R))</span><span style="color:#666;font-size:.85em"> · Likert</span></p>
-<p style="margin:2px 0">Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not apply this operation to variables handled as continuous because they have many distinct levels.</p>
+<p style="margin:2px 0">Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not apply this operation to variables handled as continuous because they have many distinct levels.</p>
 <p style="margin:2px 0"><b>How to read it.</b> The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.</p>
 <p style="margin:2px 0"><b>Common misread.</b> A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale.</p>
 </div>
@@ -2222,6 +2229,23 @@ control, is identical in both.</div>
 <tr><td>Right-click an individual data point</td><td>A small menu for that one value. In jamovi it offers "Hide this point", a display-only change you undo from the eye button. In the app it offers "Exclude this value from the dataset" (and "Include this value in the dataset" on an excluded one), which writes a real exclusion in the data table, plus "Reveal in Data" to jump to that cell.</td></tr>
 <tr><td>Hover</td><td>Tooltips with the exact values (bars, points, slices, matrix cells); hovered lines and ticks thicken so you know what you are about to click.</td></tr>
 </table></div>
+<h3 data-channel="app" id="touch">Touch (phones and tablets)</h3>
+<p data-channel="app">On a touch screen the app switches to larger buttons and larger text by itself. A phone is good for viewing a chart, sharing it and editing it; building a whole project is easier on a bigger screen. A finger follows these rules on the chart and on a layout page:</p>
+<div class="tablewrap" data-channel="app"><table>
+<tr><th>Gesture</th><th>Does</th></tr>
+<tr><td>Tap a chart part</td><td>Opens its style panel, the same as a click. A part with values to show (a point, a slice, a histogram bar, a matrix cell) also shows them beside it. They stay while that part is selected and leave when you tap somewhere else on the chart.</td></tr>
+<tr><td>Tap <i>Tap to add title</i></td><td>Opens the chart title for typing. The same faint line stands in for an axis title or a legend title you have cleared.</td></tr>
+<tr><td>Double tap a label or a data cell</td><td>Opens it for typing, the same as a double-click.</td></tr>
+<tr><td>Drag a part</td><td>Moves it at once, with no wait: reorder bars, move a label or the legend, drag an item on a layout page. Bars move only along their own axis, so on an upright chart a sideways drag reorders them and an up or down swipe that starts on a bar scrolls the page.</td></tr>
+<tr><td>Swipe on empty space</td><td>Scrolls the page and moves nothing.</td></tr>
+<tr><td>Touch and hold empty space, then drag</td><td>Draws a selection box. A ring appears under your finger when it is ready.</td></tr>
+<tr><td>Touch and hold, without moving</td><td>Opens that part's menu, the one a right-click opens on a computer. Lifting your finger leaves the menu open; tap an item to choose it. On a note, a drawn shape, a reference line or a bracket the menu starts with <b>Duplicate</b>. On a data cell it starts with <b>Edit value</b>.</td></tr>
+<tr><td>Touch and hold a button</td><td>Shows what the button does, the way resting a mouse on it does on a computer. Lifting your finger does not press it.</td></tr>
+<tr><td>Drag in the color square, on the hue strip or on a slider</td><td>Works at once, with no hold.</td></tr>
+</table>
+<p data-channel="app">On a phone, and on a tablet held upright, the app also rearranges itself. The four workspaces are tabs along the bottom of the screen. <strong>Menu</strong>, at the top left, holds Open and Save project along with File, Edit, Data, View, Insert and Help. <strong>Keep</strong> and <strong>Export</strong> sit at the top right. For a chart or a layout, Export offers <strong>Share</strong> first, which sends a picture through the share sheet to Messages, Mail, your photos or another app, and <strong>Save a file</strong> second, which opens the full export dialog with PNG chosen. The line under the project name says whether your work is saved and what the chart check found. Beside the chart's tabs, <strong>Setup</strong> opens the chart's variables as a sheet from below, with the chart redrawn in the room above it so you can watch it change. The chart toolbar ends in <strong>More</strong>, which holds Show or hide parts, Chart settings, Find a setting, Add to chart and Zoom. A tablet held sideways keeps the three columns of a computer. On any touch screen a menu names each command without its keyboard shortcut; use a keyboard once, on a tablet for example, and the shortcuts are shown beside the commands again. A tablet held sideways opens the editor beside the chart, so the whole chart stays in view while you edit, and a finger can drag the dividers between the three columns.</p>
+<p data-channel="app">On a phone the start centre puts picking up before building. <strong>Continue</strong> leads when there is autosaved work. Then come <strong>Open a project file</strong> and <strong>Open a shared link</strong>, where you paste a link someone sent you, and then the three examples. <strong>Blank data sheet</strong>, <strong>Paste data</strong> and <strong>Search open data</strong> follow under Start from scratch. A tablet keeps the start centre a computer has.</p>
+<p data-channel="app">On an iPhone or iPad you can keep the app on the home screen: in Safari, open <strong>Share</strong> and choose <strong>Add to Home Screen</strong>. It then opens full screen, without the browser's bars. Two things are different there. The home screen app keeps its own autosaved work, separate from Safari's, so save your project to a file in Safari first and open that file in the home screen app. And it has no downloads: an export, or Save project, shows the file's name with a <strong>Save or share</strong> button, which opens the share sheet. Choose Save to Files there, or send the file to another app.</p></div>
 <h3>Keyboard</h3>
 <p data-channel="app">These are the chart editor's own keys, which work
 wherever the chart does. The app adds its own shortcuts around it (menus,
@@ -2259,7 +2283,7 @@ workspaces, the data grid, saving); press <kbd>F1</kbd>, or choose
   <figcaption>Export plot: format, filename, and destination.</figcaption>
 </figure>
 <ul>
-<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.)</li>
+<li><b>Format:</b> SVG, PDF, PNG, JPG. (SVG and PDF are vector, so they stay sharp at any size; use them for papers. PNG / JPG add a <b>DPI</b> choice: Screen (96) / 150 / Print (300, the default) / 600, plus Hi-res (1200) for JPG only.) An exported SVG is safe to insert into PowerPoint and Word: the chart's invisible click targets are written as no paint and any rgba color as a hex color plus opacity, the two values Office's SVG importer would otherwise paint solid black once the file is saved and reopened. Pattern fills (stripes, dots, hatching) leave as plain shapes rather than as repeating tiles, so every viewer and printer draws them without the hairline seams that tiled patterns can show in a PDF.</li>
 <li><b>Filename</b> and <b>Save to</b> (Downloads / Desktop / Documents) are remembered. Files are never overwritten; a duplicate name gets " (2)", " (3)"…</li>
 <li>After <b>Save</b>, the result appears in the small <b>Export Status</b> item under the chart: "Saved &lt;filename&gt; to &lt;folder&gt;".</li>
 </ul>
@@ -2293,7 +2317,14 @@ and PDF, and copyable for PNG and JPG); a <b>Resolution</b> for PNG and JPG
 number, the date it was kept, the analysis it came from, and your notes.
 Preferences sets the default format and raster DPI.</li>
 <li><b>Vector by default.</b> SVG and PDF stay sharp at any size, and kept
-Notebook pages stay vector all the way into the PDF.</li>
+Notebook pages stay vector all the way into the PDF. An exported SVG, chart or
+layout, is safe to insert into PowerPoint and Word: the chart's invisible click
+targets are written as no paint and any rgba color as a hex color plus opacity,
+the two values Office's SVG importer would otherwise paint solid black once the
+file is saved and reopened. Pattern fills (stripes, dots, hatching) leave as
+plain shapes rather than as repeating tiles, in chart and layout exports
+alike, so every viewer and printer draws them without the hairline seams
+that tiled patterns can show in a PDF.</li>
 <li><b>What travels in a .pand project:</b> everything - the data, every
 chart and its styling, layouts, and the Notebook. Your saved palettes and
 chart styles stay in your own library on your machine, so opening someone
@@ -2310,8 +2341,8 @@ you cannot load anything without your say. The site holding a file has to
 let other pages read it. Most open-data hosts do, and so do GitHub Pages and
 gists.</p>
 <ul>
-<li><b>Open data from the web</b>, on the start screen, searches two open
-collections (Rdatasets and Zenodo) or opens a link you already have.</li>
+<li><b>Open data from the web</b>, on the start screen, searches three open
+collections (Rdatasets, Zenodo and Harvard Dataverse) or opens a link you already have.</li>
 <li><b>A link to a data file</b> is
 <code>https://pandionplots.com/app/?data=</code> followed by the file's
 address. It opens a CSV, TSV, Excel or jamovi file as a new project, after a

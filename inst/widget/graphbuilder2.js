@@ -1404,6 +1404,331 @@
         el.textContent = safe;
         return safe;
     }
+    // PowerPoint-safe paints (Nov 2026, Torry's deck). "transparent" and
+    // rgba() are CSS colors, not SVG 1.1 paint values. Browsers and librsvg
+    // accept both, so the live chart and the PDF export are right, but
+    // PowerPoint's SVG importer paints each one as OPAQUE BLACK once a saved
+    // deck is reopened: every error bar came back as a solid black box the
+    // size of its invisible click target, and a bracket as a fat black
+    // stroke. A static file has no clicks, so a transparent fill or stroke
+    // becomes "none" (a gradient stop keeps a color and zeroes its opacity
+    // instead), and an rgba() paint becomes its hex color with the alpha
+    // folded into the matching *-opacity attribute (multiplied, should one be
+    // set already). Attributes only: the engine never writes these paints
+    // through inline styles. Runs on EXPORT clones only - the chart export
+    // harvest here, and the standalone's layout export root through
+    // GraphBuilder2.exportSafePaints - never on the standalone's chart
+    // snapshot, whose bytes the Notebook's drift verdict compares. Probe:
+    // standalone/verify/export-paint-check.mjs.
+    // Flatten pattern fills on EXPORT clones (Nov 2026, Torry's SfN poster).
+    // Every SVG-to-PDF writer a Pandion chart passes through - svg2pdf.js in
+    // the standalone, librsvg in jamovi, Chromium for a browser print - turns
+    // an SVG <pattern> into a PDF tiling pattern, and tiling patterns draw
+    // hairline seams between tiles in some viewers and print RIPs at some
+    // zooms (a Quick Look render of the poster showed a white line across
+    // every striped bar). Plain geometry never does. So each pattern-filled
+    // element becomes: the element itself filled with the tile's base color,
+    // a sibling group clipped to the element's own shape carrying the tile
+    // content unrolled across the element (stripes and hatch lines as long
+    // runs, dots and glyphs once per tile), and the element's outline
+    // re-stroked on top. Geometry is read from the element's own attributes
+    // (absolute path commands, rect, circle, ellipse, polygon, line), never
+    // from layout, so it also works on the standalone's detached layout
+    // export root; an unreadable shape conservatively covers its owner svg's
+    // viewBox, and an element that would need more than 20000 tiles keeps its
+    // pattern. Generated ids are a per-root counter, so the harvest string
+    // stays stable across renders (jamovi's chartSnapshot hashes it). Runs on
+    // export clones only, like _gb2ExportSafePaints: never on the live chart,
+    // never on the standalone's chart snapshot. Probe:
+    // standalone/verify/export-pattern-check.mjs.
+    function _gb2ExportFlattenPatterns(root) {
+        if (!root || typeof root.querySelectorAll !== "function") return root;
+        var NS = "http://www.w3.org/2000/svg";
+        var doc = root.ownerDocument || document;
+        var MAX_TILES = 20000;
+        var fmt = function (n) { return String(Math.round(n * 1000) / 1000); };
+        var num = function (el, name, dflt) {
+            var v = parseFloat(el.getAttribute(name));
+            return isFinite(v) ? v : dflt;
+        };
+        var near = function (a, b) { return Math.abs(a - b) < 1e-6; };
+        var PAIRS = { M: 2, L: 2, T: 2, C: 6, S: 4, Q: 4 };
+        var bboxOf = function (el) {
+            var tag = el.tagName.toLowerCase(), x0, y0, x1, y1;
+            var add = function (x, y) {
+                if (!isFinite(x) || !isFinite(y)) return;
+                if (x0 === undefined || x < x0) x0 = x;
+                if (x1 === undefined || x > x1) x1 = x;
+                if (y0 === undefined || y < y0) y0 = y;
+                if (y1 === undefined || y > y1) y1 = y;
+            };
+            if (tag === "rect") {
+                var rx = num(el, "x", 0), ry = num(el, "y", 0);
+                add(rx, ry); add(rx + num(el, "width", 0), ry + num(el, "height", 0));
+            } else if (tag === "circle") {
+                var cr = num(el, "r", 0);
+                add(num(el, "cx", 0) - cr, num(el, "cy", 0) - cr);
+                add(num(el, "cx", 0) + cr, num(el, "cy", 0) + cr);
+            } else if (tag === "ellipse") {
+                add(num(el, "cx", 0) - num(el, "rx", 0), num(el, "cy", 0) - num(el, "ry", 0));
+                add(num(el, "cx", 0) + num(el, "rx", 0), num(el, "cy", 0) + num(el, "ry", 0));
+            } else if (tag === "line") {
+                add(num(el, "x1", 0), num(el, "y1", 0)); add(num(el, "x2", 0), num(el, "y2", 0));
+            } else if (tag === "polygon" || tag === "polyline") {
+                var pts = (el.getAttribute("points") || "").trim().split(/[\s,]+/).map(parseFloat);
+                for (var pi = 0; pi + 1 < pts.length; pi += 2) add(pts[pi], pts[pi + 1]);
+            } else if (tag === "path") {
+                var d = el.getAttribute("d") || "";
+                if (/[mlhvcsqtaz]/.test(d.replace(/\d[eE][-+]?\d+/g, "0"))) return null;
+                var toks = d.match(/[MLHVCSQTAZ]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+                var cmd = null, buf = [], cx = 0, cy = 0;
+                for (var ti = 0; ti < toks.length; ti++) {
+                    var tk = toks[ti];
+                    if (/^[A-Z]$/.test(tk)) { cmd = tk; buf = []; continue; }
+                    buf.push(parseFloat(tk));
+                    if (cmd === "H" && buf.length === 1) { cx = buf[0]; add(cx, cy); buf = []; }
+                    else if (cmd === "V" && buf.length === 1) { cy = buf[0]; add(cx, cy); buf = []; }
+                    else if (PAIRS[cmd] && buf.length === PAIRS[cmd]) {
+                        for (var qi = 0; qi < buf.length; qi += 2) add(buf[qi], buf[qi + 1]);
+                        cx = buf[buf.length - 2]; cy = buf[buf.length - 1]; buf = [];
+                    } else if (cmd === "A" && buf.length === 7) {
+                        var rr = Math.max(Math.abs(buf[0]), Math.abs(buf[1]));
+                        add(cx - rr, cy - rr); add(cx + rr, cy + rr);
+                        add(buf[5] - rr, buf[6] - rr); add(buf[5] + rr, buf[6] + rr);
+                        cx = buf[5]; cy = buf[6]; buf = [];
+                    }
+                }
+            } else return null;
+            return (x0 === undefined) ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        };
+        var canvasBox = function (el) {
+            var owner = el.ownerSVGElement || null;
+            if (owner) {
+                var vb = (owner.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(parseFloat);
+                if (vb.length === 4 && vb.every(isFinite) && vb[2] > 0 && vb[3] > 0)
+                    return { x: vb[0], y: vb[1], w: vb[2], h: vb[3] };
+                var ow = num(owner, "width", 0), oh = num(owner, "height", 0);
+                if (ow > 0 && oh > 0) return { x: 0, y: 0, w: ow, h: oh };
+            }
+            return { x: -5000, y: -5000, w: 10000, h: 10000 };
+        };
+        var matrixOf = function (pat) {
+            try {
+                var c = pat.patternTransform && pat.patternTransform.baseVal
+                    && pat.patternTransform.baseVal.consolidate();
+                if (c && c.matrix) return { a: c.matrix.a, b: c.matrix.b, c: c.matrix.c, d: c.matrix.d, e: c.matrix.e, f: c.matrix.f };
+            } catch (_eM) {}
+            var t = (pat.getAttribute("patternTransform") || "").trim();
+            var m = /^matrix\(\s*([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)[\s,]+([-\d.e]+)\s*\)$/i.exec(t);
+            if (m) return { a: +m[1], b: +m[2], c: +m[3], d: +m[4], e: +m[5], f: +m[6] };
+            var r = /^rotate\(\s*([-\d.e]+)\s*\)$/i.exec(t);
+            if (r) { var th = (+r[1]) * Math.PI / 180; return { a: Math.cos(th), b: Math.sin(th), c: -Math.sin(th), d: Math.cos(th), e: 0, f: 0 }; }
+            return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        };
+        var invert = function (m) {
+            var det = m.a * m.d - m.b * m.c;
+            if (!isFinite(det) || Math.abs(det) < 1e-12) return null;
+            return { a: m.d / det, b: -m.b / det, c: -m.c / det, d: m.a / det,
+                     e: (m.c * m.f - m.d * m.e) / det, f: (m.b * m.e - m.a * m.f) / det };
+        };
+        var apply = function (m, x, y) { return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]; };
+        var isIdentity = function (m) { return near(m.a, 1) && near(m.b, 0) && near(m.c, 0) && near(m.d, 1) && near(m.e, 0) && near(m.f, 0); };
+        var mk = function (tag, attrs) {
+            var e = doc.createElementNS(NS, tag);
+            for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
+            return e;
+        };
+        var stripDataAttrs = function (el) {
+            for (var i = el.attributes.length - 1; i >= 0; i--) {
+                var an = el.attributes[i].name;
+                if (an.indexOf("data-") === 0 || an === "id" || an === "aria-label" || an === "role") el.removeAttribute(an);
+            }
+        };
+        var defsFor = function (el) {
+            var owner = el.ownerSVGElement || root;
+            for (var c = owner.firstChild; c; c = c.nextSibling)
+                if (c.nodeType === 1 && c.tagName.toLowerCase() === "defs") return c;
+            var d = doc.createElementNS(NS, "defs");
+            owner.insertBefore(d, owner.firstChild);
+            return d;
+        };
+        var counter = 0, touched = {};
+        var all = root.querySelectorAll("[fill]");
+        var targets = [];
+        for (var i = 0; i < all.length; i++) {
+            var fm = /^\s*url\(\s*["']?#([^"')]+)["']?\s*\)\s*$/.exec(all[i].getAttribute("fill") || "");
+            if (fm) targets.push([all[i], fm[1]]);
+        }
+        for (var ti2 = 0; ti2 < targets.length; ti2++) {
+            var el = targets[ti2][0], pid = targets[ti2][1];
+            var pat = null;
+            try { pat = root.querySelector("pattern[id=\"" + pid.replace(/["\\]/g, "\\$&") + "\"]"); } catch (_eQ) { pat = null; }
+            if (!pat) continue;
+            if ((pat.getAttribute("patternUnits") || "") !== "userSpaceOnUse") continue;
+            var tileW = num(pat, "width", 0), tileH = num(pat, "height", 0);
+            if (!(tileW > 0 && tileH > 0)) continue;
+            var kids = [];
+            for (var k2 = pat.firstChild; k2; k2 = k2.nextSibling) if (k2.nodeType === 1) kids.push(k2);
+            if (!kids.length) continue;
+            var base = null, content = kids;
+            var k0 = kids[0];
+            if (k0.tagName.toLowerCase() === "rect" && near(num(k0, "x", 0), 0) && near(num(k0, "y", 0), 0)
+                && near(num(k0, "width", 0), tileW) && near(num(k0, "height", 0), tileH)) {
+                base = k0.getAttribute("fill") || "#000000"; content = kids.slice(1);
+            }
+            var box = bboxOf(el) || canvasBox(el);
+            var m = matrixOf(pat), inv = invert(m);
+            if (!inv) continue;
+            var cs = [apply(inv, box.x, box.y), apply(inv, box.x + box.w, box.y),
+                      apply(inv, box.x, box.y + box.h), apply(inv, box.x + box.w, box.y + box.h)];
+            var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (var ci = 0; ci < 4; ci++) {
+                minX = Math.min(minX, cs[ci][0]); maxX = Math.max(maxX, cs[ci][0]);
+                minY = Math.min(minY, cs[ci][1]); maxY = Math.max(maxY, cs[ci][1]);
+            }
+            var i0 = Math.floor(minX / tileW) - 1, i1 = Math.ceil(maxX / tileW) + 1;
+            var j0 = Math.floor(minY / tileH) - 1, j1 = Math.ceil(maxY / tileH) + 1;
+            var inner = mk("g", {});
+            if (!isIdentity(m)) inner.setAttribute("transform", "matrix(" + [m.a, m.b, m.c, m.d, m.e, m.f].map(fmt).join(" ") + ")");
+            var spanY0 = (j0) * tileH, spanY1 = (j1 + 1) * tileH, spanX0 = i0 * tileW, spanX1 = (i1 + 1) * tileW;
+            var allLines = content.length > 0 && content.every(function (c) {
+                if (c.tagName.toLowerCase() !== "line") return false;
+                var hx = near(num(c, "y1", 0), num(c, "y2", 0)) && near(Math.min(num(c, "x1", 0), num(c, "x2", 0)), 0) && near(Math.max(num(c, "x1", 0), num(c, "x2", 0)), tileW);
+                var vx = near(num(c, "x1", 0), num(c, "x2", 0)) && near(Math.min(num(c, "y1", 0), num(c, "y2", 0)), 0) && near(Math.max(num(c, "y1", 0), num(c, "y2", 0)), tileH);
+                return hx || vx;
+            });
+            var oneStripe = content.length === 1 && content[0].tagName.toLowerCase() === "rect"
+                && near(num(content[0], "y", 0), 0) && near(num(content[0], "height", 0), tileH);
+            var made = 0, ok = true;
+            if (oneStripe) {
+                var sr = content[0];
+                for (var si = i0; si <= i1; si++) {
+                    var r1 = sr.cloneNode(false); stripDataAttrs(r1);
+                    r1.setAttribute("x", fmt(si * tileW + num(sr, "x", 0)));
+                    r1.setAttribute("y", fmt(spanY0)); r1.setAttribute("height", fmt(spanY1 - spanY0));
+                    inner.appendChild(r1); made++;
+                }
+            } else if (allLines) {
+                for (var li = 0; li < content.length; li++) {
+                    var ln = content[li];
+                    if (near(num(ln, "y1", 0), num(ln, "y2", 0))) {
+                        for (var lj = j0; lj <= j1; lj++) {
+                            var h1 = ln.cloneNode(false); stripDataAttrs(h1);
+                            var yy = lj * tileH + num(ln, "y1", 0);
+                            h1.setAttribute("x1", fmt(spanX0)); h1.setAttribute("x2", fmt(spanX1));
+                            h1.setAttribute("y1", fmt(yy)); h1.setAttribute("y2", fmt(yy));
+                            inner.appendChild(h1); made++;
+                        }
+                    } else {
+                        for (var lk = i0; lk <= i1; lk++) {
+                            var v1 = ln.cloneNode(false); stripDataAttrs(v1);
+                            var xx = lk * tileW + num(ln, "x1", 0);
+                            v1.setAttribute("y1", fmt(spanY0)); v1.setAttribute("y2", fmt(spanY1));
+                            v1.setAttribute("x1", fmt(xx)); v1.setAttribute("x2", fmt(xx));
+                            inner.appendChild(v1); made++;
+                        }
+                    }
+                }
+            } else {
+                var tiles = (i1 - i0 + 1) * (j1 - j0 + 1);
+                if (tiles > MAX_TILES || tiles < 1) ok = false;
+                else {
+                    for (var gi = i0; gi <= i1; gi++) {
+                        for (var gj = j0; gj <= j1; gj++) {
+                            var tg = mk("g", { transform: "translate(" + fmt(gi * tileW) + " " + fmt(gj * tileH) + ")" });
+                            for (var ck = 0; ck < content.length; ck++) {
+                                var cc = content[ck].cloneNode(true); stripDataAttrs(cc); tg.appendChild(cc);
+                            }
+                            inner.appendChild(tg); made++;
+                        }
+                    }
+                }
+            }
+            if (!ok) continue;
+            var clipId = "gb2flat-" + (counter++);
+            var cp = mk("clipPath", { id: clipId });
+            var shape = el.cloneNode(false);
+            stripDataAttrs(shape);
+            ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
+             "stroke-linecap", "stroke-linejoin", "transform", "clip-path", "opacity", "style", "filter", "mask",
+             "tabindex", "pointer-events", "cursor"].forEach(function (an) { shape.removeAttribute(an); });
+            cp.appendChild(shape);
+            defsFor(el).appendChild(cp);
+            var clipG = mk("g", { "clip-path": "url(#" + clipId + ")" });
+            clipG.appendChild(inner);
+            var wrap = mk("g", { "data-gb2-flat": "1" });
+            var elT = el.getAttribute("transform");
+            if (elT) wrap.setAttribute("transform", elT);
+            var op = num(el, "opacity", 1) * num(el, "fill-opacity", 1);
+            if (op < 1) wrap.setAttribute("opacity", fmt(Math.max(0, op)));
+            wrap.appendChild(clipG);
+            el.parentNode.insertBefore(wrap, el.nextSibling);
+            var st = el.getAttribute("stroke");
+            if (st && st !== "none" && num(el, "stroke-width", 1) > 0) {
+                var outline = el.cloneNode(false);
+                stripDataAttrs(outline);
+                outline.setAttribute("fill", "none");
+                outline.setAttribute("data-gb2-flat", "outline");
+                wrap.parentNode.insertBefore(outline, wrap.nextSibling);
+                el.setAttribute("stroke", "none");
+            }
+            el.setAttribute("fill", base || "none");
+            touched[pid] = pat;
+        }
+        for (var tid in touched) {
+            if (!Object.prototype.hasOwnProperty.call(touched, tid)) continue;
+            var still = false;
+            try {
+                var esc = tid.replace(/["\\]/g, "\\$&");
+                still = !!root.querySelector("[fill=\"url(#" + esc + ")\"], [stroke=\"url(#" + esc + ")\"]");
+            } catch (_eS) { still = true; }
+            if (!still && touched[tid].parentNode) touched[tid].parentNode.removeChild(touched[tid]);
+        }
+        return root;
+    }
+    function _gb2ExportSafePaints(root) {
+        if (!root || typeof root.getElementsByTagName !== "function") return root;
+        var attrs = ["fill", "stroke", "stop-color"];
+        var opac = { fill: "fill-opacity", stroke: "stroke-opacity",
+                     "stop-color": "stop-opacity" };
+        var rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i;
+        var hex = function (n) {
+            var h = Math.max(0, Math.min(255, Math.round(parseFloat(n)))).toString(16);
+            return h.length < 2 ? "0" + h : h;
+        };
+        var nodes = [root], all = root.getElementsByTagName("*");
+        for (var i = 0; i < all.length; i++) nodes.push(all[i]);
+        for (var j = 0; j < nodes.length; j++) {
+            var el = nodes[j];
+            if (!el || typeof el.getAttribute !== "function") continue;
+            for (var a = 0; a < attrs.length; a++) {
+                var name = attrs[a];
+                var v = el.getAttribute(name);
+                if (v === null) continue;
+                var t = String(v).trim();
+                if (/^transparent$/i.test(t)) {
+                    if (name === "stop-color") {
+                        el.setAttribute(name, "#000000");
+                        el.setAttribute("stop-opacity", "0");
+                    } else {
+                        el.setAttribute(name, "none");
+                    }
+                    continue;
+                }
+                var m = rgb.exec(t);
+                if (!m) continue;
+                el.setAttribute(name, "#" + hex(m[1]) + hex(m[2]) + hex(m[3]));
+                if (m[4] === undefined) continue;
+                var alpha = parseFloat(m[4]);
+                if (!isFinite(alpha) || alpha >= 1) continue;
+                var oName = opac[name];
+                var oVal = parseFloat(el.getAttribute(oName));
+                if (!isFinite(oVal)) oVal = 1;
+                el.setAttribute(oName, String(Math.max(0, Math.min(1, oVal * Math.max(0, alpha)))));
+            }
+        }
+        return root;
+    }
     function _gb2PrepareSvgForExport(copy) {
         // Mutate an export clone only. Live data-* values still identify
         // exact groups/facets for interactions and statistical selection.
@@ -1860,6 +2185,33 @@
         // two-sided p matches prop.test(x, n, correct = FALSE).
         // seDiff is the unpooled Wald SE, used for the CI on p1 - p2
         // (also matching prop.test's correct = FALSE interval).
+        // Fisher's exact test for a 2 x 2 table, two-sided the way R's
+        // fisher.test computes it: the summed probability of every table
+        // with the same margins that is no more likely than the observed
+        // one (R's relative tolerance of 1e-7). Counts must be whole.
+        fisherExact2x2: function (a, b, c, d) {
+            var whole = function (v) {
+                return typeof v === "number" && isFinite(v) && v >= 0 && Math.abs(v - Math.round(v)) < 1e-9;
+            };
+            if (!whole(a) || !whole(b) || !whole(c) || !whole(d)) return null;
+            a = Math.round(a); b = Math.round(b); c = Math.round(c); d = Math.round(d);
+            var r1 = a + b, r2 = c + d, c1 = a + c, n = r1 + r2;
+            if (n < 1) return null;
+            var self = this;
+            var lf = function (x) { return self._logGamma(x + 1); };
+            var lp = function (x) {
+                return lf(r1) + lf(r2) + lf(c1) + lf(n - c1) - lf(n) -
+                    lf(x) - lf(r1 - x) - lf(c1 - x) - lf(r2 - c1 + x);
+            };
+            var lo = Math.max(0, c1 - r2), hi = Math.min(r1, c1);
+            var lobs = lp(a), sum = 0;
+            for (var x = lo; x <= hi; x++) {
+                var l = lp(x);
+                if (l <= lobs + 1e-7) sum += Math.exp(l);
+            }
+            if (!isFinite(sum)) return null;
+            return { p: Math.min(1, sum) };
+        },
         twoPropZ: function (x1, N1, x2, N2, tail) {
             if (!(N1 > 0) || !(N2 > 0)) return null;
             var p1 = x1 / N1, p2 = x2 / N2;
@@ -1991,6 +2343,41 @@
             return { F: F, df1: df1, df2: df2, p: p,
                      msb: msb, msw: msw,
                      etaSq: etaSq, k: k, N: N };
+        },
+        // Welch's one-way ANOVA (Welch 1951): each group weighted by its
+        // own precision n / s^2, so no common spread is assumed. Needs at
+        // least two values and a positive variance in every group. The
+        // second df is estimated and is rarely whole. Matches R's
+        // oneway.test(var.equal = FALSE) and jamovi's One-Way ANOVA.
+        welchANOVA: function (levels) {
+            if (!levels || levels.length < 2) return null;
+            var gs = [], W = 0, i;
+            for (i = 0; i < levels.length; i++) {
+                var v = (levels[i] || []).filter(isFinite);
+                if (v.length < 1) continue;
+                if (v.length < 2) return null;
+                var m = this.mean(v), s2 = this.variance(v, m);
+                if (!(s2 > 0) || !isFinite(s2)) return null;
+                var w = v.length / s2;
+                gs.push({ n: v.length, m: m, w: w });
+                W += w;
+            }
+            var k = gs.length;
+            if (k < 2 || !(W > 0)) return null;
+            var mw = 0;
+            for (i = 0; i < k; i++) mw += gs[i].w * gs[i].m;
+            mw /= W;
+            var num = 0, lam = 0;
+            for (i = 0; i < k; i++) {
+                num += gs[i].w * (gs[i].m - mw) * (gs[i].m - mw);
+                var q = 1 - gs[i].w / W;
+                lam += q * q / (gs[i].n - 1);
+            }
+            var df1 = k - 1;
+            var F = (num / df1) / (1 + 2 * (k - 2) / (k * k - 1) * lam);
+            var df2 = (k * k - 1) / (3 * lam);
+            if (!isFinite(F) || !isFinite(df2) || !(df2 > 0)) return null;
+            return { F: F, df1: df1, df2: df2, p: this.fSurvival(F, df1, df2), k: k };
         },
         // Gaussian elimination with partial pivoting for the small
         // normal-equations systems below (p <= ~a*b). Returns the
@@ -2795,79 +3182,124 @@
         // (the studentized range q) compared to a different
         // reference distribution (k_groups, df_within from a
         // one-way ANOVA). JS has no built-in ptukey(), so we
-        // integrate numerically via Simpson's rule:
+        // integrate numerically (trapezoid rule, both integrals):
         //
         //   P(W ≤ w | k)    = k · ∫ φ(z) · [Φ(z+w) − Φ(z)]^(k−1) dz
         //                      (CDF of range of k iid N(0,1))
         //   P(Q ≤ q | k, ν) = ∫ P(W ≤ q·s | k) · f_S(s | ν) ds
         //                      where S = √(χ²(ν)/ν)
         //
-        // Accuracy: matches R's ptukey() to ~3-4 decimal places
-        // for typical (k=2..10, ν=10..500). Sufficient for the
-        // significance decisions this tool drives.
+        // Accuracy (Nov 2026): within 1e-11 of the exact value for every
+        // df from 1 up and k to 50, checked against the t distribution
+        // at k = 2 (where 1 - ptukey IS the two-sided t p), SciPy's
+        // studentized_range, and its own result with every step halved.
+        // The earlier Simpson grid was fixed in s: it cut the far tail
+        // at df below 2 (5e-5 at df 1) and under-sampled the narrow chi
+        // density from df ~150 up (0.18 at df 1000), and above df 1000
+        // it used the df = infinity range.
+        //
+        // Normal CDF to double precision: W. J. Cody's rational
+        // Chebyshev approximations (Math. Comp. 23, 1969), the algorithm
+        // behind R's pnorm. _normCDF above (1.5e-7) stays as it is for
+        // the rank tests; the range integral raises a difference of two
+        // CDFs to the k - 1 power, which that error does not survive.
+        _normCDFExact: function (x) {
+            if (x !== x) return NaN;
+            var y = Math.abs(x), s, num, den, tmp;
+            if (y <= 0.67448975) {
+                s = x * x;
+                num = (((0.065682337918207449113 * s + 2.2352520354606839287) * s +
+                        161.02823106855587881) * s + 1067.6894854603709582) * s +
+                        18154.981253343561249;
+                den = (((s + 47.20258190468824187) * s + 976.09855173777669322) * s +
+                        10260.932208618978205) * s + 45507.789335026729956;
+                return 0.5 + x * num / den;
+            }
+            if (y > 38) return x > 0 ? 1 : 0;
+            if (y <= 5.656854249492381) {
+                num = (((((((1.0765576773720192317e-8 * y + 0.39894151208813466764) * y +
+                        8.8831497943883759412) * y + 93.506656132177855979) * y +
+                        597.27027639480026226) * y + 2494.5375852903726711) * y +
+                        6848.1904505362823326) * y + 11602.651437647350124) * y +
+                        9842.7148383839780218;
+                den = (((((((y + 22.266688044328115691) * y + 235.38790178262499861) * y +
+                        1519.377599407554805) * y + 6485.558298266760755) * y +
+                        18615.571640885098091) * y + 34900.952721145977266) * y +
+                        38912.003286093271411) * y + 19685.429676859990727;
+                tmp = num / den;
+            } else {
+                s = 1 / (x * x);
+                num = ((((0.02307344176494017303 * s + 0.21589853405795699) * s +
+                        0.1274011611602473639) * s + 0.022235277870649807) * s +
+                        0.001421619193227893466) * s + 2.9112874951168792e-5;
+                den = ((((s + 1.28426009614491121) * s + 0.468238212480865118) * s +
+                        0.0659881378689285515) * s + 0.00378239633202758244) * s +
+                        7.29751555083966205e-5;
+                tmp = (0.3989422804014327 - s * num / den) / y;
+            }
+            s = Math.floor(y * 16) / 16;
+            tmp = Math.exp(-s * s * 0.5) * Math.exp(-(y - s) * (y + s) * 0.5) * tmp;
+            return x > 0 ? 1 - tmp : tmp;
+        },
+        // Range of k iid N(0,1). The integrand is a smooth bell that
+        // dies at both ends, where the plain trapezoid rule converges
+        // geometrically (Simpson's alternating weights only hurt it);
+        // the step narrows with k because the bell does.
         _pStudentRangeNormal: function (w, k) {
             if (w <= 0) return 0;
             if (k < 2) return 1;
-            // Simpson's rule on z ∈ [-6, 6] — effectively ±∞ for
-            // standard normal (Φ(-6) ≈ 1e-9).
-            var lo = -6, hi = 6;
-            var n = 60; // must be even for Simpson's rule
-            var h = (hi - lo) / n;
+            var h = Math.min(0.2, 0.8 / Math.sqrt(k));
+            var n = Math.ceil(8.4 / h);
             var sum = 0;
-            var INV_SQRT_2PI = 1 / Math.sqrt(2 * Math.PI);
-            for (var i = 0; i <= n; i++) {
-                var z = lo + i * h;
-                var phi = INV_SQRT_2PI * Math.exp(-z * z / 2);
-                var diff = this._normCDF(z + w) - this._normCDF(z);
-                if (diff < 0) diff = 0;
-                var term = phi * Math.pow(diff, k - 1);
-                var wt = (i === 0 || i === n) ? 1 : (i % 2 === 0 ? 2 : 4);
-                sum += wt * term;
+            for (var i = -n; i <= n; i++) {
+                var z = i * h;
+                var diff = this._normCDFExact(z + w) - this._normCDFExact(z);
+                if (diff <= 0) continue;
+                sum += Math.exp(-z * z / 2) * Math.pow(diff, k - 1);
             }
-            var p = k * sum * h / 3;
+            var p = k * sum * h * 0.3989422804014327;
             if (p < 0) p = 0;
             if (p > 1) p = 1;
             return p;
         },
+        // Mixture over S = sqrt(chi2(df)/df), integrated on t = ln s.
+        // There the weight exp(df (t - (e^(2t) - 1)/2)) is a smooth bell
+        // centered at t = 0 with width 1/sqrt(2 df) at every df, so the
+        // step is scaled to the weight instead of being fixed in s, and
+        // the cost no longer grows with q. The weight is normalized by
+        // its own trapezoid sum, which needs no gamma function. Each
+        // side runs outward from the peak until its terms are below
+        // 1e-18; the left side stops calling the range integral once
+        // the product is that small (both factors fall together there).
         ptukey: function (q, k, df) {
             if (q <= 0) return 0;
             if (k < 2) return 1;
-            if (!isFinite(df) || df > 1000) {
+            if (!isFinite(df) || df > 1e10) {
                 return this._pStudentRangeNormal(q, k);
             }
-            // f_S(s) is the density of √(χ²(ν)/ν). Computed in log
-            // space to keep the ν^(ν/2) factor from overflowing
-            // at large df.
-            var logCoef = (df / 2) * Math.log(df / 2)
-                          - this._logGamma(df / 2)
-                          + Math.log(2);
-            // Integration range for s: PDF peaks near 1 and drops
-            // off by s = 3-4. Truncate at 4 for safety.
-            var lo = 0.001, hi = 4;
-            // The grid scales with q (Sep 16 2026): at a large q with
-            // tiny df the whole tail sits at s below about 14/q, where a
-            // fixed 80-node grid left only a few nodes and the p came
-            // out 26% high at (q 50, k 6, df 2.5) and 14x low at
-            // (100, 4, 3) against SciPy's studentized_range.sf. With
-            // n = 40 q the twelve checked inputs, ordinary ones included,
-            // match SciPy to four figures; the cost is under 20 ms at
-            // q = 100 (scratchpad rail2/tukey/compare.mjs).
-            var n = Math.max(80, Math.ceil(40 * q));
-            if (n % 2) n++;
-            if (n > 8000) n = 8000;
-            var h = (hi - lo) / n;
-            var sum = 0;
-            for (var i = 0; i <= n; i++) {
-                var s = lo + i * h;
-                var logFs = logCoef + (df - 1) * Math.log(s) - df * s * s / 2;
-                var f_s = Math.exp(logFs);
-                if (!isFinite(f_s)) continue;
-                var pR = this._pStudentRangeNormal(q * s, k);
-                var term = f_s * pR;
-                var wt = (i === 0 || i === n) ? 1 : (i % 2 === 0 ? 2 : 4);
-                sum += wt * term;
+            if (!(df > 0)) return 0;
+            var h = Math.PI / (21 + 5.7 * Math.sqrt(df));
+            var num = this._pStudentRangeNormal(q, k), den = 1;
+            var i, t, g, term, live = true;
+            for (i = 1; i < 1000000; i++) {
+                t = i * h;
+                g = Math.exp(df * (t - Math.expm1(2 * t) / 2));
+                if (g < 1e-18) break;
+                den += g;
+                num += g * this._pStudentRangeNormal(q * Math.exp(t), k);
             }
-            var p = sum * h / 3;
+            for (i = 1; i < 1000000; i++) {
+                t = -i * h;
+                g = Math.exp(df * (t - Math.expm1(2 * t) / 2));
+                if (g < 1e-18) break;
+                den += g;
+                if (live) {
+                    term = g * this._pStudentRangeNormal(q * Math.exp(t), k);
+                    num += term;
+                    if (term < 1e-18) live = false;
+                }
+            }
+            var p = num / den;
             if (p < 0) p = 0;
             if (p > 1) p = 1;
             return p;
@@ -3242,10 +3674,15 @@
                 // value - one more and the histogram would carry an
                 // empty bin off its right end.
                 var k = 0;
+                // Stop at the first edge that reaches the maximum (Nov
+                // 2026). The test was "past the maximum", and on non-integer
+                // data the last of the target edges lands ON the maximum,
+                // so one more bin was added to hold only the largest value.
+                var aTol = Math.abs(ai.w) * 1e-9;
                 while (k < 2000) {
                     var ax = aStart + k * ai.w;
+                    if (k > 0 && ax >= ai.max - aTol) { edges.push(Math.max(ax, ai.max)); break; }
                     edges.push(ax);
-                    if (ax > ai.max + 1e-9) break;
                     k++;
                 }
                 if (edges.length >= 2) return edges;
@@ -5074,6 +5511,13 @@
         // the echo later hashes identical and is skipped. Deferred so the
         // calling commit's own teardown finishes first.
         function _gb2RerenderSoon() {
+            // A commit routed through chartSpec schedules its undo snapshot
+            // 250 ms out, but this re-render re-seeds the undo baseline from
+            // data that already holds the change, so that pending step was
+            // lost (every Estimation band and Difference plot control that
+            // re-rendered lost its undo this way). Take it now; undo's own
+            // re-render runs while _undoApplying is set and takes nothing.
+            try { if (_undoTimer && !_undoApplying) { clearTimeout(_undoTimer); _undoTimer = null; _undoTake(); } } catch (_eUf) {}
             try {
                 setTimeout(function () {
                     try {
@@ -5689,6 +6133,20 @@
                 _hiddenPointLookup[key][h.idx] = true;
             }
         })();
+        // Host-declared, through the pointMenuVerb seam: this host's hidden
+        // points are real exclusions written from its own data editor, not a
+        // display choice. jamovi never ships the key, so every reader of
+        // this keeps the hide semantics there (the Descriptives hold the
+        // full data, the axis keeps a hidden point in view). Where the key
+        // is set, an excluded value is left out of everything that is
+        // computed or scaled from the data: the Descriptives, the outlier
+        // fences and the axis range, as well as the bars and tests that
+        // already left it out (Nov 2026: "if you exclude the data, it
+        // should be excluded in other places, including the descriptives").
+        // The slashed marker stays, drawn wherever it falls inside the axis.
+        function _gb2PtsExcluded() {
+            return !!(data && data.pointMenuVerb === "exclude");
+        }
         function _hiddenSetForBar(b) {
             if (!b) return null;
             var key = (b.x || "") + "::" + (b.group || "");
@@ -6352,7 +6810,10 @@
                 // markers at hidden positions must stay on-axis, and the
                 // axis holding still while points are hidden/restored
                 // keeps the exploration readable (Jul 9 2026).
-                var _rvArr = Array.isArray(barsArr[i]._origValues)
+                // Not where hidden points are exclusions (_gb2PtsExcluded):
+                // an excluded typo must not stretch the axis to keep its
+                // marker in view, so the range follows the values that remain.
+                var _rvArr = (!_gb2PtsExcluded() && Array.isArray(barsArr[i]._origValues))
                     ? barsArr[i]._origValues : barsArr[i].values;
                 if (isDistGraph && Array.isArray(_rvArr) && _rvArr.length > 0) {
                     var dvs = _rvArr;
@@ -9180,10 +9641,75 @@
         // widget re-mount: the fresh applySize() resets to
         // inchesW * inchesH, and the dragged element (whose offset is
         // persisted) now sits past the canvas edge.
+        // A significance bracket rides its spanned bars: its spine is
+        // derived from their ceiling on every draw. When those bars sit
+        // OFF the value axis (a Min or Max override, or a keystroke on the
+        // way to one, pushed the data out of range) the bracket is drawn
+        // far outside the plot by the AXIS, not by the user, so it must
+        // not grow the canvas (Nov 7 2026, Torry's standalone report: a
+        // Max typed as 1-6-0 drew the bracket 46,000 px up and the chart
+        // was parked that far down). A bracket the user dragged above the
+        // plot keeps its bars on the axis and still earns its room.
+        function _gb2OffAxisBracket(el) {
+            try {
+                // The element may be the bracket group itself or a part
+                // of it swept on its own: the label text is registered
+                // as an editable text and measured by that loop, so the
+                // owning annotation is resolved through the ancestors.
+                var id = null, n = el, hops = 0;
+                while (n && n.getAttribute && hops < 8) {
+                    id = n.getAttribute("data-ann-id");
+                    if (id) break;
+                    n = n.parentNode; hops++;
+                }
+                if (!id) return false;
+                var ann = findAnnotation(id);
+                if (!ann || ann.kind !== "bracket") return false;
+                var anchored = (ann.anchorLeftCat && ann.anchorRightCat) ||
+                    _isMainEffectAnn(ann);
+                if (!anchored) return false;
+                if (typeof window.__gb2_valAxis !== "function") return false;
+                var va = window.__gb2_valAxis();
+                if (!va || typeof va.toPxVal !== "function") return false;
+                var c = _cmpCeilPx(_cmpVisibleCells(),
+                    Math.min(ann.x, ann.x2), Math.max(ann.x, ann.x2), va);
+                if (!isFinite(c)) return false;
+                var p0 = va.toPxVal(va.yMin), p1 = va.toPxVal(va.yMax);
+                if (!isFinite(p0) || !isFinite(p1)) return false;
+                var lo = Math.min(p0, p1) - 0.5, hi = Math.max(p0, p1) + 0.5;
+                return c < lo || c > hi;
+            } catch (_eOab) { return false; }
+        }
         function _growCanvasForAllElements() {
-            // Editable text (titles, ticks, labels, etc.).
+            // The upward growth is RECOMPUTED from zero on every sweep
+            // (Nov 7 2026). _topGrow used to be grow-only within a mount,
+            // reset only by a full render: once something had pushed the
+            // chart down, a redraw could never bring it back, so the
+            // keystroke case above left the chart 46,000 px down after
+            // the final digit landed. Dropping the shift and re-measuring
+            // from the natural height keeps a real drag above the plot
+            // grown (it measures the same on every sweep) and lets the
+            // canvas come back the moment nothing needs the room. Only
+            // runs when a shift exists, so an ordinary redraw is
+            // byte-identical to before.
+            if (_topGrow > 0) {
+                _topGrow = 0;
+                try {
+                    var _hNat = inchesH * PX_PER_INCH + (M.extraBottomPx || 0);
+                    if (isFinite(_hNat) && _hNat > 0) {
+                        svg.setAttribute("height", _hNat);
+                        svg.__gb2_expectedH = _hNat;
+                        svg.__gb2_sizeWriteAt = Date.now();
+                        _gb2SyncSizeStyle(undefined, _hNat);
+                    }
+                } catch (_eTg) {}
+                _updateBgCanvas();
+            }
+            // Editable text (titles, ticks, labels, etc.). A bracket's
+            // label is one of these, so it takes the off-axis guard too.
             for (var id in editableElsByDragId) {
                 if (Object.prototype.hasOwnProperty.call(editableElsByDragId, id)) {
+                    if (_gb2OffAxisBracket(editableElsByDragId[id])) continue;
                     _ensureChartRoomFor(editableElsByDragId[id]);
                 }
             }
@@ -9192,11 +9718,17 @@
             try {
                 if (typeof annotationsGroup !== "undefined" && annotationsGroup) {
                     var c = annotationsGroup.children;
-                    for (var i = 0; i < c.length; i++) _ensureChartRoomFor(c[i]);
+                    for (var i = 0; i < c.length; i++) {
+                        if (_gb2OffAxisBracket(c[i])) continue;
+                        _ensureChartRoomFor(c[i]);
+                    }
                 }
                 if (typeof annotationsBackGroup !== "undefined" && annotationsBackGroup) {
                     var cb = annotationsBackGroup.children;
-                    for (var j = 0; j < cb.length; j++) _ensureChartRoomFor(cb[j]);
+                    for (var j = 0; j < cb.length; j++) {
+                        if (_gb2OffAxisBracket(cb[j])) continue;
+                        _ensureChartRoomFor(cb[j]);
+                    }
                 }
             } catch (e) {}
             try {
@@ -9305,13 +9837,23 @@
                 var CHART_TOP_PADDING = 8;
                 if (elTop < -MAX_TOP_BG_PAD + CHART_TOP_PADDING) {
                     var deltaGrow = -elTop - MAX_TOP_BG_PAD + CHART_TOP_PADDING;
-                    _topGrow += deltaGrow;
-                    // SVG must grow by the same amount so the shifted
-                    // bars/axes don't get clipped at the bottom.
-                    var grownH = (newH !== H ? newH : H) + deltaGrow;
-                    svg.setAttribute("height", grownH);
-                    try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, grownH); } catch (_eXg) {}
-                    grew = true;
+                    // Capped like the right and bottom edges (Nov 7 2026):
+                    // the canvas never exceeds _AUTO_EXPAND_MAX_H in all,
+                    // so no position can park the chart thousands of px
+                    // down. Past the cap the element draws above the
+                    // canvas, which overflow:visible still shows.
+                    var _hFrom = (newH !== H ? newH : H);
+                    var _topRoom = _AUTO_EXPAND_MAX_H - _hFrom;
+                    if (deltaGrow > _topRoom) deltaGrow = _topRoom;
+                    if (deltaGrow > 0) {
+                        _topGrow += deltaGrow;
+                        // SVG must grow by the same amount so the shifted
+                        // bars/axes don't get clipped at the bottom.
+                        var grownH = _hFrom + deltaGrow;
+                        svg.setAttribute("height", grownH);
+                        try { svg.__gb2_expectedH = grownH; svg.__gb2_sizeWriteAt = Date.now(); _gb2SyncSizeStyle(undefined, grownH); } catch (_eXg) {}
+                        grew = true;
+                    }
                 }
             }
             if (grew) _updateBgCanvas();
@@ -9939,6 +10481,7 @@
         // would extend past the wrap's right edge.
         var _xyWrapRect = null, _xyWrapRectAt = 0, _xyWrapScale = 1;
         function _xyTooltipPosition(clientX, clientY) {
+            if (_xyTipPin) { _xyTipPlace(); return; }
             // Both reads below force a layout flush and this runs per
             // pointermove (60 Hz): cache the wrap rect briefly (150 ms
             // TTL keeps it honest across scroll/resize) and the
@@ -9980,10 +10523,437 @@
             _xyTooltip.style.display = "block";
             _xyTooltip.__gb2w = 0;
             _xyTooltip.__gb2h = 0;
+            if (_xyTipSynth) _xyTipPinNow();
             _xyTooltipPosition(clientX, clientY);
         }
         function _xyTooltipHide() {
+            if (_xyTipPin) return;
             _xyTooltip.style.display = "none";
+        }
+        // ---- Readouts for bars, markers, boxes and heatmap tiles ---------
+        // Pie slices, histogram bars, Likert segments, scatter points and
+        // correlation cells say what they show when the pointer rests on
+        // them; these marks did not. The numbers come from the same values
+        // the marks are drawn from, so a readout can never disagree with
+        // its mark.
+        // Four significant figures, whole numbers from 1000 up: one figure
+        // more than the value labels on bars print.
+        function _tipNum(v) {
+            v = +v;
+            if (!isFinite(v)) return "";
+            if (Math.abs(v) >= 1000) return String(Math.round(v));
+            return (+v.toPrecision(4)).toString();
+        }
+        function _tipLine(label, value) {
+            return "<div>" + label + " " + value + "</div>";
+        }
+        // A bar, a line or dot marker, a box, a violin or a raincloud:
+        // its name, the value it is drawn at, its error bar as drawn
+        // (named by the current type), and how many values are in it.
+        // `siblings` are the bars drawn with it: a Pareto bar's share is
+        // of its own panel's total.
+        function _cellTipHtml(bar, siblings) {
+            if (!bar) return "";
+            var gt = String(data.graphType || "");
+            var parts = [];
+            var fac = "";
+            try { fac = _facetOf(String(bar.x)); } catch (_eCtF) {}
+            if (fac) parts.push(_facetDisplayLabel(fac));
+            var catN = "";
+            try { catN = displayCategory(String(bar.x)); } catch (_eCtC) {}
+            if (catN != null && String(catN) !== "") parts.push(catN);
+            // Frequencies pie data aside, a bar's group is its series.
+            if (hasGroups && bar.group != null && String(bar.group) !== "") parts.push(displayGroup(String(bar.group)));
+            var html = "";
+            if (parts.length) {
+                var esc = [];
+                for (var np = 0; np < parts.length; np++) esc.push(_nmEsc(parts[np]));
+                html += "<div style='font-weight:600;margin-bottom:2px;'>" + esc.join(" &middot; ") + "</div>";
+            }
+            if (gt === "box" || gt === "violin" || gt === "raincloud") {
+                var st = null;
+                try { st = _computeBoxStats(bar.values || []); } catch (_eCtS) {}
+                if (!st) return "";
+                html += _tipLine("Median =", _tipNum(st.median));
+                html += _tipLine("Quartiles:", _tipNum(st.q1) + " to " + _tipNum(st.q3));
+                if (gt === "box") {
+                    html += _tipLine("Whiskers:", _tipNum(st.whiskerLow) + " to " + _tipNum(st.whiskerHigh));
+                    if (st.min < st.whiskerLow || st.max > st.whiskerHigh) {
+                        html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                    }
+                } else {
+                    html += _tipLine("Range:", _tipNum(st.min) + " to " + _tipNum(st.max));
+                }
+                html += _tipLine("n =", String(st.n));
+                return html;
+            }
+            if (_gbFreqMode) {
+                var raw = (typeof bar._freqRawCount === "number") ? bar._freqRawCount : bar.mean;
+                if (typeof raw !== "number" || !isFinite(raw)) return "";
+                html += _tipLine("Count =", String(Math.round(raw)));
+                if (gt === "pareto") {
+                    var tot = 0;
+                    var myFac = fac;
+                    for (var sb = 0; siblings && sb < siblings.length; sb++) {
+                        var sbBar = siblings[sb];
+                        if (!sbBar) continue;
+                        var sbFac = "";
+                        try { sbFac = _facetOf(String(sbBar.x)); } catch (_eCtP) {}
+                        if (sbFac !== myFac) continue;
+                        var sbRaw = (typeof sbBar._freqRawCount === "number") ? sbBar._freqRawCount : sbBar.mean;
+                        if (typeof sbRaw === "number" && isFinite(sbRaw)) tot += sbRaw;
+                    }
+                    if (tot > 0) html += _tipLine("Share:", _tipNum(100 * raw / tot) + "% of " + String(Math.round(tot)));
+                } else if (typeof bar.mean === "number" && isFinite(bar.mean)) {
+                    var isFill = (gt === "bar" && hasGroups && data.freqPosition === "fill");
+                    if (isFill || data.freqStat === "percent") html += _tipLine("Percent =", _tipNum(bar.mean) + "%");
+                    else if (data.freqStat === "proportion") html += _tipLine("Proportion =", _tipNum(bar.mean));
+                }
+                return html;
+            }
+            if (typeof bar.mean !== "number" || !isFinite(bar.mean)) return "";
+            var isMed = (data.summaryFunc === "median");
+            html += _tipLine(isMed ? "Median =" : "Mean =", _tipNum(bar.mean));
+            var half = (typeof bar.se === "number" && isFinite(bar.se)) ? bar.se : 0;
+            var et = (typeof data.errorBarType === "string") ? data.errorBarType : "";
+            if (!isMed && half > 0 && et !== "none" && !_isElementHidden("errorBars")) {
+                var within = (data.isRepeatedMeasures === true && data.errorBarMethod === "within")
+                    ? " (within-subject)" : "";
+                var lo = _tipNum(bar.mean - half), hi = _tipNum(bar.mean + half);
+                if (et === "se") html += _tipLine("SE =", _tipNum(half) + within);
+                else if (et === "sd") html += _tipLine("SD =", _tipNum(half) + within);
+                else if (et === "ci95") html += _tipLine("95% CI:", lo + " to " + hi + within);
+                else if (et === "ci99") html += _tipLine("99% CI:", lo + " to " + hi + within);
+                else if (et === "ci95c") html += _tipLine("Difference-adjusted 95% interval:", lo + " to " + hi);
+                else html += _tipLine("Error bar:", lo + " to " + hi);
+            }
+            if (typeof bar.n === "number" && isFinite(bar.n)) html += _tipLine("n =", String(bar.n));
+            return html;
+        }
+        // A heatmap tile: how many observations it holds and the X and Y
+        // ranges it covers, named by the axis titles.
+        function _binTipHtml(bin) {
+            if (!bin || typeof bin.count !== "number") return "";
+            var xn = (typeof data.xLabel === "string" && data.xLabel.trim().length) ? data.xLabel : "X";
+            var yn = (typeof data.yLabel === "string" && data.yLabel.trim().length) ? data.yLabel : "Y";
+            return "<div style='font-weight:600;margin-bottom:2px;'>Count = " + String(Math.round(bin.count)) + "</div>" +
+                _tipLine(_nmEsc(xn) + ":", _tipNum(bin.x_lo) + " to " + _tipNum(bin.x_hi)) +
+                _tipLine(_nmEsc(yn) + ":", _tipNum(bin.y_lo) + " to " + _tipNum(bin.y_hi));
+        }
+
+        // ---- Touch readout pin (data.touchHost, standalone only) --------
+        // On a touch screen a tap is also a hover: the browser sends the
+        // mouse hover events and then the click, so a value readout shows
+        // up together with the part's editor. It had no rule of its own
+        // there. A scatter point's was hidden a quarter second later by the
+        // point's own click handler; a pie slice's stayed where the finger
+        // had been, on the slice's own label, until the next tap anywhere;
+        // tapping the same part twice showed nothing the second time,
+        // because no browser sends a second hover for a part it still takes
+        // to be hovered.
+        //
+        // With the host key set, a finger TAP on a chart part asks that
+        // part's own hover handlers for the readout (the same events a
+        // mouse would send, replayed on the release), and the readout is
+        // PINNED: hide requests are ignored, it sits clear of the tapped
+        // part instead of under the finger, and it leaves when the next
+        // press lands on the chart or the selection moves on. When the
+        // chart is redrawn or rebuilt the same part is asked again, so the
+        // values never go stale. Only a replay pins, so a readout a drag
+        // shows for itself is untouched. jamovi never ships the key: the
+        // listeners are not registered there and every function below is
+        // unreachable or returns at its first line.
+        var _xyTipPin = null;      // { el, fx, fy, at, selKey, own, w, h }
+        var _xyTipSynth = false;   // true while a replay is dispatching
+        var _xyTipTarget = null, _xyTipX = 0, _xyTipY = 0;
+        var _xyTipDown = null;     // the touch press being watched
+        var _xyTipDead = false;    // a later render has replaced this one
+        var _xyTipWatching = false;
+        function _xyTipTouchOn() {
+            return !!(data && data.touchHost === true);
+        }
+        function _xyTipSelKey() {
+            try {
+                return (inspector && inspector.selection)
+                    ? inspector.selection.join("|") : "";
+            } catch (_eK) { return ""; }
+        }
+        function _xyTipRoleEls(role) {
+            var out = [];
+            try {
+                var all = svg.querySelectorAll("[data-role]");
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i].getAttribute("data-role") === role) out.push(all[i]);
+                }
+            } catch (_eR) {}
+            return out;
+        }
+        // What a rebuild needs to find the same part again: a role, a place
+        // among the parts of that role, and how the tapped element relates
+        // to that part. The finger usually lands on a hit shape that has no
+        // role of its own (a scatter point's is the circle drawn right after
+        // the point), so the nearest named part stands for it: itself, the
+        // element before or after it, or the named group it sits in.
+        function _xyTipIdentify(el) {
+            try {
+                var base = null, rel = "self", k = 0;
+                var pv = el.previousElementSibling, nx = el.nextElementSibling;
+                if (el.getAttribute("data-role")) base = el;
+                else if (pv && pv.getAttribute("data-role")) { base = pv; rel = "next"; }
+                else if (nx && nx.getAttribute("data-role")) { base = nx; rel = "prev"; }
+                else {
+                    base = (el.parentNode && el.parentNode.closest)
+                        ? el.parentNode.closest("[data-role]") : null;
+                    if (!base || base === svg || !svg.contains(base)) return null;
+                    rel = "in";
+                    k = Array.prototype.indexOf.call(base.getElementsByTagName(el.tagName), el);
+                    if (k < 0) return null;
+                }
+                var role = base.getAttribute("data-role");
+                var els = _xyTipRoleEls(role);
+                var idx = els.indexOf(base);
+                if (idx < 0) return null;
+                return { role: role, idx: idx, n: els.length, rel: rel, tag: el.tagName, k: k };
+            } catch (_eI) { return null; }
+        }
+        function _xyTipResolve(rec) {
+            try {
+                var els = _xyTipRoleEls(rec.role);
+                if (els.length !== rec.n) return null;
+                var base = els[rec.idx];
+                if (!base) return null;
+                var el = base;
+                if (rec.rel === "next") el = base.nextElementSibling;
+                else if (rec.rel === "prev") el = base.previousElementSibling;
+                else if (rec.rel === "in") el = base.getElementsByTagName(rec.tag)[rec.k];
+                return (el && el.tagName === rec.tag) ? el : null;
+            } catch (_eS) { return null; }
+        }
+        // A window global because the rebuild is a new closure; never written
+        // to storage.
+        function _xyTipRemember() {
+            var pin = _xyTipPin, rec = null;
+            if (pin && pin.el) rec = _xyTipIdentify(pin.el);
+            if (rec) {
+                rec.selKey = pin.selKey;
+                // Where on the part the finger was, as a share of its box:
+                // a part that answers by position (the canvas of a very
+                // large scatter, a cumulative line) is asked at the same
+                // spot again, not at its centre.
+                rec.rx = 0.5; rec.ry = 0.5;
+                try {
+                    var wrR = wrap.getBoundingClientRect(), vsR = _gb2ViewScale(svg) || 1;
+                    var bR = pin.el.getBoundingClientRect();
+                    if (bR.width > 0 && bR.height > 0) {
+                        rec.rx = Math.max(0, Math.min(1, (wrR.left + pin.fx * vsR - bR.left) / bR.width));
+                        rec.ry = Math.max(0, Math.min(1, (wrR.top + pin.fy * vsR - bR.top) / bR.height));
+                    }
+                } catch (_eRr) {}
+            }
+            try { window.__gb2_touchReadout = rec; } catch (_eW) {}
+        }
+        function _xyTipPinNow() {
+            // The finger's point is kept relative to the chart: opening the
+            // editor scrolls the page, and a point remembered in window
+            // coordinates would then describe somewhere else.
+            var wr0 = wrap.getBoundingClientRect(), vs0 = 1;
+            try { vs0 = _gb2ViewScale(svg) || 1; } catch (_eV0) {}
+            _xyTipPin = { el: _xyTipTarget,
+                          fx: (_xyTipX - wr0.left) / vs0, fy: (_xyTipY - wr0.top) / vs0,
+                          at: Date.now(), selKey: _xyTipSelKey() };
+            // A readout is never a target. Its own rule says so, but the
+            // Label parts sweep that hands pointer events back to the chart's
+            // chrome hands them to the readout too, and a pinned readout
+            // sits close enough to the finger to take the tap's click.
+            try { _xyTooltip.style.pointerEvents = "none"; } catch (_ePe) {}
+            _xyTipRemember();
+            if (!_xyTipWatching) {
+                _xyTipWatching = true;
+                requestAnimationFrame(_xyTipWatch);
+            }
+        }
+        function _xyTipUnpin() {
+            _xyTipPin = null;
+            try { window.__gb2_touchReadout = null; } catch (_eU) {}
+            _xyTooltip.style.display = "none";
+        }
+        // Clear of the tapped part and of any label drawn on it. The places,
+        // in order: above the part, below it, then above, below and beside
+        // the finger; the first one that fits inside the chart and covers
+        // none of the part's own labels is taken. A part that fills most of
+        // the chart (a long line, a band, half a pie) has no useful box, so
+        // for it only the places around the finger are tried.
+        function _xyTipOwnLabels(pin, wr, vs) {
+            var out = [];
+            try {
+                if (!pin.el || !pin.el.isConnected) return out;
+                var r = pin.el.getBoundingClientRect();
+                var texts = svg.querySelectorAll("text");
+                for (var i = 0; i < texts.length && out.length < 12; i++) {
+                    var tr = texts[i].getBoundingClientRect();
+                    if (!(tr.width > 0)) continue;
+                    var cx = tr.left + tr.width / 2, cy = tr.top + tr.height / 2;
+                    if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) continue;
+                    // On the part itself, not merely inside its box: a
+                    // slice's box holds its neighbours' labels too.
+                    if (document.elementsFromPoint(cx, cy).indexOf(pin.el) < 0) continue;
+                    out.push({ l: (tr.left - wr.left) / vs, t: (tr.top - wr.top) / vs,
+                               r: (tr.right - wr.left) / vs, b: (tr.bottom - wr.top) / vs });
+                }
+            } catch (_eO) {}
+            return out;
+        }
+        function _xyTipPlace() {
+            var pin = _xyTipPin;
+            if (!pin) return;
+            var wr = wrap.getBoundingClientRect();
+            var vs = 1;
+            try { vs = _gb2ViewScale(svg) || 1; } catch (_eV) {}
+            var wW = wr.width / vs, wH = wr.height / vs;
+            var w = _xyTooltip.offsetWidth || 120;
+            var h = _xyTooltip.offsetHeight || 40;
+            var r = null;
+            try { if (pin.el && pin.el.isConnected) r = pin.el.getBoundingClientRect(); } catch (_eB) {}
+            if (!pin.own) pin.own = _xyTipOwnLabels(pin, wr, vs);
+            var fx = pin.fx, fy = pin.fy;
+            var cand = [];
+            if (r && r.width > 0 && r.height > 0 &&
+                r.height < wr.height * 0.55 && r.width < wr.width * 0.7) {
+                var mid = ((r.left + r.right) / 2 - wr.left) / vs;
+                cand.push([mid - w / 2, (r.top - wr.top) / vs - h - 8]);
+                cand.push([mid - w / 2, (r.bottom - wr.top) / vs + 8]);
+            }
+            cand.push([fx - w / 2, fy - 22 - h]);
+            cand.push([fx - w / 2, fy + 22]);
+            cand.push([fx + 22, fy - h / 2]);
+            cand.push([fx - 22 - w, fy - h / 2]);
+            var best = null;
+            for (var i = 0; i < cand.length && !best; i++) {
+                var x = Math.max(4, Math.min(cand[i][0], wW - w - 4)), y = cand[i][1];
+                if (y < 4 || y + h > wH - 4) continue;
+                var covers = false;
+                for (var j = 0; j < pin.own.length; j++) {
+                    var o = pin.own[j];
+                    if (!(x + w < o.l - 2 || x > o.r + 2 || y + h < o.t - 2 || y > o.b + 2)) { covers = true; break; }
+                }
+                if (!covers) best = [x, y];
+            }
+            if (!best) {
+                best = [Math.max(4, Math.min(cand[0][0], wW - w - 4)),
+                        Math.max(4, Math.min(cand[0][1], wH - h - 4))];
+            }
+            _xyTooltip.style.left = best[0] + "px";
+            _xyTooltip.style.top = best[1] + "px";
+            pin.w = w; pin.h = h;
+        }
+        // The hover a mouse would have sent, on the part itself. The leave
+        // first: it resets a handler that still believes it is hovered,
+        // which is what made a second tap on the same part show nothing.
+        function _xyTipReplay(el, x, y) {
+            if (!el || !el.isConnected) return;
+            var one = { bubbles: false, cancelable: false, view: window, clientX: x, clientY: y };
+            var up = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+            try {
+                el.dispatchEvent(new MouseEvent("mouseout", up));
+                el.dispatchEvent(new MouseEvent("mouseleave", one));
+            } catch (_eL) {}
+            _xyTipSynth = true;
+            try {
+                el.dispatchEvent(new MouseEvent("mouseenter", one));
+                el.dispatchEvent(new MouseEvent("mouseover", up));
+                el.dispatchEvent(new MouseEvent("mousemove", up));
+            } catch (_eE) {}
+            _xyTipSynth = false;
+        }
+        // After a redraw or a rebuild: the same part, asked again. No record,
+        // another selection, or a different number of parts of that role
+        // means the readout no longer describes what is on screen.
+        function _xyTipRestore(isRetry) {
+            if (!_xyTipTouchOn() || _xyTipDead) return;
+            var rec = null;
+            try { rec = window.__gb2_touchReadout; } catch (_eG) {}
+            if (!rec) { if (_xyTipPin) _xyTipUnpin(); return; }
+            if (isRetry && _xyTipPin && _xyTipPin.el && _xyTipPin.el.isConnected) return;
+            var key = _xyTipSelKey();
+            if (key !== rec.selKey) {
+                // The selection is put back a moment after a rebuild draws.
+                if (!isRetry && key === "" && rec.selKey !== "") {
+                    setTimeout(function () { try { _xyTipRestore(true); } catch (_eT) {} }, 90);
+                    return;
+                }
+                _xyTipUnpin();
+                return;
+            }
+            var el = _xyTipResolve(rec);
+            if (!el) { _xyTipUnpin(); return; }
+            var r = el.getBoundingClientRect();
+            _xyTipTarget = el;
+            _xyTipX = r.left + r.width * (typeof rec.rx === "number" ? rec.rx : 0.5);
+            _xyTipY = r.top + r.height * (typeof rec.ry === "number" ? rec.ry : 0.5);
+            _xyTipPin = null;
+            _xyTipReplay(el, _xyTipX, _xyTipY);
+            if (!_xyTipPin) _xyTipUnpin();
+        }
+        // A redraw replaces the part under a pinned readout without telling
+        // anyone, and the readout's own size can change after it is placed.
+        // One check a frame, only while a readout is pinned.
+        function _xyTipWatch() {
+            if (_xyTipDead || !wrap.isConnected) { _xyTipWatching = false; _xyTipPin = null; return; }
+            if (!_xyTipPin) { _xyTipWatching = false; return; }
+            if (!_xyTipPin.el || !_xyTipPin.el.isConnected) {
+                try { _xyTipRestore(false); } catch (_eW2) {}
+                if (!_xyTipPin) { _xyTipWatching = false; return; }
+            }
+            // The host raises small text on a touch screen a moment after it
+            // is written, so the readout can grow under a placement already
+            // made for its first size.
+            try {
+                if (_xyTooltip.offsetWidth !== _xyTipPin.w ||
+                    _xyTooltip.offsetHeight !== _xyTipPin.h) _xyTipPlace();
+            } catch (_eW3) {}
+            requestAnimationFrame(_xyTipWatch);
+        }
+        // The readout belongs to the selection it appeared with. The tap's
+        // own selection lands a moment before or after the readout and is
+        // adopted; any later change of selection ends it.
+        function _xyTipOnSelection(sel) {
+            var pin = _xyTipPin;
+            if (!pin) return;
+            var k = "";
+            if (typeof sel === "string") k = sel;
+            else if (sel && typeof sel.join === "function") k = sel.join("|");
+            if ((Date.now() - pin.at) < 700) { pin.selKey = k; _xyTipRemember(); return; }
+            if (k !== pin.selKey) _xyTipUnpin();
+        }
+        if (_xyTipTouchOn()) {
+            __disposables.push(function () { _xyTipDead = true; });
+            onDoc("pointerdown", function (e) {
+                if (!wrap.contains(e.target)) return;
+                // Any press on the chart ends the old readout: a finger
+                // starting a tap or a drag, or a mouse on a screen that
+                // has both.
+                if (_xyTipPin) _xyTipUnpin();
+                if (e.pointerType !== "touch" || e.isPrimary === false) { _xyTipDown = null; return; }
+                _xyTipDown = { t: e.target, x: e.clientX, y: e.clientY, at: Date.now() };
+            }, true);
+            onDoc("pointerup", function (e) {
+                var d = _xyTipDown;
+                _xyTipDown = null;
+                if (!d || e.pointerType !== "touch" || !e.isTrusted) return;
+                // A drag or a swipe, a hold the host answered with its menu,
+                // or Label parts (which explains a part in its panel).
+                if (Math.abs(e.clientX - d.x) > 8 || Math.abs(e.clientY - d.y) > 8) return;
+                if ((Date.now() - d.at) > 600) return;
+                if (window.__gb2_touchPressConsumed === true) return;
+                if (window.__gb2_anatomyOn) return;
+                if (!d.t || !d.t.isConnected || !svg.contains(d.t)) return;
+                _xyTipTarget = d.t; _xyTipX = d.x; _xyTipY = d.y;
+                _xyTipReplay(d.t, d.x, d.y);
+            }, true);
+            onDoc("pointercancel", function () { _xyTipDown = null; }, true);
+            onDoc("pointermove", function (e) {
+                if (_xyTipPin && e.pointerType === "mouse" && wrap.contains(e.target)) _xyTipUnpin();
+            }, true);
         }
 
         // A flex-column "card" holds the toolbar (top), chart wrap
@@ -11297,8 +12267,21 @@
                     ci95c: "difference-adjusted 95 percent intervals, read by whether one group\u2019s mean falls inside the other group\u2019s interval",
                     ci: "confidence intervals"
                 }[String(d.errorBarType || "").toLowerCase()];
-                if (_ebName)
-                    parts.push("Error bars show " + _ebName);
+                // Only where error bars are drawn (Nov 2026): the sentence
+                // was spoken for histograms, box plots and median charts,
+                // which draw none.
+                var _ebGt = String(d.graphType || "");
+                var _ebDrawn = (_ebGt === "bar" || _ebGt === "line" || _ebGt === "dot") &&
+                    d.freqMode !== true && d.summaryFunc !== "median";
+                if (_ebName && _ebDrawn) {
+                    // Repeated measures draws within-subject bars by default
+                    // (Nov 2026, the statistical review): say so, and on a
+                    // chart with groups say what they cannot be used for.
+                    var _ebWithin = (d.isRepeatedMeasures === true && d.errorBarMethod === "within");
+                    parts.push("Error bars show " + (_ebWithin ? "within-subject " : "") + _ebName);
+                    if (_ebWithin && gs.length > 1 && !_pieish)
+                        parts.push("They show change within each group and cannot be used to compare the groups");
+                }
                 var _hiddenDataCount =
                     (Array.isArray(d.hiddenBars) ? d.hiddenBars.length : 0) +
                     (Array.isArray(d.hiddenPoints) ? d.hiddenPoints.length : 0) +
@@ -11729,9 +12712,17 @@
                 // ancestor never hears them. The scatter points use exactly
                 // that, and a real pointer exit fires bubbling out as well, so
                 // send it from the innermost element too.
+                // These leaves are the harvest's own, and every attribute is
+                // put back a moment later. A handler that keeps what it lit in
+                // a variable of its own must not forget the mark because of
+                // them (the flag below): the snapshot restores the DOM, not
+                // the handler, and a forgotten mark that is lit again can
+                // never be switched off.
+                window.__gb2_harvestUnhover = true;
                 if (_hovEls.length) _hFire(_hovEls[0], "out", true);
                 for (var _hj = 0; _hj < _hovEls.length; _hj++) _hFire(_hovEls[_hj], "leave", false);
             } catch (_eHov1) {}
+            window.__gb2_harvestUnhover = false;
             var copy = svg.cloneNode(true);
             // put the live chart back before anything can paint
             if (_hovEls.length) _hRestore();
@@ -11848,6 +12839,13 @@
                     } catch (_ee) {}
                 }
             } catch (_eEmptyStyle) {}
+            // PowerPoint-safe paints: see _gb2ExportSafePaints (module scope,
+            // shared with the standalone's layout export).
+            try { _gb2ExportSafePaints(copy); } catch (_ePptPaint) {}
+            // Pattern fills become plain clipped geometry on export: see
+            // _gb2ExportFlattenPatterns (module scope, shared with the
+            // standalone's layout export).
+            try { _gb2ExportFlattenPatterns(copy); } catch (_ePatFlat) {}
             // The large-N scatter fast layer is a canvas in a
             // foreignObject: canvas pixels survive neither cloneNode
             // nor XMLSerializer, so swap it for a high-res raster
@@ -14550,12 +15548,35 @@
         // restore the column-name default the user can re-type it.
         function commitTitle(overrideOpt, valueOpt, value) {
             var trimmed = (value || "").trim();
+            // Undo: register both option keys BEFORE the poke below, so a
+            // first touch backfills the true old value (the edit-time undo
+            // law; both are seeded in TRACKED_OPTIONS today). A title that
+            // was never renamed ships neither option (R folds them into
+            // xLabel), so the pre-edit snapshot holds undefined, which the
+            // stack's localStorage round trip drops, and the undo after the
+            // re-render below then left the rename in place. Record the
+            // options' effective defaults (override off, no text) instead.
+            if (hasSetOption) {
+                try {
+                    _undoTrackKey(overrideOpt);
+                    _undoTrackKey(valueOpt);
+                    if (_undoLastSnapshot) {
+                        if (_undoLastSnapshot[overrideOpt] === undefined) _undoLastSnapshot[overrideOpt] = false;
+                        if (_undoLastSnapshot[valueOpt] === undefined) _undoLastSnapshot[valueOpt] = "";
+                    }
+                } catch (_eUt) {}
+            }
             // Render the new title IMMEDIATELY: write the value into the
             // matching JS data field + redraw, instead of only queuing it
             // for R (which made a freshly-added title appear one round-trip
             // late). Done before the hasSetOption guard so local preview is
             // independent of the option-commit path.
             try {
+                // The option fields too, not only the display fields below:
+                // the undo snapshot reads data[key] for every tracked key, and
+                // the chartSpec route writes only the blob.
+                data[overrideOpt] = true;
+                data[valueOpt] = trimmed;
                 var _tgSet = null;
                 if (valueOpt === "xTitle") { data.xLabel = trimmed; data.xTitleOverride = true; _tgSet = { xLabel: trimmed, xTitleOverride: true }; if (typeof addXTitleZone !== "undefined" && addXTitleZone) addXTitleZone.style.display = "none"; }
                 else if (valueOpt === "yTitle") { data.yLabel = trimmed; data.yTitleOverride = true; _tgSet = { yLabel: trimmed, yTitleOverride: true }; if (typeof addYTitleZone !== "undefined" && addYTitleZone) addYTitleZone.style.display = "none"; }
@@ -14565,10 +15586,38 @@
                 // carries it (no "title vanishes then returns" flash).
                 redraw();
             } catch (_eCt) {}
+            if (hasSetOption) {
+                // Take this rename's undo step NOW, before the commit and the
+                // local re-render: the re-render re-seeds the undo baseline
+                // from data that already holds the new title, which swallowed
+                // the 250 ms snapshot the chartSpec route schedules (one undo
+                // then reverted the rename together with the edit before it).
+                try { if (!_undoApplying) _undoTake(); } catch (_eUk) {}
+                try { _setOption(overrideOpt, true); } catch (e) {}
+                try { _setOption(valueOpt, trimmed); } catch (e) {}
+            }
             _gb2RerenderSoon();
-            if (!hasSetOption) return;
-            try { _setOption(overrideOpt, true); } catch (e) {}
-            try { _setOption(valueOpt, trimmed); } catch (e) {}
+        }
+        // The commit hook of an axis or legend title, by text id (null for
+        // any other id). textEditOnCommit holds a title's hook only while
+        // the title is DRAWN (makeEditableText registers it on each redraw)
+        // or after a click on its click-to-add zone, and every redraw
+        // empties the map. A panel opened for a title that is empty at that
+        // moment by any other route (Find a setting, or clearing the text
+        // and typing again in the same open panel) therefore found no hook:
+        // Enter did nothing, the typed title lived only in __gb2_textData,
+        // and it was gone at the next chart switch or reopen. Repeated
+        // Measures met this by default, since its value-axis title starts
+        // empty (a first-use walkthrough, Nov 2026). The text panel and the
+        // inline editor fall back to this, and the add zones register the
+        // same functions, so the routes cannot drift apart. The chart title
+        // needs no entry: redraw() recomputes hasTitle, so its first typed
+        // character draws the element and registers the hook.
+        function _gb2TitleCommitHook(id) {
+            if (id === "xTitle") return function (v) { commitTitle("xTitleOverride", "xTitle", v); };
+            if (id === "yTitle") return function (v) { commitTitle("yTitleOverride", "yTitle", v); };
+            if (id === "groupTitle") return function (v) { commitTitle("groupTitleOverride", "groupTitle", v); };
+            return null;
         }
 
         // --- Relabel commit helpers (lookups defined above) -------------
@@ -15768,13 +16817,19 @@
             var _tail = (ann.autoPTail === "greater" || ann.autoPTail === "less")
                 ? ann.autoPTail : "two";
             // THE FAMILY RULE, Compare Groups half (Torry, Oct 22 2026;
-            // widened Oct 26 2026 after his class_year screenshot): with ANY
-            // correction on except Games-Howell (Tukey, Dunnett, Bonferroni,
-            // Holm, FDR), an independent t bracket's statistic and
+            // widened Oct 26 2026 after his class_year screenshot; narrowed
+            // Nov 11 2026, his ruling on the statistical review): under
+            // Tukey and Dunnett, whose math needs one error term, and under
+            // Bonferroni, Holm and FDR while Test is left on Auto, an
+            // independent t bracket's statistic and
             // unadjusted p come from the one-way ANOVA's pooled error term
             // over every cell of its panel - the same ruler the adjusted p
             // uses, and what jamovi's ANOVA post hoc prints under every one
             // of its corrections - so a row never mixes two error terms.
+            // Bonferroni, Holm and FDR only rescale p values, so a Welch's
+            // or Student's t PICKED BY HAND under Test stays that pair's
+            // own test (pooling unequal spreads can hide or invent a
+            // difference; the reviewer's case went from .002 to .273).
             // Games-Howell's own model is Welch's t, so under it a Student's
             // pick runs as Welch. With Correct = None each pair is its own
             // two-group test. Under a pooled correction Cohen's d (and g)
@@ -15787,7 +16842,8 @@
                 if (_pc === "gamesHowell") {
                     testKind = "welch";
                 } else if (_pc === "tukey" || _pc === "dunnett" ||
-                           _pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") {
+                           ((_pc === "bonferroni" || _pc === "holm" || _pc === "fdrBH") &&
+                            (!ann.autoPTest || ann.autoPTest === "auto"))) {
                     try {
                         var _fcP = _facetCells(_facetOf(ann.anchorLeftCat || ""));
                         var _aovP = (_fcP.k >= 2) ? _gb2Stats.oneWayANOVA(_fcP.levels) : null;
@@ -15802,6 +16858,23 @@
             if (testKind === "studentT") {
                 res = _gb2Stats.studentT(lv, rv, _tail);
                 testFamily = "t";
+                // A group with a single value (or a pair with no spread of
+                // its own) has no two-group t, but the pooled model compares
+                // its mean all the same, and jamovi's post hoc lists those
+                // pairs (Nov 2026, the statistical review: with groups of 2,
+                // 3 and 1 the pair that drove the omnibus was not listed).
+                // Borrow the model's error term; the pair's own SDs stay
+                // whatever they are.
+                if (!res && _poolModel) {
+                    var _l1 = (lv || []).filter(isFinite), _r1 = (rv || []).filter(isFinite);
+                    if (_l1.length >= 1 && _r1.length >= 1) {
+                        var _lm1 = _gb2Stats.mean(_l1), _rm1 = _gb2Stats.mean(_r1);
+                        res = { t: NaN, df: NaN, p: NaN, m1: _lm1, m2: _rm1,
+                                sd1: (_l1.length > 1) ? _gb2Stats.sd(_l1, _lm1) : NaN,
+                                sd2: (_r1.length > 1) ? _gb2Stats.sd(_r1, _rm1) : NaN,
+                                n1: _l1.length, n2: _r1.length };
+                    }
+                }
                 if (res && _poolModel) {
                     var _seP = Math.sqrt(_poolModel.mse * (1 / res.n1 + 1 / res.n2));
                     if (isFinite(_seP) && _seP > 0) {
@@ -16259,8 +17332,13 @@
                                 applied[ai] = false;
                                 return r.res.p;
                             }
-                            corrStat[ai] = { t: tObs[ai], df: dfD,
-                                             basis: "pooled" };
+                            // the row reads left minus right; Dunnett's own
+                            // statistic is treatment minus control, so give
+                            // it the row's sign (it read +3.02 beside d = -1.35)
+                            corrStat[ai] = { t: (r.res && isFinite(r.res.t) && r.res.t < 0)
+                                                    ? -Math.abs(tObs[ai])
+                                                    : ((r.res && isFinite(r.res.t) && r.res.t > 0) ? Math.abs(tObs[ai]) : tObs[ai]),
+                                             df: dfD, basis: "pooled" };
                             var pd = 1 - _gb2Stats.dunnettCdf(
                                 qD, lambdas, dfD);
                             return Math.max(0, Math.min(1, pd));
@@ -19797,27 +20875,21 @@
 
         addXTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["xTitle"] = function (v) {
-                commitTitle("xTitleOverride", "xTitle", v);
-            };
+            textEditOnCommit["xTitle"] = _gb2TitleCommitHook("xTitle");
             setInspectorSelection("text:xTitle");
             try { showInlineTextEditor("xTitle", addXTitleZone); } catch (_e) {}
         });
 
         addYTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["yTitle"] = function (v) {
-                commitTitle("yTitleOverride", "yTitle", v);
-            };
+            textEditOnCommit["yTitle"] = _gb2TitleCommitHook("yTitle");
             setInspectorSelection("text:yTitle");
             try { showInlineTextEditor("yTitle", addYTitleZone); } catch (_e) {}
         });
 
         addGroupTitleZone.addEventListener("click", function (e) {
             e.preventDefault(); e.stopPropagation();
-            textEditOnCommit["groupTitle"] = function (v) {
-                commitTitle("groupTitleOverride", "groupTitle", v);
-            };
+            textEditOnCommit["groupTitle"] = _gb2TitleCommitHook("groupTitle");
             setInspectorSelection("text:groupTitle");
             try { showInlineTextEditor("groupTitle", addGroupTitleZone); } catch (_e) {}
         });
@@ -23391,6 +24463,53 @@
                     // group; the helper below works regardless.
                     try { addIndicatorPolygonForTextEl(el, { pad: 3 }); }
                     catch (e2) {}
+                } else {
+                    // Number labels the chart computes (the values on bars,
+                    // pie slices, Likert segments and correlation cells, and
+                    // the numbers on the correlation colour scale) share ONE
+                    // editor per kind: its selection names the kind, not a
+                    // label, so no element is registered under it and nothing
+                    // was drawn - a panel open with no mark on the chart.
+                    // Every label of the kind gets a light dashed box, since
+                    // an edit in that panel changes all of them. A chart
+                    // carrying more than 150 such labels gets one box round
+                    // the plot instead of a lattice of them.
+                    var _nlSel = {
+                        barValueLabel: '[data-role="bar-value-label"]',
+                        pieSliceLabel: '[data-role="freq-slice-label"]',
+                        likertValueLabel: '[data-role="likert-value"]',
+                        corrValueLabel: '[data-role="corr-value"], [data-role="corr-value-p"]',
+                        corrLegendTick: '[data-role="corr-legend-tick"]'
+                    };
+                    if (Object.prototype.hasOwnProperty.call(_nlSel, id)) {
+                        var _nlEls = [];
+                        try { _nlEls = svg.querySelectorAll(_nlSel[id]); } catch (_eNl) {}
+                        var _nlShown = [];
+                        for (var _nli = 0; _nli < _nlEls.length; _nli++) {
+                            try {
+                                var _nlB = _nlEls[_nli].getBBox();
+                                if (_nlB && _nlB.width && _nlB.height) _nlShown.push(_nlEls[_nli]);
+                            } catch (_eNb) {}
+                        }
+                        if (_nlShown.length > 150) {
+                            addIndicatorBox(chartLeft, chartTop, innerW, innerH);
+                        } else {
+                            for (var _nlj = 0; _nlj < _nlShown.length; _nlj++) {
+                                // These labels sit ON the marks, whose fill
+                                // can be as dark as the dashes: a white line
+                                // under them keeps the box readable on a
+                                // dark bar and disappears on a light one.
+                                try {
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, stroke: "#ffffff", strokeWidth: 2.75, strokeOpacity: 0.9,
+                                        dashArray: "none", "class": "gb2-halo-union" });
+                                    addIndicatorPolygonForTextEl(_nlShown[_nlj], {
+                                        pad: 3, strokeWidth: 1.25, strokeOpacity: 0.9,
+                                        dashArray: "4,3", "class": "gb2-halo-union" });
+                                } catch (_eNp) {}
+                            }
+                        }
+                    }
                 }
             } else if (sel.indexOf("annotation:") === 0) {
                 // Treat text annotations like chart text - dashed halo
@@ -35832,6 +36951,7 @@
                 for (var _orpI = 0; _orpI < n; _orpI++) {
                     var _orpV = values[_orpI];
                     if (typeof _orpV !== "number" || !isFinite(_orpV)) continue;
+                    if (_gb2PtsExcluded() && _isPointHidden(bar.x, bar.group, _orpI)) continue;
                     if (_orpV < _orpLo || _orpV > _orpHi) _outOfRangeCount++;
                 }
 
@@ -36310,7 +37430,9 @@
                 var srcVals = bar._origValues || bar.values;
                 if (!Array.isArray(srcVals)) return;
                 var arr = [];
+                var _fenceXcl = _gb2PtsExcluded();
                 for (var _bvi = 0; _bvi < srcVals.length; _bvi++) {
+                    if (_fenceXcl && _isPointHidden(bar.x, bar.group, _bvi)) continue;
                     var _bv = +srcVals[_bvi];
                     if (isFinite(_bv)) arr.push(_bv);
                 }
@@ -37475,6 +38597,28 @@
                             this.removeAttribute("stroke-width");
                             this.removeAttribute("stroke-opacity");
                         });
+                        // Readout: the tile's count and the ranges it covers.
+                        (function (tileEl, tileBin) {
+                            var _tlHtml = null, _tlShown = false;
+                            function _tlMove(ev) {
+                                if (ev.buttons) {
+                                    if (_tlShown) { _xyTooltipHide(); _tlShown = false; }
+                                    return;
+                                }
+                                if (_tlShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                                if (_tlHtml === null) {
+                                    try { _tlHtml = _binTipHtml(tileBin); } catch (_eTl) { _tlHtml = ""; }
+                                }
+                                if (_tlHtml) { _xyTooltipShow(_tlHtml, ev.clientX, ev.clientY); _tlShown = true; }
+                            }
+                            tileEl.addEventListener("mouseenter", _tlMove);
+                            tileEl.addEventListener("mousemove", _tlMove);
+                            tileEl.addEventListener("mouseleave", function () {
+                                // The harvest's leave is not the pointer's: keep the
+                                // flag, so the leave that follows still hides it.
+                                if (_tlShown) { _xyTooltipHide(); if (window.__gb2_harvestUnhover !== true) _tlShown = false; }
+                            });
+                        })(_binEl, _bin);
                         _binEl.addEventListener("click", function (e) {
                             e.stopPropagation();
                             e.preventDefault();
@@ -38548,7 +39692,13 @@
                                 if (!t || !t.__gb2pt || t !== _cur) return;
                                 if (e.relatedTarget === t) return;
                                 _hOff(t);
-                                _cur = null;
+                                // A leave sent by the export harvest is not
+                                // the pointer leaving: the harvest lights the
+                                // ring again as soon as it has its copy, so
+                                // this point is still the lit one. Forgetting
+                                // it here left a ring that nothing switched
+                                // off, and the next point lit a second.
+                                if (window.__gb2_harvestUnhover !== true) _cur = null;
                                 _xyTooltipHide();
                             });
                             dg.addEventListener("mousemove", function (e) {
@@ -41693,13 +42843,22 @@
                 // the destroy/recreate cycle of redraw().
                 barRect.setAttribute("data-bar-cat", catName);
                 barRect.setAttribute("data-bar-group", hasGroups ? (bar.group || "") : "");
-                (function (visuals, grp, catName) {
+                (function (visuals, grp, catName, tipBar) {
+                    // The readout's text, built when the pointer arrives.
+                    var _ctHtml = null, _ctShown = false;
                     // Hover affordance: bump opacity to 1 (so the pop is
                     // dramatic at low base opacity) AND lift brightness
                     // a touch (so there's still visible feedback when
                     // base opacity is already 1 - opacity-only would be
                     // a no-op there).
-                    barRect.addEventListener("mouseenter", function () {
+                    barRect.addEventListener("mouseenter", function (ev) {
+                        // Readout (see _cellTipHtml). Not while a button is
+                        // down: a drag across the bars is not a question.
+                        _ctHtml = null; _ctShown = false;
+                        if (ev && !ev.buttons) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt) { _ctHtml = ""; }
+                            if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                        }
                         for (var i = 0; i < visuals.length; i++) {
                             // stash the pre-hover value so the harvest clone can put it back; without this the raised opacity bakes into copies and saves
                             if (visuals[i].getAttribute("data-base-fill-opacity") == null) visuals[i].setAttribute("data-base-fill-opacity", visuals[i].getAttribute("fill-opacity") || "");
@@ -41731,7 +42890,21 @@
                             }
                         }
                     });
+                    barRect.addEventListener("mousemove", function (ev) {
+                        if (ev.buttons) {
+                            if (_ctShown) { _xyTooltipHide(); _ctShown = false; }
+                            return;
+                        }
+                        if (_ctShown) { _xyTooltipPosition(ev.clientX, ev.clientY); return; }
+                        if (_ctHtml === null) {
+                            try { _ctHtml = _cellTipHtml(tipBar, bars); } catch (_eCt2) { _ctHtml = ""; }
+                        }
+                        if (_ctHtml) { _xyTooltipShow(_ctHtml, ev.clientX, ev.clientY); _ctShown = true; }
+                    });
                     barRect.addEventListener("mouseleave", function () {
+                        // The harvest's leave is not the pointer's: keep the
+                        // flag, so the leave that follows still hides it.
+                        if (_ctShown) { _xyTooltipHide(); if (window.__gb2_harvestUnhover !== true) _ctShown = false; }
                         // Read opacity at handler-call time, not at
                         // bar-creation time: the user can drag the
                         // opacity slider after this bar was created
@@ -41763,7 +42936,7 @@
                     // mode and reorders the bar's group (or category
                     // when Shift is held).
                     _attachBarDragReorder(barRect, catName, hasGroups ? grp : "");
-                })(built.visuals, bar.group, bar.x);
+                })(built.visuals, bar.group, bar.x, bar);
                 dataGroup.appendChild(barRect);
 
                 // Individual data points (overlay) - skipped when the
@@ -44251,6 +45424,23 @@
                         ev.stopPropagation(); ev.preventDefault();
                         setInspectorSelection("corrVar:" + v);
                     });
+                    // Double-click renames on the chart, as it does on a
+                    // category label or an axis title: the same inline
+                    // editor, saving through the rename the panel's text box
+                    // uses (selecting the variable is what wires that
+                    // commit). The editor opens over the label that was
+                    // double-clicked, row or column, so that label is the
+                    // registered one while it is open; the next draw
+                    // registers the row label again.
+                    t.addEventListener("dblclick", function (ev) {
+                        ev.stopPropagation(); ev.preventDefault();
+                        try {
+                            setInspectorSelection("corrVar:" + v);
+                            if (!t.isConnected) return;
+                            editableElsByDragId["corrVar:" + v] = t;
+                            showInlineTextEditor("corrVar:" + v);
+                        } catch (_eCvD) {}
+                    });
                     // Wrap in a group so the drag-to-reorder gesture can
                     // translate this label with its row / column.
                     var lblG = svgEl("g", {
@@ -44650,6 +45840,29 @@
                 var levels = Array.isArray(data.likertLevels)
                     ? data.likertLevels.map(String) : [];
                 var k = levels.length;
+                // Numeric response codes (Nov 2026, the statistical review):
+                // when the responses are numbers the payload ships their
+                // values (likertCodes, ascending, in level order) and the
+                // item means, intervals and alpha arrive on those numbers,
+                // not on positions 1..k. Reverse scoring then reflects
+                // around the two ends of the scale, and a mean is placed on
+                // the means axis (whose ticks sit at positions 1..k) by
+                // interpolating between the codes either side of it.
+                var _lkCodes = (Array.isArray(data.likertCodes) && k >= 2 &&
+                    data.likertCodes.length === k) ? data.likertCodes : null;
+                if (_lkCodes) {
+                    for (var _lc0 = 0; _lc0 < k; _lc0++) {
+                        if (typeof _lkCodes[_lc0] !== "number" || !isFinite(_lkCodes[_lc0]) ||
+                            (_lc0 > 0 && !(_lkCodes[_lc0] > _lkCodes[_lc0 - 1]))) { _lkCodes = null; break; }
+                    }
+                }
+                var _lkReflSum = _lkCodes ? (_lkCodes[0] + _lkCodes[k - 1]) : (k + 1);
+                function _lkPos(v) {
+                    if (!_lkCodes || typeof v !== "number" || !isFinite(v)) return v;
+                    var pi = 0;
+                    while (pi < k - 2 && v > _lkCodes[pi + 1]) pi++;
+                    return (pi + 1) + (v - _lkCodes[pi]) / (_lkCodes[pi + 1] - _lkCodes[pi]);
+                }
                 var allItems = Array.isArray(data.likertItems)
                     ? data.likertItems.map(String) : [];
                 // A continuous battery legitimately ships ZERO levels
@@ -44698,9 +45911,9 @@
                     var m = meanMap[it];
                     if (!m || !_lkIsRev(it)) return m;
                     var out = { item: m.item, n: m.n, mean: m.mean, se: m.se };
-                    if (typeof m.mean === "number") out.mean = k + 1 - m.mean;
-                    if (typeof m.hi === "number") out.lo = k + 1 - m.hi;
-                    if (typeof m.lo === "number") out.hi = k + 1 - m.lo;
+                    if (typeof m.mean === "number") out.mean = _lkReflSum - m.mean;
+                    if (typeof m.hi === "number") out.lo = _lkReflSum - m.hi;
+                    if (typeof m.lo === "number") out.hi = _lkReflSum - m.lo;
                     return out;
                 }
                 function pctOf(it, lv) {
@@ -45248,8 +46461,8 @@
                         var _ciEls = [];
                         if (hasCI) {
                             var _ciLine = svgEl("line", {
-                                x1: toX(Math.max(xmin, loV)), y1: cyD,
-                                x2: toX(Math.min(xmax, hiV)), y2: cyD,
+                                x1: toX(Math.max(xmin, _lkPos(loV))), y1: cyD,
+                                x2: toX(Math.min(xmax, _lkPos(hiV))), y2: cyD,
                                 stroke: _ciC, "stroke-width": ciW,
                                 "stroke-opacity": 0.85, "stroke-linecap": "round",
                                 "data-role": "likert-ci", "data-item": it
@@ -45260,7 +46473,7 @@
                             [loV, hiV].forEach(function (b2) {
                                 if (b2 < xmin || b2 > xmax) return;
                                 var _cap = svgEl("line", {
-                                    x1: toX(b2), y1: cyD - 4, x2: toX(b2), y2: cyD + 4,
+                                    x1: toX(_lkPos(b2)), y1: cyD - 4, x2: toX(_lkPos(b2)), y2: cyD + 4,
                                     stroke: _ciC, "stroke-width": ciW,
                                     "stroke-opacity": 0.85,
                                     "data-role": "likert-ci-cap", "data-item": it
@@ -45272,7 +46485,7 @@
                             // treatment (the interval thickens) + tooltip +
                             // click to open the means panel; the row stays
                             // drag-to-reorder.
-                            var _ciHX1 = toX(Math.max(xmin, loV)), _ciHX2 = toX(Math.min(xmax, hiV));
+                            var _ciHX1 = toX(Math.max(xmin, _lkPos(loV))), _ciHX2 = toX(Math.min(xmax, _lkPos(hiV)));
                             var _ciHit = svgEl("rect", {
                                 x: Math.min(_ciHX1, _ciHX2), y: cyD - 6,
                                 width: Math.abs(_ciHX2 - _ciHX1), height: 12,
@@ -45311,7 +46524,7 @@
                         var _lkDotShape = (typeof data.likertDotShape === "string" && data.likertDotShape.length) ? data.likertDotShape : "circle";
                         var _lkOutlineC = (typeof data.likertDotOutlineColor === "string" && data.likertDotOutlineColor.length) ? data.likertDotOutlineColor : "#ffffff";
                         var _lkOutlineW = (typeof data.likertDotOutlineWidth === "number" && data.likertDotOutlineWidth >= 0) ? data.likertDotOutlineWidth : 1;
-                        var dot = pointShapeEl(_lkDotShape, toX(md2.mean), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
+                        var dot = pointShapeEl(_lkDotShape, toX(_lkPos(md2.mean)), cyD, dotR * 2, dotC, _lkOutlineC, _lkOutlineW, 1);
                         dot.setAttribute("data-role", "likert-dot");
                         dot.setAttribute("data-item", it);
                         dot.style.pointerEvents = "none";
@@ -45322,7 +46535,7 @@
                         // + click open the means panel; the row stays
                         // drag-to-reorder.
                         var _dotHalo = svgEl("circle", {
-                            cx: toX(md2.mean), cy: cyD, r: Math.max(dotR + 5, 9),
+                            cx: toX(_lkPos(md2.mean)), cy: cyD, r: Math.max(dotR + 5, 9),
                             fill: "transparent", stroke: "none",
                             style: "cursor:pointer;",
                             "data-role": "likert-dot-hit", "data-item": it
@@ -45529,6 +46742,22 @@
                         _lkSetLabelMove(ilbl, "likertItem:" + itL, _itOff.dx, _itOff.dy);
                         _lkWireLabelMove(ilbl, "likertItem:" + itL, function () {
                             setInspectorSelection("likertItem:" + itL);
+                        });
+                        // Double-click renames on the chart (see the
+                        // correlation variable labels). The label drawn here
+                        // may carry the reverse-scored mark, which is not
+                        // part of the name, so the editor starts from the
+                        // name alone.
+                        ilbl.addEventListener("dblclick", function (ev) {
+                            ev.stopPropagation(); ev.preventDefault();
+                            try {
+                                setInspectorSelection("likertItem:" + itL);
+                                if (!ev.currentTarget || !ev.currentTarget.isConnected) return;
+                                showInlineTextEditor("likertItem:" + itL);
+                                if (_inlineTextEditor && _inlineTextEditor.dragId === "likertItem:" + itL) {
+                                    _inlineTextEditor.input.value = _lkDispItem(itL);
+                                }
+                            } catch (_eLkD) {}
                         });
                     })(it);
                     dataGroup.appendChild(ilbl);
@@ -47596,10 +48825,15 @@
                 if (_hpCount > 0) {
                     var _hpRangePresent = _outOfRangeCount > 0;
                     var _hpMini = window.__gb2_hpBadgeMinimized === true;
-                    var _hpTip = _hpCount + (_hpCount === 1
-                        ? " data point is hidden."
-                        : " data points are hidden.") +
-                        " Click to open the Visibility panel and restore them.";
+                    var _hpTip = _gb2PtsExcluded()
+                        ? (_hpCount + (_hpCount === 1
+                            ? " value is excluded in the data."
+                            : " values are excluded in the data.") +
+                            " Click to list them and include them again.")
+                        : (_hpCount + (_hpCount === 1
+                            ? " data point is hidden."
+                            : " data points are hidden.") +
+                            " Click to open the Visibility panel and restore them.");
                     var _hpExpanded = window.__gb2_hpBadgeListOpen === true;
                     var _hpBadge = document.createElement("div");
                     _hpBadge.setAttribute("data-role", "gb2-hp-badge");
@@ -47703,9 +48937,11 @@
                         _hpHeader.title = _hpExpanded
                             ? "Click to collapse the list"
                             : "Click to show & restore individual hidden points";
-                        var _hpWord = _hpCount === 1 ? " point" : " points";
+                        var _hpWord = _gb2PtsExcluded()
+                            ? (_hpCount === 1 ? " value" : " values")
+                            : (_hpCount === 1 ? " point" : " points");
                         var _hpMsg = document.createElement("span");
-                        _hpMsg.textContent = "⊘ " + _hpCount + _hpWord + " hidden";
+                        _hpMsg.textContent = "⊘ " + _hpCount + _hpWord + (_gb2PtsExcluded() ? " excluded" : " hidden");
                         _hpMsg.style.cssText = "flex:1;line-height:1;";
                         _hpHeader.appendChild(_hpMsg);
                         // Chevron — rotates when list is open.
@@ -48766,6 +50002,41 @@
                                 window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
                         } catch (_eFqRs) {}
                     }
+                    // Likert equivalent. The response-level editor belongs
+                    // to the diverging and stacked views and the mean-dots
+                    // editor to the means view, each the editor of its
+                    // view's main mark; the validity rules below dropped
+                    // whichever was open on a switch between the two, so the
+                    // panel closed. One now becomes the other: to the dots on
+                    // the way to means, and on the way back to the level that
+                    // was open before (remembered for the session), or the
+                    // first level when there was none.
+                    if (_dtg === "likertmeans" || _dtg === "likertdiverging" || _dtg === "likertstacked") {
+                        var _lkRestoreBefore = "";
+                        try { _lkRestoreBefore = JSON.stringify(arr); } catch (_eLkRb) {}
+                        arr = arr.map(function (s0) {
+                            if (typeof s0 !== "string") return s0;
+                            if (_dtg === "likertmeans" && s0.indexOf("likertLevel:") === 0) {
+                                try { window.__gb2_lkLastLevel = s0.substring("likertLevel:".length); } catch (_eLkL) {}
+                                return "likertMeanDots";
+                            }
+                            if (_dtg !== "likertmeans" && s0 === "likertMeanDots") {
+                                var _lkLvs = (data && Array.isArray(data.likertLevels)) ? data.likertLevels : [];
+                                var _lkWant = (typeof window.__gb2_lkLastLevel === "string") ? window.__gb2_lkLastLevel : null;
+                                var _lkHas = false;
+                                for (var _lkI = 0; _lkI < _lkLvs.length; _lkI++) {
+                                    if (String(_lkLvs[_lkI]) === _lkWant) { _lkHas = true; break; }
+                                }
+                                if (!_lkHas) _lkWant = _lkLvs.length ? String(_lkLvs[0]) : null;
+                                return (_lkWant !== null) ? ("likertLevel:" + _lkWant) : s0;
+                            }
+                            return s0;
+                        });
+                        try {
+                            if (_lkRestoreBefore !== JSON.stringify(arr) && window.localStorage)
+                                window.localStorage.setItem(INSPECTOR_LS_KEY, JSON.stringify(arr));
+                        } catch (_eLkRs) {}
+                    }
                     var kept = arr.filter(function (s) {
                         if (s === "boxOptions") return false;
                         // Draw mode is a transient action, not a restorable
@@ -49092,6 +50363,30 @@
                     return;
                 }
             } catch (_eSS) {}
+            // Touch presses the HOST has already ruled on (data.touchHost,
+            // standalone only; jamovi never ships the key, so every line
+            // here is dead there). The element resolvers run their release
+            // branch on pointercancel exactly as on pointerup, which made
+            // two wrong selections on a touch screen, and they are refused
+            // HERE for the same reason as the stats choke above:
+            //   1. a press the browser CANCELLED because it took the touch
+            //      for a page scroll counted as a click, so swiping the page
+            //      past a bar opened that bar's editor;
+            //   2. a press the host answered with its long-press menu
+            //      selected the part again when the finger lifted.
+            // The host stamps both from its own window-level listeners and
+            // clears them on the next press; this only reads them. Clearing
+            // a selection (null) always passes.
+            try {
+                if (data && data.touchHost === true && typeof sel === "string" &&
+                    (window.__gb2_touchPressConsumed === true ||
+                     (Date.now() - (window.__gb2_touchCancelAt || 0)) < 400)) {
+                    return;
+                }
+            } catch (_eTH) {}
+            // A pinned touch readout follows the selection (data.touchHost;
+            // the pin is never set without the host key).
+            try { if (_xyTipPin) _xyTipOnSelection(sel); } catch (_eTp) {}
             opts = opts || {};
             // Blur any element currently focused inside the inspector
             // panel before we rebuild its contents. The panel content
@@ -49651,7 +50946,7 @@
                     try { _clearTextOverrideForId(dragId); } catch (_e) {}
                 }
                 if (commitVal) {
-                    var fn = textEditOnCommit[dragId];
+                    var fn = textEditOnCommit[dragId] || _gb2TitleCommitHook(dragId);
                     if (typeof fn === "function") {
                         try { fn(v); } catch (_e) {}
                     }
@@ -51267,16 +52562,17 @@
             mode: { name: "Mode", sym: "Mo", body: "The value that occurs most often in the sample. When several values share the highest count, the smallest of them is reported and the cell carries an asterisk; when every value occurs exactly once there is no mode and the cell shows a dash.", read: "For measurements with many distinct values the mode says little; it is most useful for counts, ratings and other data with a small set of repeated values. Compare it with the mean and median to see where the bulk of the observations sits." },
             sd: { name: "SD (standard deviation)", sym: "SD", body: "How spread out individual values are around their mean, in the same units as the data. A larger SD means the values are more spread out.", read: "SD describes the spread of the observations, not the precision of the estimated mean; do not confuse it with SE." },
             se: { name: "SE (standard error)", sym: "SE", body: "How much the cell's mean would wobble from sample to sample. For an ordinary independent cell it is the SD divided by the square root of n. Repeated Measures instead uses the selected within-subject or between-subject method; the table footnote names which one.", read: "A smaller SE (a shorter error bar) means the mean is estimated more precisely. In a repeated-measures chart, interpret it using the method named below the table." },
+            welchF: { name: "Welch's F", sym: "F", body: "A one-way ANOVA that does not assume the groups share one spread. Each group counts by its own precision, and the second degrees of freedom are estimated from the data, so they are rarely a whole number.", read: "Read it like the F above it: it asks whether the group means differ anywhere. When the groups' spreads differ a lot it is the safer of the two rows; when the spreads are similar the two rows nearly agree." },
             fStat: { name: "F statistic", sym: "F", body: "A ratio of effect-related variation to error variation. Larger F means the group or condition differences are large relative to the noise used for that test.", read: "A big F signals detectability, not importance; use an effect size to judge how large the difference is." },
             df: { name: "degrees of freedom", sym: "df", body: "How many values in the calculation are free to vary: depending on the test it tracks your sample size, the number of groups, or the size of the table. It sets the shape of the distribution the test uses.", read: "This is bookkeeping for the test, not a finding on its own." },
-            omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor on its own; an interaction means one factor's effect depends on the level of the other." },
+            omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor's effect averaged over the levels of the other factor, not that factor acting by itself; an interaction means one factor's effect depends on the level of the other." },
             mainEffect: { name: "Main effect", sym: "", body: "One factor's overall effect: whether its levels differ on the outcome when you average over the other factor(s) in the design.", read: "A small p is evidence this factor's levels differ on average. When an interaction is significant, read a main effect with care: the factor's effect is not the same at every level of the other factor." },
             interactionEffect: { name: "Interaction", sym: "", body: "An interaction means that the pattern for one factor changes across the levels of another. In ANOVA terms, the factors are not simply additive on the outcome scale being analyzed.", read: "A small interaction p is evidence that the modeled difference is not the same at every level of the other factor. Examine the cell means or simple effects instead of relying only on overall main effects." },
-            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the total corrected sum of squares.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA, the terms are adjusted and can overlap, so their eta-squared values do not have to add to 1." },
+            etaSq: { name: "Eta-squared", sym: "η²", body: "For an ANOVA term, Pandion Plots calculates eta-squared as that term's sum of squares divided by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does.", read: "In a one-way ANOVA, this can be read as a share of the sample's total variation. In a factorial Type III ANOVA with unequal cell sizes the table's rows no longer add up to the data's total variation, so the share is of the table's own total." },
             etaSqP: { name: "Partial eta-squared", sym: "η²p", body: "Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.", read: "It runs from 0 to 1, but it is not a share of all outcome variation. Values for different terms do not add to 1 and can change with the design and error denominator." },
             omegaSq: { name: "Omega-squared", sym: "ω²", body: "Like eta-squared, omega-squared estimates how much population variation is associated with an ANOVA effect, but it corrects some of eta-squared's upward bias. It is often a little smaller.", read: "The estimate can be zero or negative. Read a small negative value as an effect near zero, not as negative variance." },
             shapiroW: { name: "Shapiro-Wilk W", sym: "W", body: "The Shapiro-Wilk test compares the ordered sample with the pattern expected from a normal distribution. W is generally nearer 1 when the sample is more compatible with normality, but W is not a percentage or a stand-alone closeness score; its p value also depends on sample size.", read: "A small p flags evidence against normality under the test. A larger p means no departure was detected, not that normality was proved." },
-            skewness: { name: "Skewness", sym: "", body: "How lopsided the distribution is. Positive means a longer tail to the right (high values), negative a longer tail to the left, and near zero is roughly symmetric.", read: "Past about 1 or below about -1 is noticeably skewed, but treat that as a rough guide, not a cutoff." },
+            skewness: { name: "Skewness", sym: "", body: "How lopsided the distribution is. Positive means a longer tail to the right (high values), negative a longer tail to the left. A symmetric distribution has skewness 0, but a value near zero does not by itself show symmetry.", read: "Past about 1 or below about -1 is noticeably skewed, but treat that as a rough guide, not a cutoff." },
             kurtosis: { name: "Kurtosis (excess)", sym: "", body: "Excess kurtosis summarizes how strongly extreme values affect the distribution compared with a normal distribution, which is set to 0. Positive values mean greater tail extremity; negative values mean less.", read: "Sample kurtosis is strongly influenced by extreme observations. It does not measure how tall, flat, or pointy the center of the distribution looks." },
             minMax: { name: "Min and Max", sym: "", body: "The smallest and largest values in the cell. Together they mark the full range the data cover.", read: "The gap between them is the total range; a lone extreme value can stretch it." },
             chiSq: { name: "Chi-square", sym: "χ²", body: "Pearson's chi-square compares observed counts with the counts expected under the null hypothesis. Pandion Plots uses the usual uncorrected statistic and an approximate chi-square p value for tests of independence or equal proportions.", read: "Interpret it only with df, p, expected counts, and an effect size. It assumes independent observational units and can be inaccurate with sparse expected counts." },
@@ -51284,7 +52580,7 @@
             cohensW: { name: "Cohen's w", sym: "w", body: "An effect size for the goodness-of-fit test: how far the observed proportions stray from the expected ones, on a scale that does not depend on sample size.", read: "Rough benchmarks are about 0.1 small, 0.3 medium, 0.5 large; read it alongside the p value, not instead of it." },
             deltaP: { name: "Difference in proportions", sym: "Δp", body: "The plain gap between two proportions, one minus the other, on the same scale as the proportions. It is the effect size that goes with the two-proportion z-test.", read: "A difference of 0.15 means one group's proportion is 15 percentage points higher; the sign shows the direction." },
             zStat: { name: "z statistic", sym: "z", body: "A standardized score for how many standard errors a result sits from what the no-difference assumption expects. Here it comes from comparing two proportions.", read: "Further from 0 (either sign) is more surprising under the null; the p value is the probability piece." },
-            stdResidual: { name: "Standardized residual", sym: "", body: "For one cell, how far its observed count sits above or below its expected count, on a standardized scale (adjusted, so it behaves roughly like a z-score).", read: "Positive means more cases than expected, negative fewer; a magnitude of about 2 or more marks a cell that departs notably." },
+            stdResidual: { name: "Standardized residual", sym: "", body: "For one cell, how far its observed count sits above or below its expected count, on a standardized scale (adjusted, so it behaves roughly like a z-score).", read: "Positive means more cases than expected, negative fewer; a magnitude of about 2 or more is worth a look, but a table has many cells and some pass 2 by chance, so treat it as a clue and not a separate test." },
             percentTotal: { name: "% of Total", sym: "", body: "A cell's count shown as a percentage of the total being used for that chart. Usually the total is all visible cases in the panel. In a 100% filled bar it is the total for that category, and in a grouped proportion histogram each group uses its own total.", read: "Check the denominator,the total used to calculate the percentage,before comparing values. Each complete set adds to about 100%, apart from rounding." },
             cumulativePct: { name: "Cumulative %", sym: "", body: "A running percentage over categories or intervals in a defined order. Histogram bins accumulate from the lowest interval upward. Frequency categories accumulate in chart order within each panel.", read: "Check both the order and the denominator. Sorting a histogram table only rearranges the already calculated rows, so a count-sorted view may not show 100% in its last visible row." },
             count: { name: "Count", sym: "", body: "A raw frequency: how many cases fall in this cell or bin.", read: "Counts depend on sample size; a percent is easier to compare across groups of different sizes." },
@@ -51301,7 +52597,7 @@
             studentT: { name: "Student's t-test", sym: "t", body: "Student's t-test compares the population means of two independent groups. It combines the two group variances into one pooled estimate, so it assumes that the population variances are equal. It also relies on independent observations and the usual normal or large-sample approximation.", read: "Use it when the equal-variance model is defensible; otherwise Welch's test is generally safer. Report the mean difference and its uncertainty, not t alone." },
             pairedT: { name: "Paired t-test", sym: "t", body: "The paired t-test compares two measurements from the same people or matched units by first calculating each pair's difference. It tests whether the population mean difference is zero. Pairs must be correctly matched, different pairs must be independent, and the difference scores need the usual normal or large-sample approximation.", read: "Report the signed mean difference, its uncertainty, and p value. A significant result does not mean that every unit changed or that the change was large." },
             mannWhitney: { name: "Mann-Whitney U", sym: "U", body: "Mann-Whitney compares two independent groups by ranking their combined observations. In general, it tests whether values from one group tend to rank differently from values in the other; it is not automatically a test of medians. Only when the distributions have comparable shapes can it be read cleanly as a location shift.", read: "Use the p value for the rank-distribution comparison and report the group distributions with a rank-based effect size. Skewness alone does not make Mann-Whitney preferable to Welch's t-test." },
-            wilcoxonSR: { name: "Wilcoxon signed-rank", sym: "V", body: "Wilcoxon signed-rank is a paired test that ranks the nonzero differences by size and keeps their signs. It tests whether the difference distribution is symmetric around zero. Under symmetry, this concerns the method's center, called the pseudomedian, rather than simply the ordinary sample median.", read: "A small p value indicates an imbalance between positive and negative signed ranks under that symmetry model. It does not show that every person changed or that the change was large." },
+            wilcoxonSR: { name: "Wilcoxon signed-rank", sym: "V", body: "Wilcoxon signed-rank is a paired test that ranks the nonzero differences by size and keeps their signs. Its null hypothesis is that the differences are spread symmetrically around zero. When the differences are symmetric, it tests whether their center is zero (median, mean and pseudomedian are then the same point). When they are not, it can reject even though the median or mean difference is zero.", read: "A small p value indicates an imbalance between positive and negative signed ranks under that symmetry model. It does not show that every person changed or that the change was large." },
             tStat: { name: "t statistic", sym: "t", body: "A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it further from 0. It feeds into the p value.", read: "Further from 0 (either sign) means a stronger difference relative to noise; the sign shows which side is higher. A large t can come from a tiny difference measured precisely." },
             uStat: { name: "U statistic", sym: "U", body: "The Mann-Whitney U statistic is based on pairwise ordering: each observation in one group is compared with each observation in the other, and tied pairs contribute half. Pandion Plots displays the smaller of the two complementary U values. The sign of its effect size separately follows jamovi's first-sample convention.", read: "U depends on the two sample sizes, so interpret it through its null distribution and p value. Report the group distributions and rank-biserial effect rather than treating U itself as a location difference." },
             vStat: { name: "V statistic", sym: "V", body: "The Wilcoxon signed-rank statistic used here: zero differences are removed, absolute differences are ranked, and the ranks attached to positive differences are summed.", read: "Interpret V through its null distribution and p value. Describe the full distribution of paired differences and report the rank-biserial effect for size. The signed-rank test is not simply a test of the ordinary median." },
@@ -51309,7 +52605,7 @@
             cohensDz: { name: "Cohen's dz (paired)", sym: "dz", body: "For paired or repeated measurements, Cohen's dz is the sample mean of the pairwise differences divided by the sample SD of those differences. It expresses the average difference in difference-score SD units.", read: "Larger absolute values mean that the mean difference is large relative to the variation among the pairwise differences. Its denominator differs from independent-group d, so the values are not directly interchangeable." },
             hedgesG: { name: "Hedges' g", sym: "g", body: "Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.", read: "Read it exactly like d, as a mean difference in standard deviation units, nudged a little toward zero in small samples." },
             rankBiserialR: { name: "Rank-biserial r", sym: "r", body: "A signed rank-based effect size from -1 to +1. For Mann-Whitney it summarizes pairwise ordering between groups; for Wilcoxon it compares the total positive and negative signed ranks. Pandion Plots follows jamovi's sign convention, which can point opposite to Cohen's d for the same independent-group ordering.", read: "Values near -1 or +1 mean that nearly all pairwise comparisons or signed ranks point in one direction; values near 0 mean little net rank dominance. It is not Pearson correlation and does not by itself describe a median difference." },
-            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
+            reverseScored: { name: "Reverse-scored item", sym: "(R)", body: "Reverse scoring flips an item's numeric direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not reverse variables handled as continuous because they have many distinct levels.", read: "The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it; reversal cannot repair a multidimensional or poorly keyed scale." },
             varPair: { name: "Pair", sym: "", body: "The two variables whose correlation this row reports. Correlation is symmetric, so the order of the two names does not matter.", read: "" },
             surveyItem: { name: "Item", sym: "", body: "One question or statement from the survey battery. Each row summarizes every response to that one item.", read: "An (R) marker means the item was reverse-scored before these numbers were computed, so it reads in the same direction as the rest of the scale." },
             itemCount: { name: "Items", sym: "k", body: "How many survey items feed the reliability estimate. With the same average agreement among items, a longer scale pushes alpha higher, so compare alphas with the item count in mind.", read: "" }
@@ -52775,7 +54071,7 @@
             {g:1,n:"Cohen's dz (paired)",y:"dz",m:["RM"],s:["dz","paired d","effect size paired"],b:"For paired or repeated measurements, Cohen's dz is the mean of the paired differences divided by the SD of those differences.",r:"The sign shows the direction of the mean difference. A larger absolute value means the mean difference is larger relative to how much the paired differences vary.",w:"It does not describe a typical person's change and is not directly interchangeable with independent-group d. Fixed small/medium/large labels are context-dependent."},
             {g:1,n:"Hedges' g",y:"g",m:["Compare","RM"],s:["g","corrected d","effect size"],b:"Hedges' g is Cohen's d with a small correction for the slight overestimation d has in small samples. You read it on the same standard deviation scale as d.",r:"Read it exactly like d, as a mean difference in standard deviation units, with values in small samples pulled a little toward zero compared to d.",w:"Several Hedges-g conventions and correction formulas exist. Report the software and denominator convention when exact cross-study comparability matters."},
             {g:1,n:"rank-biserial r",y:"r",m:["Compare","RM"],s:["rank biserial","effect size rank","nonparametric effect size"],b:"A rank-based effect size from -1 to +1. For Mann-Whitney, it summarizes whether observations from one independent group tend to outrank those from the other. For Wilcoxon, it compares the positive and negative ranked paired differences.",r:"Values near 0 show little overall rank advantage; values nearer -1 or +1 show that the ranked evidence falls mostly in one direction. Check group order before interpreting the sign: Pandion Plots follows jamovi's convention, which can point opposite to Cohen's d.",w:"It is not Pearson correlation, and it does not by itself estimate a difference in means or medians."},
-            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the total corrected sum of squares. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the total corrected sum of squares under this ANOVA calculation.",w:"In a factorial Type III ANOVA, adjusted terms can overlap, so their eta-squared values do not have to add to 1. Eta-squared also tends to overestimate the corresponding population effect."},
+            {g:1,n:"eta-squared",y:"eta2",m:["Compare","RM"],s:["eta squared","variance explained","eta"],b:"Pandion Plots calculates eta-squared for an ANOVA term by dividing that term's sum of squares by the sum of every row of the ANOVA table (all the terms plus the residual), the way jamovi does. In a one-way ANOVA, it is the usual share of the sample's total variation associated with group differences.",r:"For example, .10 means that the term's sum of squares is 10% of the table's total under this ANOVA calculation.",w:"In a factorial Type III ANOVA with unequal cell sizes, the table's rows do not add up to the data's total variation, so eta-squared is a share of the table's own total, not of all the variation in the data. Eta-squared also tends to overestimate the corresponding population effect."},
             {g:1,n:"Partial eta-squared",y:"partial eta2",m:["Compare","RM"],s:["partial eta squared","eta p","effect size anova"],b:"Partial eta-squared compares the variation linked to one ANOVA term with that term's variation plus its own error variation. Repeated-measures terms use the error term defined by their design.",r:"It runs from 0 to 1. Read it as the term's variation divided by that variation plus its own error,not as a share of all outcome variation.",w:"Values across terms do not add to 1 and depend on the design and error denominator. Do not compare them as though they were slices of one common whole."},
             {g:1,n:"Omega-squared",y:"omega2",m:["Compare","RM"],s:["omega squared","effect size anova","less biased"],b:"Omega-squared estimates the share of population variance associated with an ANOVA effect while correcting some of eta-squared's upward bias. It is often smaller than eta-squared, and an estimate can be zero or negative.",r:"Treat a small negative value as an estimate near zero, not as negative variance. Formula conventions differ across designs, so report the software or method when comparing studies.",w:"Bias correction does not make omega-squared assumption-free; it inherits the ANOVA model and design assumptions."},
             {g:1,n:"R-squared",y:"R2",m:["Scatter"],s:["r squared","variance explained","fit","goodness of fit regression"],b:"R-squared is the proportion of the variation in the outcome that the fitted line or model accounts for. It runs from 0 to 1, where 0 explains none of the spread and 1 explains all of it.",r:"Read it as the fraction of the outcome's variation captured by the fit: 0.25 means the model accounts for about 25 percent of the spread.",w:"A high R-squared means the model fits the spread of these data well, not that the relationship is causal or that predictions will be accurate for new cases."},
@@ -52784,7 +54080,7 @@
             {g:2,n:"paired t-test",y:"t",m:["RM"],s:["paired","dependent t","repeated t","before after"],b:"A test of whether the population's average paired difference is zero,for example, when the same people are measured before and after. It works on each matched pair's difference score.",r:"t is the mean difference divided by its SE. The sign shows direction; report the mean difference, confidence interval, and p value rather than t alone.",w:"Pairs must be correctly matched and independent of other pairs, and the difference-score mean needs an adequate normal or large-sample approximation. Significance does not mean every unit changed or that change was large."},
             {g:2,n:"Mann-Whitney U",y:"U",m:["Compare"],s:["u test","mann whitney","wilcoxon rank sum","nonparametric","rank test"],b:"A test for two independent groups that works with ranked values rather than means. In general, it asks whether values from the two groups tend to occupy different ranks; it is not automatically a test of medians.",r:"Use the p value to assess the rank-distribution difference and report both groups' distributions plus a rank-based effect size. If the group distributions have similar shapes, the result can be interpreted as a location shift; if their shapes differ, the test can respond to those differences too.",w:"Skewness alone does not make Mann-Whitney preferable to Welch's t-test. Different shapes can produce significance even when medians are equal."},
             {g:2,n:"Wilcoxon signed-rank",y:"V",m:["RM"],s:["signed rank","wilcoxon","nonparametric paired","rank test"],b:"A paired test that ranks the sizes of nonzero differences, then compares ranks attached to positive and negative differences. Its usual null assumes the difference distribution is symmetric around zero; under that assumption, it tests whether the distribution is centered at zero,technically, whether its pseudomedian is zero.",r:"Pandion Plots reports V as the sum of positive ranks. Use its p value to assess the signed-rank imbalance, and also report the paired differences and a rank-based effect size.",w:"The test uses both signs and ranked magnitudes, so it is not assumption-free and is not generally justified by saying the scores are merely ordinal or skewed."},
-            {g:2,n:"Which test?",y:"",m:["Compare","RM"],s:["which test","choose a test","welch or student","t test or mann whitney","test selection","equal variances","levene"],b:"Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test is worse than either test used alone (the pretest misses trouble in small samples and distorts the overall error rate), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.",r:"Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.",w:"Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not."},
+            {g:2,n:"Which test?",y:"",m:["Compare","RM"],s:["which test","choose a test","welch or student","t test or mann whitney","test selection","equal variances","levene"],b:"Welch's t is the default for comparing two independent group means: it does not assume equal spread, and when spreads happen to be equal it gives nearly the same answer as Student's t, so it costs almost nothing. Testing for equal variances first and then choosing a test does not hold the error rate that Welch's t holds when used every time (the pretest misses unequal variances in small samples, exactly where Student's t then goes wrong), so Pandion Plots never does it. Student's t stays available for teaching or matching a textbook. Mann-Whitney U answers a different question (whether one group's values tend to be larger, not whether means differ), so reach for it when the outcome is ordinal or when the mean is not the summary you care about.",r:"Leave Test on Auto: it picks a paired test when the two cells are the same subjects and Welch's t otherwise, and the readout always names what ran.",w:"Skewed or non-normal data alone is not a reason to switch to Mann-Whitney: at moderate sample sizes the t family handles it, and under unequal spreads Mann-Whitney has error problems of its own that Welch's t does not."},
             {g:2,n:"the t statistic",y:"t",m:["Compare","RM"],s:["t","t value","signal to noise"],b:"A single number that scales the size of a difference by the noise around it, so bigger differences and less noise both push it away from 0. It feeds into the p value; on its own it is a signal-to-noise ratio, not a probability.",r:"Look at how far t sits from 0: further out (in either direction) means a stronger difference relative to noise, and the sign just shows which group or direction is higher.",w:"t by itself is not a p value and not an effect size; a large t can come from a tiny difference measured very precisely."},
             {g:2,n:"the U statistic",y:"U",m:["Compare"],s:["u"],b:"A Mann-Whitney statistic equivalent to counting pairwise orderings between groups, with tied pairs contributing half. Pandion Plots displays the smaller of the two complementary U values, while rank-biserial sign follows jamovi's first-sample convention.",r:"Interpret U through the group sizes and its null distribution; report the group distributions and rank-biserial effect.",w:"U is not itself a difference in means or medians, and software may display U for a particular group rather than the smaller U."},
             {g:2,n:"the V statistic",y:"V",m:["RM"],s:["v"],b:"Pandion Plots removes zero paired differences, ranks the absolute nonzero differences, and reports V as the sum of ranks attached to positive differences, matching R's convention.",r:"Interpret V through its null distribution and p value; report the paired-difference distribution and rank-biserial effect size.",w:"V is not a median and different software can report a different signed-rank sum, so always name the convention when comparing output."},
@@ -52804,7 +54100,7 @@
             {g:4,n:"Bonferroni",y:"",m:["Compare","RM","Freq","Corr"],s:["bonferroni","strict correction"],b:"Bonferroni limits the chance of one or more false positives across a chosen family to no more than alpha. It does this by multiplying each p value by the number of tests, up to 1, which is equivalent to dividing alpha by that number. The guarantee does not require independent tests.",r:"Compare the adjusted p values with the original alpha and report what counted as the family.",w:"It controls an error probability; it does not guarantee zero false positives. Its conservatism can reduce power, especially with many dependent tests."},
             {g:4,n:"Holm",y:"",m:["Compare","RM","Freq","Corr"],s:["holm","step down","holm bonferroni"],b:"Holm first orders the p values, then applies a step-down version of Bonferroni. It controls the same family-wise error rate even when tests are dependent and is never less powerful than ordinary Bonferroni.",r:"Compare Holm-adjusted p values directly with alpha and report the family.",w:"Greater power than Bonferroni does not guarantee that every additional rejection is true; the procedure controls a long-run family error rate."},
             {g:4,n:"Benjamini-Hochberg (FDR)",y:"",m:["Compare","RM","Freq","Corr"],s:["fdr","false discovery rate","bh","benjamini hochberg"],b:"Benjamini-Hochberg controls the expected proportion of false positives among the hypotheses it rejects, rather than the chance of any false positive. This guarantee holds for independent tests and for common forms of positive dependence.",r:"Compare BH-adjusted p values with the chosen FDR level, and state which tests formed the family. BH often finds more results than family-wise methods because it controls a different error rate.",w:"It does not promise that this particular finding is true or that the realized false share in this one analysis is below the target. Arbitrary dependence requires additional justification or another procedure."},
-            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare","RM"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead."},
+            {g:4,n:"Tukey (studentized range)",y:"",m:["Compare","RM"],s:["tukey","hsd","studentized range","all pairs"],b:"Tukey's method compares every pair of means while controlling the family-wise false-positive rate for the whole set. On Compare Groups it uses the pooled one-way-ANOVA error variance and assumes normal errors with equal population variances; on Repeated Measures it takes each pair's paired t over the subjects complete across every occasion (df = n - 1) and judges it by the studentized range with k = the number of occasions, the way jamovi's RM ANOVA post hoc does. On Repeated Measures that control is approximate: with few subjects and several occasions the family-wise rate runs somewhat above alpha, and Holm on the same paired tests holds it.",r:"Compare its family-adjusted p values directly with alpha. Pandion Plots calculates them from the pooled ANOVA error term (Compare Groups) or from each pair's paired differences over the complete subjects (Repeated Measures), never by multiplying separate pairwise p values.",w:"Unequal variances or a family that is not all pairwise means calls for a different procedure; Tukey does not apply to rank tests, and a Repeated Measures chart with a Group By variable shows the uncorrected p instead."},
             {g:4,n:"Games-Howell",y:"",m:["Compare"],s:["games howell","unequal variance posthoc"],b:"Games-Howell compares every pair of independent-group means while allowing the groups to have different variances and sample sizes. It uses separate variance estimates and adjusts the p values for the full set of pairwise comparisons.",r:"Compare each adjusted p value directly with alpha. The adjustment accounts for both unequal variances and multiple comparisons.",w:"It still assumes independent units and a suitable mean-based sampling model. In Pandion Plots it does not apply to paired or rank-based tests."},
             {g:4,n:"Dunnett (vs control)",y:"",m:["Compare"],s:["dunnett","vs control","against control"],b:"A correction for the specific case where you compare several treatment groups only against one control group, not against each other. Because it tests fewer comparisons, it keeps more sensitivity than comparing every pair.",r:"Each adjusted p value tells you whether that treatment group differs from the control; compare it to your usual cutoff.",w:"It assumes independent units and a defensible common-variance normal linear model. It says nothing about treatment-versus-treatment contrasts and is not an unequal-variance alternative."},
             {g:5,n:"Cell",y:"",m:["Compare","RM","Dist","Freq","Likert"],s:["cell","group","bar"],b:"A cell is one group in the chart: a single bar, box, or point identity, defined by its category (and its panel if the chart is split into panels). All the numbers in a summary row describe that one cell.",r:"Read the row's label to see which group the cell is (for example, the category name, or the panel and category together when the chart is faceted).",w:""},
@@ -52835,7 +54131,7 @@
             {g:7,n:"Slope",y:"b",m:["Scatter"],s:["slope","regression","b","beta","rise over run"],b:"The regression slope is how much the y variable is predicted to change for each one-unit increase in the x variable, drawn as the tilt of the best-fit line. Its size depends on the units of your variables, so a slope of 2 means something different for dollars than for millimeters.",r:"Read it as: for every 1 unit more of x, the predicted y rises (or falls, if negative) by this many units; the sign matches the direction of the correlation.",w:"A large slope is not the same as a strong relationship, since slope depends on measurement units while strength is carried by r and R-squared."},
             {g:7,n:"Strongest pair",y:"",m:["Corr"],s:["strongest","largest correlation","biggest relationship"],b:"The pair with the largest absolute value of the currently selected matrix coefficient: Pearson r, Spearman rho, or Kendall tau-b. It is chosen only from pairs with computable coefficients in the displayed variable set.",r:"Check the selected method and sign. 'Strongest' is a relative ranking within this matrix, not a claim of significance, practical importance, stability, or causation.",w:"Because the app searches across several pairs and highlights the largest sample coefficient, that winner will often look stronger than it would in new data. Treat it as a lead to investigate, not a confirmed result."},
             {g:7,n:"Cronbach's alpha",y:"alpha",m:["Likert"],s:["cronbach","alpha","reliability","internal consistency","scale"],b:"Cronbach's alpha summarizes how a set of scored items hangs together in this sample. It is calculated from the item variances, their covariances, and the number of items. Pandion Plots uses respondents with complete data on all items after any reverse scoring.",r:"Report alpha with the number of items, sample size, scoring decisions, and missing-data handling. Interpreting alpha as reliability also assumes, among other things, that items contribute equally to the common score and that their errors are uncorrelated.",w:"There is no universal .70 pass mark, and alpha can be negative. Alpha does not by itself show that a scale is one-dimensional, valid, stable over time, or equally reliable for every subgroup or score level."},
-            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale with k response levels, Pandion Plots changes x to k + 1 - x before calculating percentages, means, and alpha. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
+            {g:7,n:"Reverse-scored item",y:"(R)",m:["Likert"],s:["reverse scored","reverse coded","recoded","(r)","negatively worded"],b:"Reverse scoring flips an item's numeric direction so that high and low scores line up with the intended scale direction. For a shared discrete scale, Pandion Plots reflects the item around the two ends of the scale before calculating percentages, means, and alpha: a response x becomes lowest + highest - x, which is k + 1 - x on a scale coded 1 to k. It does not apply this operation to variables handled as continuous because they have many distinct levels.",r:"The (R) marker means that the discrete item has been reflected. Reverse an item only when its intended meaning and coding require it.",w:"A negatively worded item is not automatically reverse-keyed. Reversal also cannot repair ambiguous wording, multiple dimensions, or a poorly specified scale."},
             {g:7,n:"Internal consistency",y:"",m:["Likert"],s:["internal consistency","reliability","items agree"],b:"Internal consistency describes how responses to items intended for one combined score relate to one another in a sample. Cronbach's alpha is one common summary. Consistency does not mean that people answer every item identically, and it becomes a reliability claim only under a suitable measurement model.",r:"Before interpreting one coefficient, check the item content, scoring direction, dimensionality, and pattern of relationships among the items.",w:"Strong item relationships can come from redundancy, shared wording, method effects, or several correlated dimensions. They do not by themselves prove one dimension or construct validity."},
             {g:8,n:"Silverman's rule of thumb (bandwidth)",y:"",m:["Compare", "RM", "Dist"],s:["bandwidth", "silverman", "smoothing", "kde bandwidth", "smooth the curve"],b:"Bandwidth controls how much a density curve is smoothed. Pandion Plots first chooses an automatic width using Silverman's rule of thumb: h = 0.9 times min(SD, IQR/1.34) times n^(-1/5). If IQR is 0 it uses SD, and if there is no usable spread it uses width 1. The Bandwidth control multiplies this automatic value.",r:"Below 1 reduces smoothing and above 1 increases it. Inspect whether important features persist across reasonable nearby settings.",w:"The slider value is not the bandwidth in data units, and this rule is not optimal for every distribution, especially multimodal, bounded, or very small samples."},
             {g:8,n:"Kernel (kernel density estimate)",y:"",m:["Dist"],s:["kernel", "kde", "kernel density", "density estimate", "bump shape"],b:"A kernel density estimate places a small smooth bump at every observation and adds the bumps together. The Kernel setting chooses the bump's shape, while Bandwidth controls its width. Bandwidth usually changes the visible curve more.",r:"Try reasonable nearby bandwidths and, when useful, different kernels. Features that remain visible across those choices are more stable than bumps that appear under only one setting.",w:"The curve is an estimate, not a uniquely determined outline of the population. Near a hard boundary such as zero, it can spill into impossible values, and small samples can produce unstable bumps."},
@@ -53514,9 +54810,18 @@
                     if (_fqT && typeof _fqT.minExp === "number" && isFinite(_fqT.minExp)
                         && (_fcMinE === null || _fqT.minExp < _fcMinE)) _fcMinE = _fqT.minExp;
                 }
+                // a 2 by 2 table cannot combine categories; Fisher's exact
+                // test (on the Chi-square tab) is the remedy there
+                var _fc22 = false;
+                for (var _fq3 = 0; _fq3 < data.freqTests.length; _fq3++)
+                    if (data.freqTests[_fq3] && data.freqTests[_fq3].type === "independence" &&
+                        data.freqTests[_fq3].df === 1) _fc22 = true;
                 if (_fcMinE !== null && _fcMinE < 5)
                     out.push({ id: "chisqexp", sev: "warn", title: "Expected counts are too small for chi-square",
-                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". Consider combining sparse categories, or collecting more data, before leaning on this p-value.", fixGt: null });
+                        why: "Chi-square's approximation gets unreliable when expected counts drop below 5; the smallest here is " + (Math.round(_fcMinE * 10) / 10) + ". " +
+                            (_fc22
+                                ? "For a 2 by 2 table, read Fisher's exact test on the Chi-square tab of the Statistics panel, which needs no such minimum."
+                                : "Consider combining sparse categories, or collecting more data, before leaning on this p-value."), fixGt: null });
             }
             // --- Correlation matrix ---
             if (gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length) {
@@ -53548,6 +54853,23 @@
                     out.push({ id: "likertn", sev: "warn", title: "Some items have very few responses", why: "The item with the fewest answers has n = " + _loItem + ", so a single person moves its percentages by about " + Math.round(100 / _loItem) + " points. Read those rows as sketches, not measurements.", fixGt: null });
                 if (gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 && data.likertLevels.length <= 4)
                     out.push({ id: "likshort", sev: "tip", title: "Means on a short rating scale", why: "A mean on a " + data.likertLevels.length + "-point scale treats the steps as evenly spaced, and it can hide a split: half strongly agree plus half strongly disagree averages to the middle. The diverging view shows the actual response mix.", fixGt: choiceHas("likertdiverging") ? "likertdiverging" : null });
+                // An item that runs against the rest (Nov 2026, the
+                // statistical review: alpha .33 from an item never reverse-
+                // scored read "Looks good"; jamovi flags such an item).
+                var _aiBad = [];
+                if (data.likertAlpha && Array.isArray(data.likertAlpha.itemRest)) {
+                    for (var _ai = 0; _ai < data.likertAlpha.itemRest.length; _ai++) {
+                        var _aiE = data.likertAlpha.itemRest[_ai];
+                        if (_aiE && typeof _aiE.r === "number" && _aiE.r < 0)
+                            _aiBad.push(String(_aiE.item) + " (r = " + (Math.round(_aiE.r * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.") + ")");
+                    }
+                }
+                if (_aiBad.length)
+                    out.push({ id: "alphaitem", sev: "warn",
+                        title: (_aiBad.length === 1 ? "An item runs" : "Some items run") + " against the others",
+                        why: _aiBad.join(", ") + (_aiBad.length === 1 ? " correlates" : " correlate") +
+                            " negatively with the sum of the other items. An item worded in the opposite direction has to be reverse-scored before items are averaged or alpha is read: click its label on the chart and turn on reverse scoring. If its wording is not reversed, it may not belong with the others.",
+                        fixGt: null });
             }
             // --- Tier-1 additions (Jul 2026): decodable colors, clipped
             // ranges, hidden-data disclosure, error-bar captioning, and
@@ -53618,6 +54940,7 @@
                         for (var bpi = 0; bpi < bpv.length; bpi++) {
                             var vv4 = bpv[bpi];
                             if (typeof vv4 !== "number" || !isFinite(vv4)) continue;
+                            if (_gb2PtsExcluded() && _isPointHidden(bpb.x, bpb.group, bpi)) continue;
                             totPts++;
                             if ((oLo && vv4 < data.yMin) || (oHi && vv4 > data.yMax)) outPts++;
                         }
@@ -53670,10 +54993,14 @@
                 // states which rule applies on this module.
                 var _hdRule =
                     (_mk === "cg" || _mk === "rm")
-                        ? " On this chart, significance brackets and ANOVA labels EXCLUDE the hidden data (hiding = excluding an observation), while the Statistics panel's Descriptives table keeps reporting the full data."
+                        ? (_gb2PtsExcluded()
+                            ? " On this chart, values excluded in the data are left out of everything: the bars, the tests and the Statistics panel's Descriptives. Hidden bars are left out of the tests, and the Descriptives table still lists them."
+                            : " On this chart, significance brackets and ANOVA labels EXCLUDE the hidden data (hiding = excluding an observation), while the Statistics panel's Descriptives table keeps reporting the full data.")
                     : (_mk === "freq")
                         ? " On this chart the chi-square, proportion brackets, and the tables all still INCLUDE the hidden bars - hiding only declutters the picture, it never changes a statistic."
-                        : " The Statistics panel's Descriptives table keeps reporting the full data, including the hidden parts.";
+                        : (_gb2PtsExcluded()
+                            ? " Values excluded in the data are left out of the Statistics panel's numbers. Hidden groups stay included there."
+                            : " The Statistics panel's Descriptives table keeps reporting the full data, including the hidden parts.");
                 if (_hdCount > 0)
                     out.push({ id: "hiddendata", sev: "tip", title: _hdCount + (_hdCount === 1 ? " part of the data is hidden" : " parts of the data are hidden"), why: "Hiding bars, groups, items, or variables with the eye tool is great for exploring, but a reported figure should either show them or say they were excluded - the Figure note (+ menu) is a good place. Restore hidden parts from the eye menu's Hidden list." + _hdRule, fixGt: null });
             })();
@@ -53948,6 +55275,18 @@
                     why: _ccWhich + " has no natural order, so the chart plots its categories in whatever order they happen to be in. " + _ccWhat + " then computed on those positions, and putting the categories in a different order would give a different answer. Compare Groups compares unordered categories honestly. If the categories really do have an order, set the variable's measure type to Ordinal and the numbers become meaningful. Two categories are the exception and are never flagged here: that is what a point-biserial, or a phi between two dichotomies, already is.",
                     fixGt: null });
             })();
+            // --- Within-subject error bars on a chart with groups (Nov
+            // 2026, the statistical review): each group's marks carry bars
+            // that describe change across the occasions. They ran 2 to 6
+            // times narrower than ordinary standard errors on the review's
+            // mixed design, where two groups looked far apart at an
+            // occasion whose own test gave p = .076. A note, never a pass.
+            if (_mk === "rm" && isBarType && data.hasGroups === true &&
+                data.errorBarMethod === "within" && data.summaryFunc !== "median" &&
+                typeof data.errorBarType === "string" && data.errorBarType !== "none")
+                out.push({ id: "rmwithin", sev: "tip", title: "These error bars cannot compare the groups",
+                    why: "The error bars are within-subject: they show how consistently each group changed from one occasion to the next, with the differences between people taken out, so they are much narrower than ordinary error bars. They say nothing about whether one group differs from another at the same occasion. For that, read the Compare pairs tab in the Statistics panel, or set Method to between-subjects in the error bar panel.",
+                    fixGt: null });
             var _skApp = false;
             (function () {
                 if (!((_mk === "cg" || _mk === "rm") && isBarType)) return;
@@ -53958,13 +55297,33 @@
                 // pushed every point off-chart, the skew is NOT visible
                 // and the tip should fire again.
                 if (q('[data-role="data-point"]').length > 0) return;
-                var worst = null;
+                var worst = null, outer = null;
                 for (var sb = 0; sb < bars.length; sb++) {
                     var bb3 = bars[sb]; if (!bb3 || !Array.isArray(bb3.values)) continue;
                     var vv3 = []; for (var sv = 0; sv < bb3.values.length; sv++) { var v3 = bb3.values[sv]; if (typeof v3 === "number" && isFinite(v3)) vv3.push(v3); }
-                    var n3 = vv3.length; if (n3 < 25) continue;
+                    // From 8 values (Nov 2026, the statistical review: the
+                    // rule needed 25, so one outlier dragging a mean of 12
+                    // values to 59.7 beside a median of 27.1 read "Looks
+                    // good", and small groups are where a mean is most
+                    // fragile). Skewness is judged from 10 values; from 8, a
+                    // mean lying outside the middle half of its own group.
+                    var n3 = vv3.length; if (n3 < 8) continue;
                     _skApp = true;
                     var m3 = 0; for (var sm = 0; sm < n3; sm++) m3 += vv3[sm]; m3 /= n3;
+                    var so3 = vv3.slice().sort(function (a, b) { return a - b; });
+                    var qAt3 = function (pp) {
+                        var h3 = (n3 - 1) * pp, l3 = Math.floor(h3), u3 = Math.ceil(h3);
+                        return so3[l3] + (h3 - l3) * (so3[u3] - so3[l3]);
+                    };
+                    var q1v = qAt3(0.25), q3v = qAt3(0.75);
+                    if (q3v > q1v && (m3 > q3v || m3 < q1v)) {
+                        var far3 = (m3 > q3v ? m3 - q3v : q1v - m3) / (q3v - q1v);
+                        if (!outer || far3 > outer.far) {
+                            var _co3 = String(bb3.x || "");
+                            if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _co3 += " / " + bb3.group;
+                            outer = { far: far3, cell: _co3, mean: m3, above: m3 > q3v, qv: (m3 > q3v ? q3v : q1v), med: qAt3(0.5) };
+                        }
+                    }
                     var s2 = 0, s3 = 0;
                     for (var sk = 0; sk < n3; sk++) { var d3 = vv3[sk] - m3; s2 += d3 * d3; s3 += d3 * d3 * d3; }
                     if (!(s2 > 0)) continue;
@@ -53973,14 +55332,126 @@
                     // quote one number for one cell.
                     var g1 = (Math.sqrt(n3 * (n3 - 1)) / (n3 - 2)) *
                              (Math.sqrt(n3) * s3 / Math.pow(s2, 1.5));
-                    if (Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
+                    if (n3 >= 10 && Math.abs(g1) >= 1.5 && (!worst || Math.abs(g1) > Math.abs(worst.g1))) {
                         var _cl3 = String(bb3.x || "");
                         if (bb3.group !== undefined && bb3.group !== null && String(bb3.group).length) _cl3 += " / " + bb3.group;
                         worst = { g1: g1, cell: _cl3 };
                     }
                 }
+                if (!worst && outer) {
+                    var _r3 = function (v) { return String(Math.round(v * 100) / 100); };
+                    out.push({ id: "skewmean", sev: "tip", title: "The mean sits outside the middle of its group",
+                        why: "In '" + outer.cell + "' the mean (" + _r3(outer.mean) + ") lies " + (outer.above ? "above" : "below") +
+                            " three quarters of the values (the " + (outer.above ? "upper" : "lower") + " quartile is " + _r3(outer.qv) +
+                            "): one or two extreme values are pulling it. The median (" + _r3(outer.med) +
+                            ") describes a typical value better here. Try the median (Summary, in the panel), or a box or raincloud that shows the shape.",
+                        fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+                }
                 if (worst)
                     out.push({ id: "skewmean", sev: "tip", title: "A skewed group is summarized by its mean", why: "The values behind '" + worst.cell + "' are strongly skewed (skewness = " + (Math.round(worst.g1 * 10) / 10) + "), so the mean is pulled toward the tail and a bar or dot at the mean represents a typical value poorly. Try the median (Summary Function in the panel), or a box or raincloud that shows the shape.", fixGt: (choiceHas("raincloud") ? "raincloud" : (choiceHas("box") ? "box" : null)) });
+            })();
+            // --- Very small groups under a mean and an error bar (Nov 2026,
+            // the statistical review: groups of 2, 3 and 1 drawn as bars
+            // with error bars read "Looks good"). Quiet when the values
+            // themselves are on the chart.
+            var _tgApp = (_mk === "cg" || _mk === "rm") && isBarType && !(data && data.freqMode === true);
+            (function () {
+                if (!_tgApp) return;
+                if (q('[data-role="data-point"]').length > 0) return;
+                var minN = Infinity;
+                for (var tb = 0; tb < bars.length; tb++) {
+                    var tbb = bars[tb]; if (!tbb || !Array.isArray(tbb.values)) continue;
+                    var tn = 0;
+                    for (var tv = 0; tv < tbb.values.length; tv++) if (typeof tbb.values[tv] === "number" && isFinite(tbb.values[tv])) tn++;
+                    if (tn > 0 && tn < minN) minN = tn;
+                }
+                if (minN < 5)
+                    out.push({ id: "tinygroups", sev: "tip", title: "Very small groups",
+                        why: "The smallest group here has " + (minN === 1 ? "a single value, so it has no error bar at all" : "only " + minN + " values") +
+                            ". A mean and an error bar say little about so few values, and they hide the few there are. Show every value instead: turn on Data points from the + menu.",
+                        fixGt: null });
+            })();
+            // --- One point doing the work, and a curved pattern (Nov 2026,
+            // the statistical review): r = .89 made by a single point (-.21
+            // without it) and a clean U shape at r = .01 both read "Looks
+            // good". Judged per plotted cell (group within panel), from 5
+            // points for the first and 8 for the second; the curve check
+            // stands aside when one point already explains the pattern.
+            var _xiApp = false, _xcApp = false;
+            (function () {
+                if (gt !== "scatter") return;
+                if (typeof data.xyBin === "string" && data.xyBin !== "" && data.xyBin !== "none") return;
+                var ptsI = Array.isArray(data.xyPoints) ? data.xyPoints : [];
+                var cellsI = {}, orderI = [], sepI = String.fromCharCode(31);
+                for (var pI = 0; pI < ptsI.length; pI++) {
+                    var qI = ptsI[pI];
+                    if (!qI || typeof qI.x !== "number" || typeof qI.y !== "number" || !isFinite(qI.x) || !isFinite(qI.y)) continue;
+                    var kI = ((qI.facet === undefined || qI.facet === null) ? "" : String(qI.facet)) + sepI +
+                             ((qI.group === undefined || qI.group === null) ? "" : String(qI.group));
+                    if (!cellsI[kI]) { cellsI[kI] = []; orderI.push(kI); }
+                    cellsI[kI].push(qI);
+                }
+                var fR = function (v) { return (Math.round(v * 100) / 100).toFixed(2).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1"); };
+                var fN = function (v) { return String(Math.round(v * 100) / 100); };
+                var nameI = function (key) {
+                    var parts = key.split(sepI).filter(function (s) { return s.length; });
+                    return parts.length ? " in " + parts.join(", ") : "";
+                };
+                var worstI = null, worstC = null;
+                for (var oI = 0; oI < orderI.length; oI++) {
+                    var cI = cellsI[orderI[oI]], nI = cI.length, iI;
+                    if (nI < 5 || nI > 5000) continue;
+                    var mx = 0, my = 0;
+                    for (iI = 0; iI < nI; iI++) { mx += cI[iI].x; my += cI[iI].y; }
+                    mx /= nI; my /= nI;
+                    var sxx = 0, syy = 0, sxy = 0;
+                    for (iI = 0; iI < nI; iI++) {
+                        var dx = cI[iI].x - mx, dy = cI[iI].y - my;
+                        sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                    }
+                    if (!(sxx > 0) || !(syy > 0)) continue;
+                    var rAll = sxy / Math.sqrt(sxx * syy);
+                    _xiApp = true;
+                    for (iI = 0; iI < nI; iI++) {
+                        // leave point i out: the centered sums lose its
+                        // share, rescaled for the shifted means
+                        var ex = cI[iI].x - mx, ey = cI[iI].y - my, fI = nI / (nI - 1);
+                        var lxx = sxx - fI * ex * ex, lyy = syy - fI * ey * ey, lxy = sxy - fI * ex * ey;
+                        if (!(lxx > 0) || !(lyy > 0)) continue;
+                        var rLoo = lxy / Math.sqrt(lxx * lyy);
+                        var dI = Math.abs(rAll - rLoo);
+                        if (dI >= 0.2 && (!worstI || dI > worstI.d))
+                            worstI = { d: dI, rAll: rAll, rLoo: rLoo, x: cI[iI].x, y: cI[iI].y, cell: orderI[oI] };
+                    }
+                    if (nI >= 8) {
+                        _xcApp = true;
+                        // a quadratic in x against the straight line
+                        var m2 = sxx / nI, s22 = 0, s12 = 0, s2y = 0;
+                        for (iI = 0; iI < nI; iI++) {
+                            var cx = cI[iI].x - mx, z2 = cx * cx - m2;
+                            s22 += z2 * z2; s12 += cx * z2; s2y += z2 * (cI[iI].y - my);
+                        }
+                        var det = sxx * s22 - s12 * s12;
+                        if (det > 1e-12 * sxx * s22) {
+                            var b1 = (sxy * s22 - s2y * s12) / det, b2 = (s2y * sxx - sxy * s12) / det;
+                            var r2q = (b1 * sxy + b2 * s2y) / syy, r2l = rAll * rAll;
+                            if (isFinite(r2q) && r2q - r2l >= 0.25 && (!worstC || r2q - r2l > worstC.gain))
+                                worstC = { gain: r2q - r2l, r2q: Math.min(1, r2q), r2l: r2l, cell: orderI[oI] };
+                        }
+                    }
+                }
+                if (worstI)
+                    out.push({ id: "xyinfluence", sev: "warn", title: "One point is doing a lot of the work",
+                        why: "Leaving out the single point at (" + fN(worstI.x) + ", " + fN(worstI.y) + ")" + nameI(worstI.cell) +
+                            " changes r from " + fR(worstI.rAll) + " to " + fR(worstI.rLoo) +
+                            ". A correlation that depends on one observation says more about that observation than about the rest. Check it for a data-entry error, compare Spearman's rho (Method, in the Statistics panel), and report the result with and without it.",
+                        fixGt: null });
+                else if (worstC)
+                    out.push({ id: "xycurve", sev: "tip", title: "The pattern may be curved",
+                        why: "A straight line accounts for about " + Math.round(worstC.r2l * 100) + " percent of the variation" + nameI(worstC.cell) +
+                            "; a simple curve accounts for about " + Math.round(worstC.r2q * 100) +
+                            " percent. r and a straight fit line describe straight-line patterns only, so they understate this one. Look at the points, try the LOESS fit line, and describe the shape in words.",
+                        fixGt: null });
             })();
             var _lgXOn = (gt === "scatter" && _xyLogX());
             var _lgYOn = (gt === "scatter" && _xyLogY());
@@ -54253,6 +55724,7 @@
                 { id: "shapen", name: "Enough data for the shape", tip: "Box and violin shapes need a reasonable sample in every group (about n of 10 or more); a raincloud is exempt because it shows every raw point.", applies: (gt === "box" || gt === "violin" || gt === "raincloud") && minN !== null },
                 { id: "violinn", name: "Violin sample size", tip: "A violin's smooth outline is trustworthy from about n = 20 per group.", applies: gt === "violin" && minN !== null && minN >= 10 },
                 { id: "errbars", name: "Uncertainty shown", tip: "Summary charts should show error bars (SE, SD, or a CI) so precision is visible. Not applicable to a median summary, which draws no error bars by design.", applies: isBarType && (_mk === "cg" || _mk === "rm") && bars.length > 0 && data.summaryFunc !== "median" },
+                { id: "tinygroups", name: "Enough values behind each mean", tip: "A mean and an error bar say little about fewer than 5 values; show the values themselves.", applies: _tgApp },
                 { id: "unequaln", name: "Comparable group sizes", tip: "Cells with very different ns should not look interchangeable; show or report the ns.", applies: _unApp },
                 { id: "skewmean", name: "Mean fits the data", tip: "A strongly skewed cell is poorly summarized by its mean; median or box views tell it straighter.", applies: _skApp },
                 { id: "ebnote", name: "Error bars explained", tip: "When a figure note is used, it should say whether error bars are SE, SD, or a confidence interval.", applies: _ebnApp },
@@ -54269,6 +55741,8 @@
                 { id: "overplot", name: "Overplotting", tip: "With very many points, dots pile up and hide where the data are densest.", applies: gt === "scatter" && !_hmOn },
                 { id: "xydupes", name: "Each observation visible", tip: "Points sharing an exact position stack invisibly; jitter (ordinal axes), point opacity, or a heatmap shows how many observations sit there.", applies: gt === "scatter" && !_hmOn },
                 { id: "fitfew", name: "Enough points for a fit line", tip: "A regression line on fewer than about 10 points is fragile.", applies: _ffApp },
+                { id: "xyinfluence", name: "No single point drives r", tip: "A correlation that changes a lot when one point is left out rests on that point.", applies: _xiApp },
+                { id: "xycurve", name: "A straight line fits the pattern", tip: "r and a straight fit line understate a curved relationship.", applies: _xcApp },
                 { id: "catcode", name: "Fits use meaningful positions", tip: "A fit line or correlation across three or more unordered categories is computed on arbitrary category positions.", applies: _ccApp },
                 { id: "logscale", name: "Log axis flagged", tip: "A logarithmic axis should be named in the axis title or the caption.", applies: _lgApp },
                 { id: "qqn", name: "Sample size for a Q-Q plot", tip: "With few points, wander off the line is expected even for truly normal data.", applies: gt === "qq" && minN !== null },
@@ -54278,11 +55752,13 @@
                 { id: "heatfew", name: "Enough points for a heatmap", tip: "A heatmap earns its keep when points overlap heavily; few points suit a scatter.", applies: _hmOn },
                 { id: "chisqexp", name: "Chi-square expected counts", tip: "The chi-square approximation needs expected counts of about 5 or more per cell.", applies: _mk === "freq" && Array.isArray(data.freqTests) && data.freqTests.length > 0 },
                 { id: "corrn", name: "Pairs behind each correlation", tip: "Correlations built on very few complete pairs swing wildly from sample to sample.", applies: gt.indexOf("corr") === 0 && Array.isArray(data.corrCells) && data.corrCells.length > 0 },
+                { id: "rmwithin", name: "Within-subject error bars", tip: "Within-subject error bars describe change across the occasions, not differences between groups.", applies: false },
                 { id: "corrmany", name: "Many-tests caveat", tip: "Testing many correlations at once produces some false alarms by chance.", applies: false },
                 { id: "brorphan", name: "Brackets match the chart", tip: "A significance bracket must still name bars that exist; when the variables, grouping or panels change underneath one, it is not drawn.", applies: _bkAnyBracket },
                 { id: "brackclaim", name: "Significance marks are earned", tip: "Every bracket showing a star or a p value should have a computed test behind it, not a typed placeholder.", applies: _bkAnyBracket },
                 { id: "bracketcorr", name: "Multiple-comparisons handling", tip: "Several significance brackets call for a correction, or a stated caveat.", applies: _abCount >= 1 },
                 { id: "likertn", name: "Responses per item", tip: "Items answered by very few people have unstable percentages.", applies: gt.indexOf("likert") === 0 },
+                { id: "alphaitem", name: "Items point the same way", tip: "An item that correlates negatively with the rest is usually reverse-worded and needs reverse scoring.", applies: !!(gt.indexOf("likert") === 0 && data.likertAlpha && Array.isArray(data.likertAlpha.itemRest) && data.likertAlpha.itemRest.length >= 2) },
                 { id: "likshort", name: "Means on a short scale", tip: "Averaging a very short rating scale hides the response mix behind one number.", applies: gt === "likertmeans" && Array.isArray(data.likertLevels) && data.likertLevels.length >= 2 },
                 { id: "ytitle", name: "Value-axis title", tip: "The value axis should say what was measured, and in what units.", applies: _axApp },
                 { id: "xtitle", name: "X-axis title", tip: "The X axis should say what the categories or values represent.", applies: _axApp && !_axDistCat },
@@ -54710,7 +56186,7 @@
         }
         function _stStrip0(v, d) {
             return (typeof v === "number" && isFinite(v))
-                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.")
+                ? v.toFixed(d == null ? 2 : d).replace(/^(-?)0\./, "$1.").replace(/^-(\.0+)$/, "$1")
                 : "—";
         }
         function _stP(p) {
@@ -54887,6 +56363,21 @@
                     h.indexOf("corrVar:") === 0) hg++;
             }
             if (hb + hp + hg === 0) return "";
+            // Where hidden points are exclusions, say what was left out of
+            // what in two plain sentences (hp counts the excluded values).
+            if (_gb2PtsExcluded() && (kind === "cg" || kind === "rm" || kind === "dist")) {
+                var _xs = hp > 0
+                    ? hp + (hp === 1 ? " value excluded in the data is"
+                                     : " values excluded in the data are") +
+                      " left out of everything here, the tests and the descriptives alike."
+                    : "";
+                var _hs = (hb + hg) > 0
+                    ? ((kind === "dist")
+                        ? "Hidden groups stay included in these numbers."
+                        : "Hidden bars are left out of the tests; the descriptives still list them.")
+                    : "";
+                return _stFoot(_xs + (_xs && _hs ? " " : "") + _hs);
+            }
             var msg = (kind === "cg" || kind === "rm")
                 ? "Parts of the data are hidden: tests here EXCLUDE them (hiding = excluding); the descriptives report the full data."
                 : (kind === "freq")
@@ -55261,6 +56752,90 @@
         // SS/(SS+SSE); omega² = (SS - df*MSE)/(SS_total + MSE). The
         // RM-ANOVA line keeps partial eta² (its within error term
         // makes the other flavors contested).
+        // Spread caution (Nov 2026, the statistical review): pooled
+        // comparisons and the classic F assume the groups share one
+        // spread, and nothing in the panel said so. This is a plain
+        // description, not a pretest: no test is chosen from it. Returns
+        // the panel whose largest SD is more than twice its smallest
+        // (cells with at least two values), or null.
+        function _stSpreadNote() {
+            var worst = null, seenF = {};
+            if (!Array.isArray(bars)) return null;
+            for (var si = 0; si < bars.length; si++) {
+                var sf = _facetOf((bars[si] && typeof bars[si].x === "string") ? bars[si].x : "");
+                if (seenF[sf]) continue;
+                seenF[sf] = 1;
+                var sfc = _facetCells(sf), lo = Infinity, hi = 0, nc = 0;
+                for (var sj = 0; sj < sfc.levels.length; sj++) {
+                    var sv = sfc.levels[sj];
+                    if (!sv || sv.length < 2) continue;
+                    var ssd = _gb2Stats.sd(sv);
+                    if (!isFinite(ssd)) continue;
+                    nc++;
+                    if (ssd < lo) lo = ssd;
+                    if (ssd > hi) hi = ssd;
+                }
+                if (nc < 2 || !(hi > 0) || !(hi > 2 * lo)) continue;
+                var sr = hi / Math.max(lo, 1e-12);
+                if (!worst || sr > worst.ratio) worst = { lo: lo, hi: hi, ratio: sr, facet: sf };
+            }
+            return worst;
+        }
+        // The four counts of a 2 x 2 Frequencies panel: two categories by
+        // two groups on a grouped bar chart, as [a, b, c, d] with rows the
+        // categories and columns the groups. Raw counts with hidden bars
+        // included, like every Frequencies test. Null for any other shape.
+        function _stFq2x2(facetKey) {
+            if (!(data && data.hasGroups && data.graphType === "bar") || !Array.isArray(bars)) return null;
+            var qCats = [], qGrps = [], qCnt = [[0, 0], [0, 0]];
+            for (var qi = 0; qi < bars.length; qi++) {
+                var qb = bars[qi];
+                if (!qb || _facetOf((typeof qb.x === "string") ? qb.x : "") !== facetKey) continue;
+                var qc = _stCatOf(qb.x), qg = (qb.group == null) ? "" : String(qb.group);
+                var qci = qCats.indexOf(qc), qgi = qGrps.indexOf(qg);
+                if (qci < 0) { qCats.push(qc); qci = qCats.length - 1; }
+                if (qgi < 0) { qGrps.push(qg); qgi = qGrps.length - 1; }
+                if (qci > 1 || qgi > 1) return null;
+                qCnt[qci][qgi] += _freqRawN(qb);
+            }
+            if (qCats.length !== 2 || qGrps.length !== 2) return null;
+            return [qCnt[0][0], qCnt[0][1], qCnt[1][0], qCnt[1][1]];
+        }
+        // jamovi's ANOVA table divides eta squared and omega squared by the
+        // sum of the table's own rows (every term's Type III SS plus the
+        // residual), not by the data's total SS. The two agree on a one-way
+        // or a balanced design; with unequal cell sizes Type III SS do not
+        // add up to the total, and the review's 2 x 3 design showed .22
+        // here where jamovi's table shows .29 (Nov 2026).
+        function _stTblTotal(m) {
+            var tot = (m && isFinite(m.sse)) ? m.sse : NaN;
+            var ks = ["A", "B", "C", "AB", "AC", "BC", "ABC"];
+            for (var ti = 0; ti < ks.length; ti++)
+                if (m && m[ks[ti]] && isFinite(m[ks[ti]].ss)) tot += m[ks[ti]].ss;
+            return tot;
+        }
+        // Every subject with at least one visible value on a repeated-
+        // measures chart (hidden cells and hidden points left out, as the
+        // ANOVA routines leave them out). The Omnibus footnote sets it
+        // beside the number of complete subjects the model used.
+        function _stRmSubjectsAll() {
+            var seenS = {}, nS = 0;
+            if (!Array.isArray(bars)) return 0;
+            for (var ri = 0; ri < bars.length; ri++) {
+                var rb = bars[ri];
+                if (!rb) continue;
+                var rvals = Array.isArray(rb._origValues) ? rb._origValues
+                          : (Array.isArray(rb.values) ? rb.values : null);
+                if (!rvals || !Array.isArray(rb.rowIds) || rb.rowIds.length !== rvals.length) continue;
+                if (_isBarHidden((typeof rb.x === "string") ? rb.x : "", (rb.group == null) ? "" : String(rb.group))) continue;
+                var rhs = _hiddenSetForBar(rb);
+                for (var rv2 = 0; rv2 < rvals.length; rv2++) {
+                    if (rhs && rhs[rv2]) continue;
+                    if (isFinite(rvals[rv2]) && !seenS[rb.rowIds[rv2]]) { seenS[rb.rowIds[rv2]] = 1; nS++; }
+                }
+            }
+            return nS;
+        }
         function _stOmniEffFmt(ss, df, sse, ssTotal, mse) {
             var eff = window.__gb2_statsOmniEff || "eta";
             var v, sym;
@@ -55332,9 +56907,9 @@
                 var tw = null;
                 try { tw = _gb2Stats.twoWayANOVA(obs2, fa.k, fb.k); } catch (_e2) {}
                 if (tw && !tw.emptyCells && tw.A) {
-                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
-                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, tw.ssTotal, tw.mse));
+                    out.push(mkTerm("Main effect of " + fa.name, tw.A, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Main effect of " + fb.name, tw.B, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
+                    out.push(mkTerm("Interaction " + fa.name + " × " + fb.name, tw.AB, tw.dfe, tw.sse, _stTblTotal(tw), tw.mse));
                 } else {
                     out.push("Two-way ANOVA: " + ((tw && tw.emptyCells)
                         ? ("needs every " + fa.name + " × " + fb.name + " combination observed (some cells are empty).")
@@ -55347,7 +56922,7 @@
             var thw = null;
             try { thw = _gb2Stats.threeWayANOVA(obs3, g1.k, g2.k, g3.k); } catch (_e3) {}
             if (thw && !thw.emptyCells && thw.A) {
-                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, thw.ssTotal, thw.mse); };
+                var L = function (nm, tm) { return mkTerm(nm, tm, thw.dfe, thw.sse, _stTblTotal(thw), thw.mse); };
                 out.push(L("Main effect of " + g1.name, thw.A));
                 out.push(L("Main effect of " + g2.name, thw.B));
                 out.push(L("Main effect of " + g3.name, thw.C));
@@ -55408,6 +56983,7 @@
                     try { mx2 = _computeMixedAnova2Raw(); } catch (_eM2) {}
                     if (mx2 && mx2.ok) {
                         var m2 = mx2.res;
+                        oLines.subjUsed = m2.n;
                         var gg2 = (m2.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(m2.eps) + ")"
                             : "";
@@ -55449,6 +57025,7 @@
                     } catch (_eMx) {}
                     if (mxR && mxR.ok) {
                         var mr = mxR.res;
+                        oLines.subjUsed = mr.n;
                         var ggTail = (mr.eps < 0.9995)
                             ? ", Greenhouse-Geisser (eps = " + _stStrip0(mr.eps) + ")"
                             : "";
@@ -55481,6 +57058,7 @@
                 } catch (_eR) {}
                 if (rawR && rawR.ok) {
                     var rr = rawR.res;
+                    oLines.subjUsed = rr.n;
                     var line = "Main effect of " + _stOccName() + ": F(" +
                         dfF(rr.df1) + ", " + dfF(rr.df2) + ") = " +
                         rr.F.toFixed(2) + ", " + _stP(rr.p) + ", " +
@@ -55543,7 +57121,7 @@
                     var mkLine = function (nm, t) {
                         return nm + ": F(" + t.df + ", " + tw.dfe + ") = " +
                             t.F.toFixed(2) + ", " + _stP(t.p) + ", " +
-                            _stOmniEffFmt(t.ss, t.df, tw.sse, tw.ssTotal, tw.mse);
+                            _stOmniEffFmt(t.ss, t.df, tw.sse, _stTblTotal(tw), tw.mse);
                     };
                     oLines.push(mkLine("Main effect of " + aName, tw.A));
                     oLines.push(mkLine("Main effect of " + bName, tw.B));
@@ -56602,19 +58180,35 @@
                             " were really identical, a difference at least this big would turn up " +
                             _stPFreq(res.p) + " by chance.";
                         if (cmpCorr !== "none")
-                            s += " Because several pairs were tested, significance is decided by the adjusted p beside it.";
+                            s += (cmpPairs.length > 1
+                                ? " Because several pairs were tested, significance"
+                                : " With a correction on, significance") +
+                                " is decided by the adjusted p beside it.";
                         else
                             s += (res.p < stAlpha ? " That is below your " + stAlphaLbl + " cutoff."
                                 : " That is not below your " + stAlphaLbl + " cutoff.");
                         return s;
                     }
                     if (which === "padj") {
+                        // With Correct set to None the cell shows a dash and
+                        // nothing was adjusted (Nov 2026, the statistical
+                        // review: the dash used to explain itself as an
+                        // adjustment the p had survived, on rows no
+                        // correction would have passed).
+                        if (cmpCorr === "none")
+                            return (cmpPairs.length === 1)
+                                ? "No correction is applied, and with one comparison none is needed."
+                                : "No correction is applied, so there is no adjusted p here: each of the " +
+                                  cmpPairs.length + " comparisons is judged on its own. The more comparisons you read, the more likely one falls below your " +
+                                  stAlphaLbl + " cutoff by chance alone; choose a correction under Correct to allow for that.";
                         if (!(cp.adjApplied && isFinite(cp.adjP))) return "";
                         return "Here the raw " + _stP(res.p) + " became " + _stP(cp.adjP) +
                             " after adjusting for the " + cmpPairs.length + " comparison" +
                             (cmpPairs.length === 1 ? "" : "s") + ". " +
                             (cp.adjP < stAlpha ? "It still clears your " + stAlphaLbl + " cutoff."
-                                : "It no longer clears your " + stAlphaLbl + " cutoff.");
+                                : (res.p < stAlpha
+                                    ? "It no longer clears your " + stAlphaLbl + " cutoff."
+                                    : "It did not clear your " + stAlphaLbl + " cutoff before the adjustment, and does not now."));
                     }
                     if (which === "effect") {
                         if (!isFinite(raw.effect)) return "";
@@ -57016,11 +58610,15 @@
                                 }
                                 if (!pm) return "";
                                 var dfTxt = (pm.df % 1 === 0) ? String(pm.df) : pm.df.toFixed(2);
-                                return _stFoot("With " + (cmpCorr === "dunnett" ? "Dunnett" : "Tukey") +
-                                    " on, every row's statistic and unadjusted p use the pooled variance of all " +
+                                var pmModel = (cmpCorr === "tukey" || cmpCorr === "dunnett");
+                                return _stFoot("With " + _gb2CorrName(cmpCorr) + " on" +
+                                    (pmModel ? "" : " and Test left on Auto") +
+                                    ", every row's statistic and unadjusted p use the pooled variance of all " +
                                     pm.k + (data.hasGroups ? " cells" : " groups") +
                                     " in the panel (the one-way ANOVA's error term, df " + dfTxt +
-                                    "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups.");
+                                    (pmModel
+                                        ? "), the same term as the adjusted p. With Correct set to None each pair uses its own two groups."
+                                        : "), as jamovi's ANOVA post hoc does. To keep each pair's own two-group test, pick Welch's or Student's t under Test."));
                             }
                             var seen = {}, keys = [];
                             for (var fi = 0; fi < cmpPairs.length; fi++) {
@@ -57044,6 +58642,42 @@
                                 txt = "With a correction on, every pair uses the subjects complete across all occasions of its panel (the RM ANOVA rule); subjects with a missing occasion are left out. With Correct set to None each pair uses everyone who has both occasions.";
                             }
                             return _stFoot(txt);
+                        })()) +
+                        ((function () {
+                            // A cell with one value has no t test of its
+                            // own: say which one is missing from the list.
+                            if (cmpIsRM || mk !== "cg" || cmpTest === "mannWhitneyU") return "";
+                            var listed = {}, lone = [], nmOf = function (c) {
+                                return _stCatOf(c.cat) + (c.group ? " (" + c.group + ")" : "");
+                            };
+                            for (var li5 = 0; li5 < cmpPairs.length; li5++) {
+                                var lp5 = cmpPairs[li5];
+                                if (lp5 && lp5.left) listed[lp5.left.cat + "|" + lp5.left.group] = 1;
+                                if (lp5 && lp5.right) listed[lp5.right.cat + "|" + lp5.right.group] = 1;
+                            }
+                            var allC = [];
+                            try { allC = _cmpVisibleCells(); } catch (_eLc) { allC = []; }
+                            for (var lc5 = 0; lc5 < allC.length; lc5++) {
+                                var cc5 = allC[lc5], nf5 = 0;
+                                var cv5 = (cc5 && cc5.b && Array.isArray(cc5.b.values)) ? cc5.b.values : [];
+                                for (var lv5 = 0; lv5 < cv5.length; lv5++) if (isFinite(cv5[lv5])) nf5++;
+                                if (nf5 === 1 && !listed[cc5.cat + "|" + cc5.group]) lone.push(nmOf(cc5));
+                            }
+                            if (!lone.length) return "";
+                            return _stFoot(lone.join(", ") + (lone.length === 1 ? " has" : " have") +
+                                " a single value, so " + (lone.length === 1 ? "it has" : "they have") +
+                                " no two-group test of " + (lone.length === 1 ? "its" : "their") +
+                                " own and " + (lone.length === 1 ? "is" : "are") +
+                                " not listed. With Tukey or Dunnett, or with Bonferroni, Holm or FDR and Test on Auto, the pooled error term covers " +
+                                (lone.length === 1 ? "it" : "them") + " and the pairs appear.");
+                        })()) +
+                        ((function () {
+                            if (cmpIsRM || mk !== "cg") return "";
+                            var sp = null;
+                            try { sp = _stSpreadNote(); } catch (_eSp) {}
+                            if (!sp) return "";
+                            return _stFoot("The groups' spreads differ a lot (SD from " + _stNum(sp.lo) +
+                                " to " + _stNum(sp.hi) + "). Pooled comparisons (Tukey, Dunnett, and Bonferroni, Holm or FDR with Test on Auto) and Student's t assume the groups share one spread; Welch's t and Games-Howell do not.");
                         })()) +
                         // Keep ONLY the statistical-honesty warning: the
                         // plotted center and test estimand must be named.
@@ -57267,7 +58901,7 @@
                 for (var bi = 0; bi < bars.length; bi++) {
                     var b = bars[bi];
                     if (!b || !Array.isArray(b.values)) continue;
-                    var _dvals = Array.isArray(b._origValues) ? b._origValues : b.values;
+                    var _dvals = (!_gb2PtsExcluded() && Array.isArray(b._origValues)) ? b._origValues : b.values;
                     var mo = _stMoments(_dvals);
                     if (mo.n === 0) continue;
                     // SE (numeric): raw sd/sqrt(n) for CG (and RM between/none),
@@ -57280,7 +58914,7 @@
                         var _ebT = data.errorBarType || "se";
                         if (data.isRepeatedMeasures === true &&
                             data.errorBarMethod === "within" && _ebT !== "none") {
-                            var _hw = (typeof b._origSE === "number") ? b._origSE : b.se;
+                            var _hw = (!_gb2PtsExcluded() && typeof b._origSE === "number") ? b._origSE : b.se;
                             var _km = (_ebT === "sd") ? Math.sqrt(mo.n)
                                 : (_ebT === "ci95") ? _tCriticalTwoSided(0.05, mo.n - 1)
                                 : (_ebT === "ci99") ? _tCriticalTwoSided(0.01, mo.n - 1)
@@ -57321,23 +58955,36 @@
                 // to its reading width. Short there, with the full name in the
                 // aria-label, the title and the popover; jamovi and the panel
                 // under the chart keep the long headers.
+                // Repeated measures prints the within-subject SE and an
+                // interval built from it, beside the raw SD (the table
+                // matches the drawn bars). The headers now say so (Nov
+                // 2026): read as the mean's own SE and CI they were far
+                // too narrow.
+                var _dWithin = (data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
+                    (data.errorBarType || "se") !== "none");
                 var _ciLoHdr = _ciP + "% CI lower", _ciHiHdr = _ciP + "% CI upper";
-                if (_gb2DockActive()) {
-                    _ciLoHdr = { html: _stTerm("CI lo", "ci95", _ciP + "% CI lower") };
-                    _ciHiHdr = { html: _stTerm("CI hi", "ci95", _ciP + "% CI upper") };
+                if (_dWithin) {
+                    _ciLoHdr = { html: _stTerm(_ciP + "% CI lower (within)", "ci95") };
+                    _ciHiHdr = { html: _stTerm(_ciP + "% CI upper (within)", "ci95") };
                 }
-                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm("SE", "se") }, _ciLoHdr, _ciHiHdr);
+                if (_gb2DockActive()) {
+                    _ciLoHdr = { html: _stTerm(_dWithin ? "CI lo (within)" : "CI lo", "ci95", _ciP + "% CI lower" + (_dWithin ? " (within-subject)" : "")) };
+                    _ciHiHdr = { html: _stTerm(_dWithin ? "CI hi (within)" : "CI hi", "ci95", _ciP + "% CI upper" + (_dWithin ? " (within-subject)" : "")) };
+                }
+                _descCols.push({ html: _stTerm("Cell", "cell") }, { html: _stTerm("N", "nSize") }, { html: _stTerm("Mean", "mean") }, { html: _stTerm("Median", "median") }, { html: _stTerm("Mode", "mode") }, { html: _stTerm("SD", "sd") }, { html: _stTerm(_dWithin ? "SE (within)" : "SE", "se") }, _ciLoHdr, _ciHiHdr);
                 var descCardHtml = _stCard("",
                     _stTable(_descCols, dRows, dAttrs, true) +
                     _stBtnRow(_stBtn("copycgdesc", "Copy table", false)) +
                     _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
-                        "Full data: hidden bars and points stay included in this Descriptives table." +
+                        (_gb2PtsExcluded()
+                            ? "Values excluded in the data are left out of this table; hidden bars stay listed."
+                            : "Full data: hidden bars and points stay included in this Descriptives table.") +
                         ((data.summaryFunc === "median")
                             ? " Error bars are hidden while Summary is Median: SD, SE, and CI describe the mean, so no bar draws around a median."
                             : "") +
                         ((data.isRepeatedMeasures === true && data.errorBarMethod === "within" &&
                           (data.errorBarType || "se") !== "none")
-                            ? " SE is the Cousineau-Morey within-subject value, matching the drawn error bars."
+                            ? " SE and the CI are Cousineau-Morey within-subject values, matching the drawn error bars: they describe change across the occasions, not how precisely each mean is known, and cannot compare one group with another."
                             : "")));
                 // ---- Omnibus (visible chart, like the brackets)
                 var oLines = _stOmniLines();
@@ -57378,6 +59025,19 @@
                         omniFoot = omniFaceted
                             ? "Two-way ANOVA with interaction (Type III sums of squares) over the visible chart; the panels variable joins the model as a factor."
                             : "One-way ANOVA over the visible chart, the same math as the bracket omnibus.";
+                    }
+                    // A repeated-measures ANOVA needs every occasion from a
+                    // subject; anyone missing one drops out of the whole
+                    // test. The chart's means and Descriptives keep them, so
+                    // say how many the test used (Nov 2026).
+                    if (mk === "rm" && typeof oLines.subjUsed === "number" && isFinite(oLines.subjUsed)) {
+                        var _suAll = 0;
+                        try { _suAll = _stRmSubjectsAll(); } catch (_eSu) { _suAll = 0; }
+                        if (_suAll > oLines.subjUsed)
+                            omniFoot += " This test uses the " + oLines.subjUsed + " of " + _suAll +
+                                " subjects who have a value at every occasion; " + (_suAll - oLines.subjUsed) +
+                                " with a missing occasion " + ((_suAll - oLines.subjUsed) === 1 ? "is" : "are") +
+                                " left out, though the chart's means and the Descriptives table still include them.";
                     }
                     // Parse the self-produced sentence format into the
                     // shared table look (Torry: the readout box read as
@@ -57471,6 +59131,41 @@
                             _stEsc(mLn[7])
                         ]);
                     }
+                    // Welch's F (Nov 2026, the statistical review): the
+                    // classic F assumes one spread while the default pair
+                    // test (Welch's t) does not, and jamovi's One-Way ANOVA
+                    // prints both. One-way designs only; no effect size, as
+                    // in jamovi.
+                    var omniWelch = null;
+                    if (mk === "cg" && !data.hasGroups && !omniFaceted && omniRows.length === 1) {
+                        try { omniWelch = _gb2Stats.welchANOVA(_facetCells("").levels); }
+                        catch (_eWf) { omniWelch = null; }
+                    }
+                    if (omniWelch) {
+                        var wPs = _stP(omniWelch.p);
+                        var wSig = omniWelch.p < stAlpha;
+                        var wPd = _stEsc(wPs.replace(/^p = /, "").replace(/^p /, ""));
+                        omniRows.push([
+                            _stCellTerm("Welch's F (spreads may differ)", "welchF",
+                                "This row asks the same question as the row above, do the means differ anywhere, without assuming the groups share one spread. Here " +
+                                wPs + (wSig ? " is below your " : " is not below your ") + stAlphaLbl +
+                                " cutoff. When the groups' spreads differ a lot, this is the row to lean on."),
+                            omniWelch.F.toFixed(2),
+                            String(omniWelch.df1) + ", " + omniWelch.df2.toFixed(2),
+                            (wSig ? omniChip(wPd) : wPd),
+                            _stNum(NaN)
+                        ]);
+                    }
+                    var omniSpread = "";
+                    if (mk === "cg") {
+                        var _osp = null;
+                        try { _osp = _stSpreadNote(); } catch (_eOs) {}
+                        if (_osp) omniSpread = " The groups' spreads differ a lot (SD from " + _stNum(_osp.lo) +
+                            " to " + _stNum(_osp.hi) + "): " +
+                            (omniWelch
+                                ? "the classic F assumes the groups share one spread; Welch's F does not."
+                                : "these F tests assume the groups share one spread, so read them with that in mind.");
+                    }
                     omniCardHtml = _stCard("",
                         effSel +
                         (omniRows.length
@@ -57482,7 +59177,7 @@
                                        omniRows, null, true)
                             : "") +
                         (omniPlain.length ? _stReadout(omniPlain.join("\n")) : "") +
-                        _stFoot(omniFoot +
+                        _stFoot(omniFoot + omniSpread +
                             (omniGG
                                 ? ((mk === "rm" && data.hasGroups)
                                     ? " The within-subject rows (" + _stOccName() + " + its interactions) are Greenhouse-Geisser-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
@@ -57520,7 +59215,7 @@
             } else if (mk === "freq") {
                 // ---- Chi-square (shipped tests; full data)
                 var ft = Array.isArray(data.freqTests) ? data.freqTests : [];
-                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false;
+                var fRows = [], fLines = [], fNotes = [], fTestName = "", fSym = "w", fAnyFacet = false, fAnyFisher = false;
                 var fChip = function (txt) {
                     return '<span data-cmp-sig title="Significant at ' + stAlphaLbl + '" ' +
                         'style="background:#e9f4df;border:1px solid #c8e0b8;' +
@@ -57566,6 +59261,24 @@
                               (rv > 0 ? "more" : "fewer") + " cases than expected)"
                             : "no single cell departs notably (largest std. residual " + rvS + ")"));
                     }
+                    // Fisher's exact test for a 2 x 2 panel (Nov 2026, the
+                    // statistical review): it uses no approximation, so it
+                    // is the answer when the expected counts are small, and
+                    // jamovi's Contingency Tables offers it beside
+                    // chi-square. On 3/1 against 1/4 chi-square says .099
+                    // and Fisher .206.
+                    if (t.type === "independence" && t.df === 1) {
+                        var f22 = null, fxr = null;
+                        try {
+                            f22 = _stFq2x2(fFac);
+                            fxr = f22 ? _gb2Stats.fisherExact2x2(f22[0], f22[1], f22[2], f22[3]) : null;
+                        } catch (_eF2) { fxr = null; }
+                        if (fxr && isFinite(fxr.p)) {
+                            fAnyFisher = true;
+                            fNotes.push((fFac ? fFac + ": " : "") + "Fisher's exact test: " + _stP(fxr.p) +
+                                " (exact, with no minimum on the expected counts)");
+                        }
+                    }
                 }
                 if (!fAnyFacet) {
                     for (var fr2 = 0; fr2 < fRows.length; fr2++) fRows[fr2].shift();
@@ -57594,7 +59307,9 @@
                               'Heads up: the smallest expected count is ' +
                               _stEsc(String(Math.round(fMinExp * 10) / 10)) +
                               '. Below 5 the chi-square approximation is unreliable - ' +
-                              'combine sparse categories or collect more data.</div>'
+                              (fAnyFisher
+                                  ? "read Fisher's exact test above, which needs no such minimum.</div>"
+                                  : 'combine sparse categories or collect more data.</div>')
                             : "") +
                         _stBtnRow(
                             // The former on-chart chi-square plate is
@@ -57612,7 +59327,7 @@
                 }
                 // ---- Pairwise proportions (same math as the brackets/table)
                 try {
-                    var pw = [];
+                    var pw = [], pwTwoCat = false, pwMinExp = Infinity, pwMinSame = Infinity;
                     var facets = [], seenF = {};
                     for (var pb = 0; pb < bars.length; pb++) {
                         var fb = bars[pb];
@@ -57640,7 +59355,15 @@
                                 if (!seenC[cq]) { seenC[cq] = true; cats.push(cq); }
                                 if (!seenG[gq]) { seenG[gq] = true; grps.push(gq); }
                             }
-                            for (var c3 = 0; c3 < cats.length; c3++) {
+                            // With two categories a pair's two proportions
+                            // always add to 1, so "Improved: A vs B" and
+                            // "Not improved: A vs B" are one test (z differs
+                            // only in sign). Listing both made Holm count it
+                            // twice and double its p against the chi-square
+                            // on the same table (.016 there, .033 here).
+                            var cLim = cats.length;
+                            if (cats.length === 2) { cLim = 1; pwTwoCat = true; }
+                            for (var c3 = 0; c3 < cLim; c3++) {
                                 for (var g1 = 0; g1 < grps.length; g1++) {
                                     for (var g2 = g1 + 1; g2 < grps.length; g2++) {
                                         var cellA = null, cellB = null, tot1 = 0, tot2 = 0;
@@ -57656,6 +59379,12 @@
                                         var res2 = _gb2Stats.twoPropZ(
                                             cellA ? _freqRawN(cellA) : 0, tot1,
                                             cellB ? _freqRawN(cellB) : 0, tot2, "two");
+                                        if (res2) {
+                                            var ppE = (res2.x1 + res2.x2) / (res2.n1 + res2.n2);
+                                            var mnE = Math.min(res2.n1 * ppE, res2.n1 * (1 - ppE),
+                                                res2.n2 * ppE, res2.n2 * (1 - ppE));
+                                            if (isFinite(mnE) && mnE < pwMinExp) pwMinExp = mnE;
+                                        }
                                         var lk1 = [];
                                         if (cellA) lk1.push([cellA.x, grps[g1]]);
                                         if (cellB) lk1.push([cellB.x, grps[g2]]);
@@ -57682,6 +59411,8 @@
                                 for (var a2 = a1 + 1; a2 < cats2.length; a2++) {
                                     var res3 = _gb2Stats.sameSamplePropZ(
                                         nOf[cats2[a1]], nOf[cats2[a2]], N, "two");
+                                    if (res3 && (nOf[cats2[a1]] + nOf[cats2[a2]]) < pwMinSame)
+                                        pwMinSame = nOf[cats2[a1]] + nOf[cats2[a2]];
                                     if (res3) blk.push({
                                         label: cats2[a1] + " vs " + cats2[a2],
                                         res: res3, facet: fct,
@@ -57756,10 +59487,22 @@
                             '<b style="color:#333;">' + pwSigN + ' of ' + pwRows.length +
                             '</b> significant at ' + stAlphaLbl + ' (Holm-adjusted)</span></div>' +
                             _stTable(["Comparison", "Δp", "z", "p", "p (Holm)"], pwRows, pwAttrs, true) +
+                            ((pwMinExp < 5 || pwMinSame < 10)
+                                ? '<div data-role="st-pw-small" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">' +
+                                  (pwMinExp < 5
+                                      ? 'Heads up: some of these comparisons rest on very small counts (the smallest expected count is ' +
+                                        _stEsc(String(Math.round(pwMinExp * 10) / 10)) +
+                                        '). Below 5 the z approximation is unreliable, so read those p values as rough.'
+                                      : 'Heads up: some of these comparisons rest on very few cases (two categories holding ' +
+                                        _stEsc(String(pwMinSame)) +
+                                        ' between them). Under about 10 the z approximation is unreliable, so read those p values as rough.') +
+                                  '</div>'
+                                : "") +
                             _stBtnRow(_stBtn("copypw", "Copy table", false)) +
-                            _stFoot((data.hasGroups && data.graphType === "bar")
+                            _stFoot(((data.hasGroups && data.graphType === "bar")
                                 ? "Two-proportion z-tests (independent groups) without continuity correction; Holm controls the family-wise error within each panel. Same math as the on-chart brackets."
-                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel."));
+                                : "Same-sample z-tests comparing category proportions (shared N); Holm controls the family-wise error within each panel.") +
+                                (pwTwoCat ? " With two categories a pair's two proportions always add to 1, so each pair of groups is one test and is listed once." : "")));
                         wire.push(["copypw", function (btn) {
                             _stWireTableCopy(btn, body, '[data-st-pane="pairwise"]');
                         }]);
@@ -57844,7 +59587,7 @@
                 for (var db = 0; db < bars.length; db++) {
                     var dbb = bars[db];
                     if (!dbb || !Array.isArray(dbb.values)) continue;
-                    var _dvals2 = Array.isArray(dbb._origValues) ? dbb._origValues : dbb.values;
+                    var _dvals2 = (!_gb2PtsExcluded() && Array.isArray(dbb._origValues)) ? dbb._origValues : dbb.values;
                     var dm = _stMoments(_dvals2);
                     if (dm.n === 0) continue;
                     var dg = (dbb.group == null) ? "" : String(dbb.group);
@@ -57938,7 +59681,9 @@
                     _stFoot("Mode is the most frequent value: a dash means every value occurs once, an asterisk means several values tie and the smallest is shown. " +
                         "Skewness and kurtosis use jamovi's Descriptives formulas " +
                         "(sample-adjusted, SPSS-style); kurtosis is excess " +
-                        "(normal = 0). Full data: hidden groups stay included."));
+                        "(normal = 0). " + (_gb2PtsExcluded()
+                            ? "Values excluded in the data are left out; hidden groups stay included."
+                            : "Full data: hidden groups stay included.")));
                 // ---- Frequency table (histogram class intervals): the
                 // widget's own binning + the exact range math of R's
                 // .populateBinTable, so panel, chart, and the jamovi
@@ -58062,7 +59807,9 @@
                                 _stBtnRow(_stBtn("copybins", "Copy table", false)) +
                                 _stFoot("Class intervals mirror the chart's bins and X range. " +
                                     "Cumulative % always accumulates from the lowest interval " +
-                                    "upward, whatever the sort. Full data: hidden groups stay " +
+                                    "upward, whatever the sort. " + (_gb2PtsExcluded()
+                                        ? "Values excluded in the data are left out; hidden groups stay "
+                                        : "Full data: hidden groups stay ") +
                                     "included. Copy table copies tab-separated values that " +
                                     "paste straight into Excel or Word."));
                         }
@@ -58157,8 +59904,10 @@
                         _rHere = "Here r = " + _stStrip0(rP) + " for " + cellL + ": a " +
                             _xyMagW(Math.abs(rP)) + (rP >= 0 ? " positive" : " negative") +
                             " straight-line relationship by the usual rough guide (r runs from -1 to +1). " +
-                            (rP >= 0 ? "The two variables tend to rise together."
-                                : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall.");
+                            (Math.abs(rP) < 0.1
+                                ? "At this size there is no straight-line tendency to speak of in either direction."
+                                : (rP >= 0 ? "The two variables tend to rise together."
+                                    : "As " + _xyXNm + " rises, " + _xyYNm + " tends to fall."));
                     }
                     if (typeof xe.rho === "number" && isFinite(xe.rho)) {
                         _rhoHere = "Here rho = " + _stStrip0(xe.rho) + " for " + cellL +
@@ -58348,7 +60097,8 @@
                 var _coefHereFor = function (ce4, rTxt4) {
                     var mag = Math.abs(ce4.r);
                     var stren = mag >= 0.7 ? "strong" : mag >= 0.4 ? "moderate" : mag >= 0.2 ? "weak" : "very weak";
-                    var dirw = ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
+                    var dirw = mag < 0.1 ? "no consistent tendency for one to rise or fall with the other"
+                        : ce4.r > 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go up too")
                         : ce4.r < 0 ? ("as " + ce4.a + " goes up, " + ce4.b + " tends to go down")
                         : "no consistent direction";
                     return "Here " + coefWord + " = " + rTxt4 + " between " + ce4.a + " and " + ce4.b +
@@ -58462,7 +60212,7 @@
                         (isFinite(nMin) ? ", pairwise n from " + nMin + " to " + nMax : "") +
                         (_aMS
                             ? ". p values are " + _corrPAdjLabel() + "-adjusted across the full set of pairs."
-                            : ". With this many tests some small p values are expected by chance alone - the Check-graph tab's many-tests caveat applies here too.")));
+                            : ". With this many tests some small p values are expected by chance alone; the Adjust p menu above allows for that.")));
                 // ---- All pairs: the full per-pair listing the Summary
                 // table shows (each off-diagonal pair once).
                 var _pairRows = [];
@@ -58553,10 +60303,15 @@
                     var revd = !isCont && revSet.indexOf(le.item) >= 0;
                     var mVal = le.mean, loV = le.lo, hiV = le.hi;
                     if (revd && typeof mVal === "number" && kLv > 0) {
-                        mVal = (kLv + 1) - mVal;
+                        // around the two ends of the scale: its own codes
+                        // when the responses are numbers, else 1 and k
+                        var lkCd = (Array.isArray(data.likertCodes) && kLv >= 2 &&
+                            data.likertCodes.length === kLv) ? data.likertCodes : null;
+                        var lkRf = lkCd ? (lkCd[0] + lkCd[kLv - 1]) : (kLv + 1);
+                        mVal = lkRf - mVal;
                         var t2 = loV;
-                        loV = (typeof hiV === "number") ? (kLv + 1) - hiV : undefined;
-                        hiV = (typeof t2 === "number") ? (kLv + 1) - t2 : undefined;
+                        loV = (typeof hiV === "number") ? lkRf - hiV : undefined;
+                        hiV = (typeof t2 === "number") ? lkRf - t2 : undefined;
                     }
                     var lrow = [_stEsc(le.item) + (revd ? " " + _stCellTerm("(R)", "reverseScored", "") : ""), String(le.n)];
                     if (lShowPct) {
@@ -58591,6 +60346,10 @@
                     _stBtnRow(_stBtn("copymeans", "Copy table", false)) +
                     _stFoot(isCont
                         ? "Means with t-based confidence intervals from the raw values."
+                        : (Array.isArray(data.likertCodes) && kLv >= 2 && data.likertCodes.length === kLv)
+                        ? "Means \u00b1 CI on the items' own codes (" + data.likertCodes[0] + " to " + data.likertCodes[kLv - 1] +
+                          "); per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected around " +
+                          data.likertCodes[0] + " and " + data.likertCodes[kLv - 1] + ")."
                         : "Means ± CI on the 1–" + kLv +
                           " coding; per-level columns are the percent choosing each response; items marked (R) are reverse-scored (reflected)."));
                 var lkAlphaCard = "";
@@ -58602,12 +60361,28 @@
                         (la.alpha < 0
                             ? "A negative value means the summed score has less variance than the item variances imply; inspect scoring direction and the covariance structure."
                             : "Evaluate this sample-specific coefficient against the intended score use and a defensible measurement model; there is no universal .70 pass mark.");
+                    // Say whether any item is reflected (the footnote said
+                    // "reverse-scored item codes" with none marked), and
+                    // flag an item that runs against the rest (Nov 2026).
+                    var _laAnyRev = Array.isArray(data.likertReverseItems) && data.likertReverseItems.length > 0;
+                    var _laRev = _laAnyRev ? ", with the items marked (R) reflected." : " (no item is marked reverse-scored).";
+                    var _laBad = [], _laIR = Array.isArray(la.itemRest) ? la.itemRest : [];
+                    for (var _lq = 0; _lq < _laIR.length; _lq++)
+                        if (_laIR[_lq] && typeof _laIR[_lq].r === "number" && _laIR[_lq].r < 0) _laBad.push(_laIR[_lq]);
+                    var _laNeg = _laBad.length
+                        ? '<div data-role="st-alpha-neg" style="font-size:10.5px;color:#b45309;margin:6px 0 0;line-height:1.5;">Heads up: ' +
+                          _laBad.map(function (bq) { return _stEsc(String(bq.item)) + " (r = " + _stStrip0(bq.r) + ")"; }).join(", ") +
+                          (_laBad.length === 1 ? " runs" : " run") + " against the other items: its correlation with the sum of the rest is negative. If " +
+                          (_laBad.length === 1 ? "it was" : "they were") + " worded in the opposite direction, reverse-score " +
+                          (_laBad.length === 1 ? "it" : "them") + " (click the item's label on the chart and turn on reverse scoring) before reading alpha.</div>"
+                        : "";
                     lkAlphaCard = _stCard("",
                         _stTable([
                             { html: '<span style="text-transform:none;">' + _stTerm("Cronbach\u2019s \u03b1", "cronbachAlpha") + '</span>' },
                             "Items", "Complete N"],
                             [[_stCellTerm(_stStrip0(la.alpha), "cronbachAlpha", _laHere), String(la.k), String(la.n)]], null, true) +
-                        _stFoot("Raw Cronbach's α is computed from listwise-complete, reverse-scored item codes. It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
+                        _laNeg +
+                        _stFoot("Raw Cronbach's α is computed from listwise-complete item codes" + _laRev + " It depends on item covariance, variances, and item count; it does not test unidimensionality or validity. Treating it as score reliability requires measurement assumptions such as essential tau-equivalence and uncorrelated errors."));
 
                 } else {
                     lkAlphaCard = _stCard("",
@@ -59227,6 +61002,35 @@
         }
         // Detect the labelable parts of the CURRENT chart. Each entry is
         // { name, explain, el, selKey }. Absent / hidden parts are skipped.
+        // The group (or, on an ungrouped chart, the category) of the cell an
+        // element sits in, for elements that carry no identity of their own:
+        // a raincloud draws its cloud and its mini box in unlabelled groups
+        // beside the cell's own [data-bar-cat] group, so the cell is found by
+        // position - the role-less cell group whose box overlaps this
+        // element's the most. Without it those parts keyed as a bare "bars:"
+        // and never matched the "bars:<group>" a click on them selects.
+        function _anatCellGroupOf(el) {
+            var best = "", bestA = -1;
+            try {
+                var eb = _anatBBoxInSvg(el);
+                if (!eb) return "";
+                var cells = svg.querySelectorAll('[data-bar-cat]:not([data-role])');
+                for (var ci = 0; ci < cells.length; ci++) {
+                    if (cells[ci] === el) continue;
+                    var cb = _anatBBoxInSvg(cells[ci]);
+                    if (!cb) continue;
+                    var ox = Math.min(eb.x + eb.w, cb.x + cb.w) - Math.max(eb.x, cb.x);
+                    var oy = Math.min(eb.y + eb.h, cb.y + cb.h) - Math.max(eb.y, cb.y);
+                    if (ox < 0 || oy < 0) continue;
+                    var oa = Math.max(ox, 1) * Math.max(oy, 1);
+                    if (oa > bestA) {
+                        bestA = oa;
+                        best = cells[ci].getAttribute("data-bar-group") || cells[ci].getAttribute("data-bar-cat") || "";
+                    }
+                }
+            } catch (_eCG) {}
+            return best;
+        }
         function _anatLabelSpecs() {
             var specs = [];
             var gt = (data && data.graphType) || "bar";
@@ -59248,8 +61052,12 @@
             // Axis titles only when a REAL title is drawn - skip empty or
             // single-character default titles (the raw variable name "y"/"x"),
             // which otherwise point a "title" chip at the bare axis line.
+            // An axis title of a single letter ("N", "x") is a title like
+            // any other: asking for two characters left it out of this
+            // list, and so out of the keyboard's stops. Only a title with
+            // nothing in it is skipped.
             function addTitle(name, explain, el, selKey) {
-                if (el && visible(el) && (el.textContent || "").trim().length >= 2) add(name, explain, el, selKey);
+                if (el && visible(el) && (el.textContent || "").trim().length >= 1) add(name, explain, el, selKey);
             }
             function biggest(sel) {
                 var nl = qAll(sel), best = null, bestA = -1;
@@ -59259,7 +61067,7 @@
                 return best;
             }
             function grpOf(el) { if (!el) return ""; try { return el.getAttribute("data-bar-group") || el.getAttribute("data-bar-cat") || ""; } catch (_e) { return ""; } }
-            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode); } catch (_e) { return ""; } }
+            function pgrp(el) { if (!el) return ""; try { return grpOf(el) || grpOf(el.parentNode) || _anatCellGroupOf(el); } catch (_e) { return ""; } }
             function attrOf(el, a) { if (!el) return ""; try { return el.getAttribute(a) || ""; } catch (_e) { return ""; } }
             // --- Title + axes ---
             add("Chart title", "The overall heading for the whole figure. Double-click to rename it, or click to restyle.", editableElsByDragId["chartTitle"], "text:chartTitle");
@@ -59427,7 +61235,7 @@
             add("Normal curve", "A reference bell curve with the data's own mean and SD, for comparing the shape against a normal.", biggest('[data-role="dist-normal"]'), "distNormal", { anchor: "peak", edge: "top" });
             add("Rug marks", "Small ticks along the axis showing where each individual value falls.", biggest('[data-role="dist-rug"]'), "distRug");
             // --- Frequencies ---
-            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + grpOf(slice), { body: true });
+            var slice = biggest('[data-role="freq-slice"]'); if (slice) add("Slice", "Its angle is this category's share of the whole. Click to recolor, rotate, or reorder the slices.", slice, "freqSlice:" + (grpOf(slice) || attrOf(slice, "data-cat")), { body: true });
             var sliceLab = biggest('[data-role="freq-slice-label"]'); if (sliceLab) add("Slice label", "The percentage or count printed on each wedge.", sliceLab, "text:pieSliceLabel");
             add("Cumulative line", "Tracks the running cumulative percentage across the sorted categories (the Pareto line).", biggest('[data-role="pareto-line"]'), "paretoLine", { anchor: "line" });
             if (gt === "pareto") add("Cumulative % axis", "The right-hand 0-100% scale; the cumulative line is read against it.", biggest('[data-role="pareto-axis"]'), "");
@@ -59815,7 +61623,14 @@
             }
             var GRP = ["bars:", "distHist:", "distDensity:", "distQQ:", "distEcdf:", "xyPoint:", "xyFit:", "xyEllipse:", "xyDensity2D:", "freqSlice:"];
             for (var gi = 0; gi < GRP.length; gi++) {
-                if (oldKey.indexOf(GRP[gi]) === 0) { var g2 = grpOf2(el); return g2 ? (GRP[gi] + g2) : oldKey; }
+                if (oldKey.indexOf(GRP[gi]) === 0) {
+                    var g2 = grpOf2(el);
+                    // a pie slice names its category in data-cat; a
+                    // raincloud's cloud and box are found by their cell
+                    if (!g2 && GRP[gi] === "freqSlice:") g2 = ga(el, "data-cat");
+                    if (!g2 && GRP[gi] === "bars:") g2 = _anatCellGroupOf(el);
+                    return g2 ? (GRP[gi] + g2) : oldKey;
+                }
             }
             if (oldKey.indexOf("likertLevel:") === 0) { var lv2 = ga(el, "data-level"); return lv2 ? ("likertLevel:" + lv2) : oldKey; }
             if (oldKey.indexOf("likertItem:") === 0) { var it2 = ga(el, "data-item"); return it2 ? ("likertItem:" + it2) : oldKey; }
@@ -61059,6 +62874,18 @@
             } else {
                 chipText = "Full data";
                 chipTip = "Hidden elements stay included - hiding a bar never changes an N, a mean, or a p.";
+            }
+            if (_gb2PtsExcluded() && Array.isArray(data.hiddenPoints) && data.hiddenPoints.length > 0 &&
+                (kind === "cg" || kind === "rm" || kind === "dist")) {
+                if ((kind === "cg" || kind === "rm") && tab !== "desc") {
+                    chipTip = "Pairwise tests and the omnibus recompute without hidden bars and without " +
+                        "values excluded in the data, so they always match what is drawn. The Descriptives " +
+                        "tab leaves out excluded values too, and still lists hidden bars.";
+                } else {
+                    chipText = "Exclusions applied";
+                    chipTip = "Values excluded in the data are left out of these numbers. " +
+                        "Hidden bars and groups stay listed.";
+                }
             }
             var chip = titleEl.querySelector('[data-role="gb2-crumb-chip"]');
             if (!chip) {
@@ -71141,10 +72968,19 @@
             //
             // Only shown when the last-clicked bar belongs to the
             // group this panel is displaying (otherwise "this bar"
-            // is ambiguous).
+            // is ambiguous). On an UNGROUPED chart the panel target
+            // is the clicked CATEGORY (category mode, _isCategoryTarget
+            // above), so the match is on the bar's category: the group
+            // comparison can never hold there (the bar's group is
+            // empty, the target is a name), which is why every
+            // ungrouped bar chart - Compare Groups without a Group By,
+            // Frequencies, Pareto - had no eye and a dead Delete key
+            // until Nov 2026.
             if (titleNode &&
                 _lastClickedBar &&
-                _lastClickedBar.group === (groupName || "")) {
+                (_isCategoryTarget
+                    ? String(_lastClickedBar.cat) === String(groupName)
+                    : _lastClickedBar.group === (groupName || ""))) {
                 var hideBtn = document.createElement("button");
                 hideBtn.type = "button";
                 hideBtn.style.cssText =
@@ -96114,7 +97950,9 @@
                     lines.push("         over all " + r.res.pooled.k +
                                ((data && data.hasGroups) ? " cells" : " groups") +
                                " in this panel, df " + _pdf +
-                               " (Correct: None uses the pair alone)");
+                               ((data && (data.autoPCorrection === "tukey" || data.autoPCorrection === "dunnett"))
+                                   ? " (Correct: None uses the pair alone)"
+                                   : " (Test: Welch's or Student's t keeps the pair's own test)"));
                 }
                 if (r.testFamily === "rank") {
                     if (r.testKind === "mannWhitneyU") {
@@ -98769,7 +100607,7 @@
                 }
             });
             function commitTextContent() {
-                var fn = textEditOnCommit[id];
+                var fn = textEditOnCommit[id] || _gb2TitleCommitHook(id);
                 if (typeof fn === "function") {
                     try { fn(iTextContent.value); } catch (_e) {}
                 }
@@ -105257,6 +107095,22 @@
             e.stopPropagation();
             _gb2PasteAnnotations(payload.annPayloads);
         }, true);
+        // The same duplicate for a host that has neither key nor Alt-drag
+        // to offer (a touch screen): its own menu calls this with the id of
+        // the annotation under the press. The selection is left alone on the
+        // way in; the paste selects the copy as it always does. Reassigned
+        // every render so it reaches the live closure.
+        try {
+            window.__gb2_duplicateAnnotation = function (id) {
+                try {
+                    if (typeof id !== "string" || !id) return false;
+                    var plD = _gb2GetSelectionPayload("annotation:" + id);
+                    if (!plD || !plD.annPayload) return false;
+                    _gb2PasteAnnotations([plD.annPayload]);
+                    return true;
+                } catch (_eDup) { return false; }
+            };
+        } catch (_eDupW) {}
         // Cmd/Ctrl+A selects every visible annotation (the user-added
         // objects: text notes, shapes, reference lines, brackets) so
         // they can be bulk-nudged (arrows), hidden (Delete) or
@@ -106653,6 +108507,64 @@
                 if (!insts.length) insts.push({ key: sp.selKey });
                 kinds.push({ name: sp.name || sp.selKey, insts: insts });
             }
+            // One stop per selection. Two parts that open the same editor
+            // (a line and its markers, Q-Q points and their reference line)
+            // are one place to the keyboard: _kbFindPos looks the current
+            // selection up by key, so when two kinds held the same keys it
+            // always answered the first and Tab stepped to the second
+            // forever, never reaching the axes, the legend or the editor.
+            var claimedKey = Object.create(null), uniqKinds = [];
+            for (var uk = 0; uk < kinds.length; uk++) {
+                var keptInsts = [];
+                for (var ui = 0; ui < kinds[uk].insts.length; ui++) {
+                    var instKey = kinds[uk].insts[ui].key;
+                    if (claimedKey[instKey]) continue;
+                    claimedKey[instKey] = true;
+                    keptInsts.push(kinds[uk].insts[ui]);
+                }
+                if (!keptInsts.length) continue;
+                kinds[uk].insts = keptInsts;
+                uniqKinds.push(kinds[uk]);
+            }
+            kinds = uniqKinds;
+            // Text the Label parts list leaves out still needs a stop. That
+            // list names one tick label, the Y axis numbers whenever there
+            // are any, so the X axis numbers of a scatter or a histogram
+            // had none; and it never names the legend's title or labels.
+            // They are listed here, for the keyboard only: a kind per
+            // family, one stop per label, straight from the registry of
+            // editable text (the rule _anatKindEls applies to "drag:").
+            function _kbTextKind(name, prefix) {
+                var tInsts = [];
+                var tWhole = prefix.charAt(prefix.length - 1) !== ":";
+                try {
+                    for (var tk in editableElsByDragId) {
+                        if (!Object.prototype.hasOwnProperty.call(editableElsByDragId, tk)) continue;
+                        if (tWhole ? tk !== prefix : tk.indexOf(prefix) !== 0) continue;
+                        var tEl = editableElsByDragId[tk];
+                        if (!tEl || !tEl.isConnected) continue;
+                        if (!(tEl.textContent || "").trim().length) continue;
+                        try { var tB = tEl.getBBox(); if (!(tB.width || tB.height)) continue; } catch (_eTB) { continue; }
+                        if (claimedKey["text:" + tk]) continue;
+                        claimedKey["text:" + tk] = true;
+                        tInsts.push({ key: "text:" + tk });
+                    }
+                } catch (_eTK) {}
+                return tInsts.length ? { name: name, insts: tInsts } : null;
+            }
+            function _kbPutAfter(kind, isAnchor) {
+                if (!kind) return;
+                for (var pa = 0; pa < kinds.length; pa++) {
+                    if (isAnchor(kinds[pa].insts[0].key)) { kinds.splice(pa + 1, 0, kind); return; }
+                }
+                kinds.push(kind);
+            }
+            _kbPutAfter(_kbTextKind("X tick label", "xTick:"),
+                function (k0) { return k0.indexOf("text:yTick:") === 0; });
+            var _kbLegLabels = _kbTextKind("Legend label", "groupItem:");
+            _kbPutAfter(_kbLegLabels, function (k0) { return k0 === "legend"; });
+            _kbPutAfter(_kbTextKind("Legend title", "groupTitle"),
+                function (k0) { return k0 === "legend"; });
             var dataRe = /^(bars:|line|dot|xyPoint|dataPoints|distHist:|distDens|distQQ|distEcdf|freqSlice:|paretoLine|likertLevel:|likertMeanDots|corrCells|box)/;
             var front = [], back = [];
             for (var f = 0; f < kinds.length; f++) {
@@ -107369,6 +109281,8 @@
 
             var hideElements = [];
             var hideBars = [];
+            // Scatter groups to hide: their Hide button keeps its own list.
+            var hideXyGroups = [];
             // Drawn-shape annotation ids to DELETE outright (not hide).
             var deleteShapeIds = [];
             // Title-style text clearings: each entry is { id: "chartTitle"|"groupTitle" }.
@@ -107422,6 +109336,22 @@
                     hideElements.push("xCatLabel:" + s.substring("text:xCat:".length));
                 } else if (s.indexOf("text:groupItem:") === 0) {
                     hideElements.push("groupItemLabel:" + s.substring("text:groupItem:".length));
+                } else if (s.indexOf("distHist:") === 0 || s.indexOf("distDensity:") === 0 ||
+                           s.indexOf("distQQ:") === 0 || s.indexOf("distEcdf:") === 0) {
+                    // Wherever a panel's title bar has a Hide button, Delete
+                    // does the same thing through the same store, so Undo
+                    // and Show or hide parts bring the part back. These
+                    // parts had the button and no rule here, so the key did
+                    // nothing on them. A Distribution series (histogram,
+                    // density, Q-Q, ECDF) hides as "distGroup:<group>".
+                    hideElements.push("distGroup:" + s.substring(s.indexOf(":") + 1));
+                } else if (s.indexOf("freqSlice:") === 0 || s.indexOf("corrVar:") === 0 ||
+                           s.indexOf("likertItem:") === 0 || s === "paretoLine") {
+                    // A pie slice, a correlation variable, a Likert item and
+                    // the Pareto line hide under their own selection key.
+                    hideElements.push(s);
+                } else if (s.indexOf("xyPoint:") === 0) {
+                    hideXyGroups.push(s.substring("xyPoint:".length));
                 } else if (s === "legend") {
                     hideElements.push("legend");
                 } else if (s === "yAxis") {
@@ -107441,7 +109371,15 @@
                     // Only hide when the most recent click matches this
                     // group selection; otherwise we don't know which
                     // category to target (the panel itself is per-group).
-                    if (_lastClickedBar && _lastClickedBar.group === grp) {
+                    // Ungrouped charts key the selection by CATEGORY
+                    // ("bars:<cat>", the bar panel's category mode), so
+                    // there the match is on the clicked bar's category;
+                    // the bare "bars:" key (the Distribution box family's
+                    // single empty category) keeps matching as before.
+                    var _grpMatch = !!_lastClickedBar && (hasGroups
+                        ? _lastClickedBar.group === grp
+                        : (grp === "" || String(_lastClickedBar.cat) === grp));
+                    if (_grpMatch) {
                         hideBars.push({
                             cat: _lastClickedBar.cat,
                             group: _lastClickedBar.group
@@ -107452,6 +109390,7 @@
 
             if (hideElements.length === 0 &&
                 hideBars.length === 0 &&
+                hideXyGroups.length === 0 &&
                 clearTitles.length === 0 &&
                 deleteShapeIds.length === 0) return;
 
@@ -107470,6 +109409,16 @@
             }
             for (var bi = 0; bi < hideBars.length; bi++) {
                 _addHiddenBar(hideBars[bi].cat, hideBars[bi].group);
+            }
+            if (hideXyGroups.length > 0) {
+                var _xyHidNow = Array.isArray(data.xyHiddenGroups) ? data.xyHiddenGroups.slice() : [];
+                for (var xgi = 0; xgi < hideXyGroups.length; xgi++) {
+                    if (_xyHidNow.indexOf(hideXyGroups[xgi]) < 0) _xyHidNow.push(hideXyGroups[xgi]);
+                }
+                data.xyHiddenGroups = _xyHidNow;
+                if (hasSetOption) {
+                    try { _setOption("xyHiddenGroups", _xyHidNow); } catch (_eXg) {}
+                }
             }
             // Title clears: empty string -> render path skips, click-
             // to-add ghost re-appears so the user can type again.
@@ -107496,7 +109445,7 @@
                 try { _setOption("hiddenBars", data.hiddenBars); } catch (_e) {}
             }
             if (hideElements.length > 0 || hideBars.length > 0 ||
-                clearTitles.length > 0) {
+                hideXyGroups.length > 0 || clearTitles.length > 0) {
                 if (typeof window.__gb2_updateVisBtnIcon === "function") {
                     try { window.__gb2_updateVisBtnIcon(); } catch (_e) {}
                 }
@@ -108210,6 +110159,11 @@
                 requestAnimationFrame(step);
             } catch (_eMc) {}
         })();
+
+        // A pinned touch readout (data.touchHost) survives the rebuild: the
+        // same part of the new chart is asked for a fresh one. Returns at
+        // its first line without the host key.
+        try { _xyTipRestore(false); } catch (_eTr) {}
 
         // Stamp the data hash now that the render has completed
         // successfully. Done last so an exception thrown anywhere
@@ -109734,5 +111688,7 @@
 
     root.GraphBuilder2 = { render: render,
         xmlSafeText: _gb2XmlSafeText,
-        prepareSvgForExport: _gb2PrepareSvgForExport };
+        prepareSvgForExport: _gb2PrepareSvgForExport,
+        exportSafePaints: _gb2ExportSafePaints,
+        exportFlattenPatterns: _gb2ExportFlattenPatterns };
 })(typeof window !== "undefined" ? window : this);

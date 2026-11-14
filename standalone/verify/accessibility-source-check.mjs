@@ -32,7 +32,7 @@ check(
 );
 check(
     /function wireBypassLinks\(\)/.test(shell) &&
-    /window\.innerWidth <= 760\) narrowSet\("inspector"\)/.test(shell) &&
+    /if \(narrowFrame\(\)\) narrowSet\("inspector"\)/.test(shell) &&
     /wireNarrowChrome\(\);\s*wireBypassLinks\(\);/.test(shell),
     'settings bypass opens the responsive inspector before focusing it',
 );

@@ -116,8 +116,8 @@ that implement a formula by hand are not a third independent library.
 | One-way ANOVA | R `aov`, SciPy `f_oneway`, rendered omnibus table; `stats-tail` adds direct F survival and very small test probabilities | Additional imbalance/extreme-scale and undefined-input cases |
 | Two-/three-factor Type III ANOVA and interactions | `stats-probe` plus `anova-run`: `car::Anova` and 80-digit Wald references; imbalance, missing/empty cells, tiny errors, unit/offset and factor-order variants; actual Sigma tables in five delivery paths | Independent methodology review; larger designs and broader ill-conditioning/estimability cases |
 | Repeated-measures and mixed ANOVA | `stats-probe` plus `anova-run`: independent `car`/80-digit references; 2/3/4 occasions, listwise missingness, unbalanced groups, GG epsilon/dfs/p and partial eta squared; exact observations through real R crossed-factor output | Independent review of design/sphericity restrictions; multiple within factors, larger designs and installed-host acceptance |
-| Holm, Bonferroni, BH, Games–Howell | `stats-fuzz`: R `p.adjust`; for Games–Howell the studentized-range tail integrated from R's exact df = Inf `ptukey` (see the 2026-09-13 note); missing-result negative control | More partial/selected comparison families and tail regimes; verify family disclosure |
-| Tukey and Dunnett | `stats-probe`: R `ptukey`, `mvtnorm::pmvt`; invalid-family disclosure | Broaden unequal n, shared-control and extreme-tail cases |
+| Holm, Bonferroni, BH, Games–Howell | `stats-fuzz`: R `p.adjust`; for Games–Howell the studentized-range tail integrated from R's exact df = Inf `ptukey` (see the 2026-09-13 note), three large-sample sets (error df 600 to 1,200) and a failure when R cannot reference a pair; `stats-range` holds the raw studentized-range probability from df 1 to 50,000; missing-result negative control | More partial/selected comparison families and tail regimes; verify family disclosure |
+| Tukey and Dunnett | `stats-probe`: R `ptukey`, `mvtnorm::pmvt`; invalid-family disclosure; `stats-fuzz`: R `TukeyHSD`, including the large-sample sets; `stats-range` for the studentized range itself | Broaden unequal n, shared-control and extreme-tail cases |
 | Cohen d, rank r, eta squared, partial eta squared, omega squared | `stats-probe`: specified formulas and convention pins | Inventory every selectable effect/interval and verify each independently |
 | Chi-square, counts, percentages, standardized residuals | `m1-parity`, `stats-probe`: R `chisq.test`, independence/goodness-of-fit fixtures | Sparse/zero margins, denominator changes, missing-data cases and caveat review |
 | Proportion comparisons and confidence intervals | `stats-probe`: independent/same-group proportion fixtures with z, p, difference and CI | Boundary proportions, small denominators and family-correction combinations |
@@ -148,6 +148,21 @@ SciPy and are checked explicitly. See R's official
 and [F distribution](https://stat.ethz.ch/R-manual/R-patched/library/stats/html/Fdist.html)
 definitions for the direct-tail identities. This is bounded numerical evidence,
 not verification of every possible floating-point magnitude or ANOVA design.
+
+The `stats-range` roster (2026-11-10) holds the studentized-range probability
+behind Tukey and Games-Howell adjusted p on three reference routes: 190
+two-group rows, where the upper tail is exactly the two-sided t probability
+(absolute error at most 1e-11); 760 rows for three to six groups against a
+chi mixture of R's df = Inf range, integrated in pieces (at most 1e-9, the
+accuracy of that reference); and 28 rows for 8 to 50 groups at df = Inf
+against a direct integral of the definition (at most 1e-11). The df grid runs
+from 1 through 50,000 and includes 999, 1000 and 1001. SciPy's
+`studentized_range` checks every reference (1,168 comparisons within 1e-9).
+The roster exists because the earlier integral used a grid fixed in s: it was
+6e-5 off at df 1 and up to 0.18 off at df 1000, and the rendered fuzzer, whose
+random groups stop at n = 50, never reached past df 150. R's own finite-df
+`ptukey` is not a reference here: it returns NaN below df 2, and its df = Inf
+kernel is good to about 3e-7 at 50 groups.
 
 ## Workspace, rendering and distribution matrix
 

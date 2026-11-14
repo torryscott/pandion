@@ -24,6 +24,11 @@
     # Identical to the Compare Groups rows. The two outlier keys were a
     # pre-existing gap on the box family's outlier overlay.
     list(arg = "line_marker_spread", opt = "lineMarkerSpread", bool = FALSE, default = 0.35),
+    # The dot plot's Gap tab also carries Category spacing (added to the
+    # line family after the rows above); without this row the slider's
+    # value was dropped on the echo, so it snapped back the moment it was
+    # let go. Identical to the Compare Groups row.
+    list(arg = "line_category_spacing", opt = "lineCategorySpacing", bool = FALSE, default = 1),
     list(arg = "line_point_size", opt = "linePointSize", bool = FALSE, default = -1),
     list(arg = "line_point_shape", opt = "linePointShape", bool = FALSE, default = "circle"),
     list(arg = "line_point_color", opt = "linePointColor", bool = FALSE, default = ""),

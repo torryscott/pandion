@@ -115,7 +115,12 @@ const notice = await page.evaluate(() => {
     ids,
     // pre-id files (no numericalChanges list): judged by version
     oldFileFutureApp: S.numericalNoticeFor('3.1.1', '3.2.0'),
-    knownFile: S.numericalNoticeFor('3.2.0', '3.2.5'),
+    // A file saved after every change on the ledger, opened in a still
+    // newer build. The pair is far ahead on purpose: it was 3.2.0 under
+    // 3.2.5 until the ledger gained a 3.2.1 entry, which made that file
+    // one saved BEFORE a change (pinned below as tukeyFile).
+    knownFile: S.numericalNoticeFor('9.0.0', '9.0.5'),
+    tukeyFile: S.numericalNoticeFor('3.2.0', '3.2.1'),
     notLiveYet: S.numericalNoticeFor('3.1.0', '3.1.1'),
     unversionedOld: S.numericalNoticeFor(null, '3.2.0'),
     // id-carrying files: judged by exactly what they list. This is the
@@ -135,6 +140,9 @@ ok(!!notice.oldFileFutureApp && /ROUND/.test(notice.oldFileFutureApp) &&
   'an old file under a post-change build gets the notice, naming ROUND');
 ok(notice.knownFile === null,
   'a file saved after the change gets no notice');
+ok(!!notice.tukeyFile && /Tukey and Games-Howell/.test(notice.tukeyFile) &&
+   !/ROUND|pooled error term/.test(notice.tukeyFile),
+  'a 3.2.0 file under 3.2.1 is told about the Tukey and Games-Howell change and nothing older');
 ok(notice.notLiveYet === null,
   'a change not yet in this build never fires (' + notice.notLiveYet + ')');
 ok(!!notice.unversionedOld,

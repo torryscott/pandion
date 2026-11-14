@@ -159,6 +159,15 @@ if (!(await page.locator('#ps-help-choose-body').textContent()).includes(
     !(await page.locator('#ps-help-choose-body').textContent()).includes(
         'score \u00b7 continuous'))
     throw new Error('the chooser did not explain the detected measure types');
+// The alternative card's bold "Choose this instead if:" label is the lead, so
+// its note is a bare clause. Every note used to start with the same phrase,
+// and the card read "Choose this instead if: Choose this instead if ...".
+const alternativeWhy = (await page.locator(
+    '.ps-hmc-alternative .ps-hmc-why').first().textContent()).trim();
+if (!alternativeWhy.startsWith('Choose this instead if: the grouping variables') ||
+    alternativeWhy.split('instead if').length !== 2)
+    throw new Error('the alternative card repeats its label: ' + alternativeWhy);
+console.log('  ok  the alternative card states its label once');
 await page.click('[data-hmc-data-create="plotbuilder"]');
 await page.waitForTimeout(120);
 const assignedCompare = await page.evaluate(() => ({

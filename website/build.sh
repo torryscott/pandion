@@ -110,7 +110,7 @@ EOF
 # portable download ignores a manifest it cannot fetch.
 cp standalone/manifest.json website/app/manifest.json
 mkdir -p website/app/icons
-cp standalone/icons/pandion-192.png standalone/icons/pandion-512.png website/app/icons/
+cp standalone/icons/pandion-192.png standalone/icons/pandion-512.png standalone/icons/pandion-180.png website/app/icons/
 echo "website/app/manifest.json + icons refreshed"
 
 # The "Download HTML" button serves this from our own origin. Depending on

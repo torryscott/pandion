@@ -32481,10 +32481,10 @@
   }
 
   // ---- Find open data (Torry, Sep 21 2026) ----
-  // Two collections whose search AND file hosts both let a page on another
+  // Three collections whose search AND file hosts both let a page on another
   // origin read them (probed with a pandionplots.com origin the day this
-  // was built; Figshare, OSF, Dryad and Kaggle refuse one half or both, so
-  // they are not offered).
+  // was built and again on Nov 2 2026; Figshare, OSF, Dryad and Kaggle refuse
+  // one half or both, so they are not offered).
   //   rdatasets: the data shipped with R packages, indexed as one CSV on
   //     GitHub Pages. The index loads once per session and the search runs
   //     in this browser, so nothing typed leaves the machine.
@@ -32492,6 +32492,9 @@
   //     zenodo.org (30 a minute for anonymous callers, so it runs on Enter,
   //     never per keystroke), filtered to records holding a file this app
   //     can open.
+  //   dataverse: replication and survey data behind DOIs on Harvard
+  //     Dataverse. Each search is one request for FILES, filtered to the
+  //     content types this app reads, grouped under their dataset.
   // Every Open goes through openFromLink, so the fetch, the size guard, the
   // import preview and the provenance line are the link path's, unchanged.
   var FIND_SOURCES = {
@@ -32505,8 +32508,20 @@
       api: "https://zenodo.org/api/records",
       placeholder: "Type some words, then press Enter"
     },
+    // Harvard Dataverse (Nov 2 2026): replication and survey data behind
+    // DOIs. Its search API and its file downloads both send the CORS header
+    // (probed with a pandionplots.com origin), and a file hit already names
+    // its dataset, size, content type and whether it is restricted, so one
+    // request per search is enough.
+    dataverse: {
+      note: "Each search is sent to dataverse.harvard.edu. Only CSV, tab-separated or Excel files are listed, under the dataset they belong to. Opening one fetches the file into this browser; nothing is uploaded.",
+      api: "https://dataverse.harvard.edu/api/search",
+      access: "https://dataverse.harvard.edu/api/access/datafile/",
+      page: "https://dataverse.harvard.edu/dataset.xhtml?persistentId=",
+      placeholder: "Type some words, then press Enter"
+    },
     // A link the person already has (Torry, Sep 22 2026: the welcome's From
-    // a link folded in here, beside the two sources that always allow it).
+    // a link folded in here, beside the sources that always allow it).
     link: {
       note: "Your browser fetches the file and it stays on this machine; nothing is uploaded. The site has to allow other pages to read the file, which most open-data hosts do.",
       placeholder: "https://"
@@ -32554,7 +32569,7 @@
       return;
     }
     el("ps-finddata-q").placeholder = FIND_SOURCES[id].placeholder;
-    el("ps-finddata-go").style.display = id === "zenodo" ? "" : "none";
+    el("ps-finddata-go").style.display = (id === "zenodo" || id === "dataverse") ? "" : "none";
     findRun();
   }
   function findLinkGo() {
@@ -32613,6 +32628,7 @@
   function findRun() {
     var q = String(el("ps-finddata-q").value || "").trim();
     if (FIND_SOURCE === "zenodo") findRunZenodo(q);
+    else if (FIND_SOURCE === "dataverse") findRunDataverse(q);
     else findRunRdatasets(q);
   }
   function findTokens(q) {
@@ -32766,11 +32782,111 @@
         findOpenButtonHtml(fl.url, fl.name) + "</div>";
     }
     if (rec.files.length > max)
-      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on Zenodo</div>";
+      files += '<div class="ps-finddata-meta">' + (rec.files.length - max) + " more on " + escHtml(rec.more || "Zenodo") + "</div>";
     return '<div class="ps-finddata-row" data-find-record>' +
       '<div class="ps-finddata-copy"><div class="ps-finddata-title">' + escHtml(rec.title) + "</div>" +
       '<div class="ps-finddata-meta">' + meta + "</div>" + files + "</div>" +
       '<div class="ps-finddata-actions">' + findAboutHtml(rec.page) + "</div></div>";
+  }
+  // Harvard Dataverse: one request per Enter, asking for FILES (a file hit
+  // carries its dataset, size and content type, so no second request per
+  // dataset is needed), filtered server-side to the content types this app
+  // reads. Hits are grouped under their dataset so a study with several
+  // tables reads as one row, the way a Zenodo record does.
+  var FIND_DV_TYPES = ["text/csv", "text/tab-separated-values", "text/tsv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
+  function findRunDataverse(q) {
+    var seq = ++FIND_SEQ;
+    var box = el("ps-finddata-results");
+    if (!q) { box.innerHTML = ""; findStatus("Type some words and press Enter to search Harvard Dataverse.", false); return; }
+    findStatus("Searching dataverse.harvard.edu\u2026", false);
+    var types = FIND_DV_TYPES.map(function (t) { return '"' + t + '"'; }).join(" OR ");
+    var url = FIND_SOURCES.dataverse.api + "?type=file&per_page=50&q=" + encodeURIComponent(q) +
+      "&fq=" + encodeURIComponent("fileContentType:(" + types + ")");
+    fetch(url, { mode: "cors", cache: "no-store", headers: { Accept: "application/json" } }).then(function (r) {
+      if (r.status === 429) throw new Error("rate");
+      if (!r.ok) throw new Error("dataverse.harvard.edu answered " + r.status + ".");
+      return r.json();
+    }).then(function (j) {
+      if (seq !== FIND_SEQ) return;
+      var d = (j && j.data) || {};
+      var items = Array.isArray(d.items) ? d.items : [];
+      var total = Number(d.total_count) || items.length;
+      var recs = findDataverseRecords(items);
+      var h = "";
+      for (var i = 0; i < recs.length; i++) h += findZenodoRowHtml(recs[i]);
+      box.innerHTML = h;
+      box.scrollTop = 0;
+      if (!recs.length) {
+        findStatus(items.length ? "The matching files are restricted or too large to read here. Try other words."
+          : "No datasets match those words.", false);
+        return;
+      }
+      findStatus(recs.length + (recs.length === 1 ? " dataset" : " datasets") + (total > items.length
+        ? " from the first " + items.length + " of about " + total.toLocaleString() + " matching files. Add a word to narrow it."
+        : " found."), false);
+    }).catch(function (e) {
+      if (seq !== FIND_SEQ) return;
+      var msg = String(e && e.message || e);
+      if (msg === "rate") msg = "dataverse.harvard.edu is limiting searches from this address for a minute. Wait a little and try again.";
+      else if (/Failed to fetch|NetworkError|Load failed|TypeError/i.test(msg))
+        msg = "Could not reach dataverse.harvard.edu. Check the connection and try again.";
+      findStatus(msg, true);
+    });
+  }
+  // Groups file hits under their dataset, keeping the files this app can
+  // read: a listed content type or a readable extension, not restricted
+  // (the download would refuse), and under the size cap. The authors and
+  // year come from the citation line Dataverse writes for every file
+  // (A. Author; B. Author, 2022, "Title", https://doi.org/...), the DOI from
+  // the dataset's persistent id. The same file can appear once per dataset
+  // version, so a name already listed under its dataset is skipped. A file
+  // named without an extension (Dataverse allows it) gets one from its
+  // content type, because the Excel reader goes by name and openFromLink
+  // would otherwise call it .csv.
+  function findDataverseRecords(items) {
+    var recs = [], byKey = {};
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i] || {};
+      var name = String(it.name || "");
+      var ctype = String(it.file_content_type || "").toLowerCase();
+      var id = String(it.file_id || "");
+      if (!/^\d+$/.test(id) || it.restricted) continue;
+      if (FIND_DV_TYPES.indexOf(ctype) < 0 && !FIND_READABLE.test(name)) continue;
+      if (/\.txt$/i.test(name) && FIND_PROSE.test(name)) continue;
+      if (Number(it.size_in_bytes) > DATA_REFUSE_BYTES) continue;
+      if (!/\.[a-z0-9]{2,5}$/i.test(name)) {
+        var ext = ctype === "text/csv" ? ".csv"
+          : (ctype === "text/tab-separated-values" || ctype === "text/tsv") ? ".tsv"
+          : ctype === FIND_DV_TYPES[3] ? ".xlsx" : "";
+        if (ext) name += ext;
+      }
+      var pid = String(it.dataset_persistent_id || "");
+      var key = pid || ("id:" + String(it.dataset_id || name));
+      var rec = byKey[key];
+      if (!rec) {
+        var m = /^(.*?),\s*(\d{4}),\s*"/.exec(String(it.dataset_citation || ""));
+        var who = [];
+        if (m) {
+          var parts = m[1].split(/;\s*/).filter(Boolean);
+          who = parts.slice(0, 3);
+          if (parts.length > 3) who.push("and others");
+        }
+        rec = byKey[key] = {
+          title: String(it.dataset_name || "Untitled"), who: who.join(", "),
+          year: m ? m[2] : String(it.published_at || "").slice(0, 4),
+          doi: pid.replace(/^doi:/i, ""),
+          page: pid ? FIND_SOURCES.dataverse.page + encodeURIComponent(pid) : "",
+          files: [], more: "Dataverse"
+        };
+        recs.push(rec);
+      }
+      var dup = false;
+      for (var f = 0; f < rec.files.length; f++) if (rec.files[f].name === name) { dup = true; break; }
+      if (dup) continue;
+      rec.files.push({ name: name, size: Number(it.size_in_bytes) || 0, url: FIND_SOURCES.dataverse.access + id });
+    }
+    return recs;
   }
   function wireFindDataDialog() {
     var dlg = el("ps-finddata-dialog");

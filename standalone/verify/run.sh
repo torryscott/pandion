@@ -28,40 +28,40 @@ fi
 # reads index.html source directly and runs once).
 FEATURE_PROBES="branding-check axe-state-check bypass-accessibility-check busy-check column-sizing-check \
 computed-variables-check computed-grid-refresh-check case-count-check control-focus-check bar-choice-accessibility-check character-shortcut-check coverage-gaps-check chart-accessibility-check export-accessibility-check pdf-accessibility-check grid-autofit-check \
-chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check corr-method-echo-check bracket-orientation-check corr-decimals-label-check \
+chart-check-check compare-pairs-apa-check chart-from-selection-check chart-groups-check chart-size-check corr-method-echo-check bracket-orientation-check ymax-bracket-grow-check corr-decimals-label-check \
 default-style-routes-check curve-handle-check grown-canvas-check column-gestures-check chrome-check clipboard-check copy-image-check copy-moment-check correctness-check \
 data-integrity-check workspace-sequence-check data-commandbar-check data-menu-check data-roundtrip-fuzz stash-guard-check pixel-truth-check corpus-compat-check build-stamp-check separator-accessibility-check \
 data-undo-check dates-check eyedropper-check doclifecycle-check tab-accessibility-check drag-feel-check \
-drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check \
+drag-selection-check outside-canvas-check hmc-list-check hidden-vars-check sigma-freshness-check stats-judgment-check \
 empty-states-check engine-stamp-check flyout-align-check filter-honesty-check examples-check exclusion-bridge-check \
-find-scope-check findpop-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check formula-explain-check formula-signature-check formula-term-check \
+find-scope-check findpop-check find-columns-check finish-five-check fitpanes-check formula-unit-check formula-vocab-check formula-recipes-check formula-explain-check formula-signature-check formula-term-check \
 grid-keys-check grid-enter-mode-check large-project-check large-autosave-check cell-edit-scope-check grid-column-window-check help-check hierarchy-check hidden-selection-check multi-column-type-check role-chip-order-check typed-alpha-check chip-chart-order-check chip-glide-check hist-facet-bins-check eb-method-preview-check
 identifier-advice-check inspector-freshness-check menu-selection-check \
 panel-controls-size-check \
-view-zoom-drag-check about-desktop-check inline-editor-zoom-check fit-wobble-check picker-hold-check outlier-picker-check scroll-anchor-check toolbar-redock-check stats-width-check reserve-rearm-check help-dock-route-check aspect-lock-check editor-focus-check category-spacing-check notebook-copy-check axis-role-labels-check open-by-link-check find-open-data-check share-link-check paste-preview-check welcome-recents-check setup-link-check keep-stats-check mode-stat-check tours-check distinguish-live-check launch-ping-check \
+view-zoom-drag-check about-desktop-check inline-editor-zoom-check fit-wobble-check picker-hold-check outlier-picker-check scroll-anchor-check toolbar-redock-check stats-width-check reserve-rearm-check help-dock-route-check help-tab-switch-check aspect-lock-check editor-focus-check category-spacing-check notebook-copy-check axis-role-labels-check open-by-link-check find-open-data-check share-link-check paste-preview-check welcome-recents-check setup-link-check keep-stats-check mode-stat-check tours-check distinguish-live-check launch-ping-check \
 missing-codes-check header-row-check level-variants-check typechange-cost-check \
 missing-filter-check omv-missing-rules-check autosave-honesty-check \
 data-papercuts-check dist-dot-allowlist-check stats-alpha-allowlist-check data-disclosure-check grid-wide-perf-check omv-derived-check \
 grid-accessibility-check \
 help-me-choose-check chooser-target-check menu-pointer-check import-errors-check layout-image-check modal-accessibility-check \
-layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check library-bridge-check \
+layout-arrange-check layout-clipboard-check layout-orientation-check layout-rail-check layout-selectall-check layout-reuse-check layout-undo-check layout-page-edges-check library-bridge-check \
 layout-accessibility-check layout-text-check layout-font-check layout-figure-check layout-parts-check layout-timeline-check layout-parts-polish-check arrow-nudge-check \
-linked-selection-check motion-check narrow-check novice-affordances-check \
+linked-selection-check motion-check narrow-check mobile-check novice-affordances-check \
 overlay-reload-check overlay-restore-check pane-debusy-check panel-reveal-check panelcap-check panel-dock-check hover-webkit-check gap-seam-check percol-missing-check \
 pane-scroll-cue-check perf-check picker-persistence-check pinboard-check polish-check preferences-check \
  title-squeeze-check \
 notebook-record-check notebook-pages-check notebook-undo-check notebook-drift-check \
-  guide-formulas-check keep-fidelity-check copyformat-check \
+  guide-formulas-check keep-fidelity-check copyformat-check export-paint-check export-pattern-check \
 range-badge-drag-check \
 probed-bugs-check provenance-check rail-icons-check punchlist-check swatch-row-check reachability-check recents-check reshape-check \
 reflow-accessibility-check \
 row-filters-check filter-formula-check filter-reasons-check filter-asformula-check filter-help-check \
 shape-plural-check statusbar-check stats-prefs-check density-check \
-textscale-check \
+textscale-check scatter-ring-check \
 safety-check \
 silent-failure-check selection-menus-check spreadsheet-gaps-check teaching-check \
 tokens-check toolbar-labels-check toolbar-scroll-cue-check typing-check units-check update-check void-honesty-check wizard-parity-check variable-levels-check visuals-check \
-xlsx-import-check launch-eval-fixes-check launch-contract-check"
+xlsx-import-check launch-eval-fixes-check launch-contract-check empty-title-commit-check first-data-type-check exclusion-everywhere-check keyboard-step-check part-consistency-check"
 
 echo "== m0-check (render + edit round-trip)"
 node standalone/verify/m0-check.mjs
@@ -155,7 +155,15 @@ if command -v Rscript >/dev/null 2>&1; then
     Rscript standalone/verify/stats-tail.R
     node standalone/verify/stats-tail-check.mjs
     node standalone/verify/stats-tail-check.mjs /tmp/pandion-stats-tail.json --min
-    if python3 standalone/verify/stats-tail-thirdref.py; then :; else
+    # The studentized range behind Tukey and Games-Howell, from a group of
+    # two (df near 1) to thousands of rows: the rendered fuzzer shows three
+    # decimals and its random groups stop at n = 50, so this is where the
+    # raw probability is held, in the source and the compiled core.
+    Rscript standalone/verify/stats-range.R
+    node standalone/verify/stats-range-check.mjs
+    node standalone/verify/stats-range-check.mjs /tmp/pandion-stats-range.json --min
+    if python3 standalone/verify/stats-tail-thirdref.py &&
+       python3 standalone/verify/stats-range-thirdref.py; then :; else
         st=$?
         if [ "$st" = "2" ] && [ "${PS_REQUIRE_R_PARITY:-0}" != "1" ]; then
             echo "WARN: scipy unavailable - tail third reference skipped"

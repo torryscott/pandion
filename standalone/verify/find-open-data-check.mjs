@@ -1,5 +1,5 @@
 // Find open data (Sep 21 2026, Torry): a welcome action opens a dialog
-// that searches two collections whose search and file hosts both allow a
+// that searches three collections whose search and file hosts both allow a
 // browser on another origin to read them, and every Open goes through the
 // link path (openFromLink). What this pins:
 //   1. the welcome carries Find open data; it opens the dialog with the
@@ -19,7 +19,17 @@
 //      name (the link ends in /content) and the provenance says zenodo.org;
 //   6. a failed Zenodo search and a rate-limited one each leave a plain
 //      sentence, and the Open button of a failed fetch is usable again;
-//   7. Cancel and Escape close the dialog and bring the welcome back.
+//   7. Cancel and Escape close the dialog and bring the welcome back;
+//   8. Replication data (Nov 2 2026): the note names dataverse.harvard.edu,
+//      the search runs on Enter as one request for files filtered to the
+//      content types the app reads, the hits are grouped under their
+//      dataset (three files, one row, an Excel file named without an
+//      extension getting .xlsx from its content type; a repeat of a file
+//      from an older version, a PDF, a restricted file and an oversized
+//      file are dropped), the row carries the authors, year and DOI parsed from
+//      the citation and links the dataset page, Open on a .tab file lands
+//      in the preview under its real name with the provenance naming the
+//      host, and a failed or rate-limited search leaves a plain sentence.
 // The collections are served by Playwright's request interception with
 // the CORS header the real hosts send, so the probe needs no network.
 // CONTROL (the open-by-link branch without this change): case 1 fails at
@@ -71,8 +81,8 @@ async function boot() {
     page.on('filechooser', () => {}); // Playwright dismisses an unhandled file chooser and Chromium reports that as cancel, which the app honours; a listener keeps the chooser open
     await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('psstandalone.coach.clickToEdit.v1', '1'); sessionStorage.clear(); } catch (e) {} });
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
-    const seen = { zenodo: [] };
-    const mode = { zenodo: 'ok', zenodoFile: 'ok' };
+    const seen = { zenodo: [], dataverse: [] };
+    const mode = { zenodo: 'ok', zenodoFile: 'ok', dataverse: 'ok', dvFile: 'ok' };
     const cors = { 'Access-Control-Allow-Origin': '*' };
     await page.route('https://vincentarelbundock.github.io/**', async (route) => {
         const u = route.request().url();
@@ -94,9 +104,39 @@ async function boot() {
         }
         return route.fulfill({ status: 404, headers: cors, body: 'no' });
     });
+    await page.route('https://dataverse.harvard.edu/**', async (route) => {
+        const u = route.request().url();
+        if (u.startsWith('https://dataverse.harvard.edu/api/search?')) {
+            seen.dataverse.push(u);
+            if (mode.dataverse === 'abort') return route.abort('failed');
+            if (mode.dataverse === 'rate') return route.fulfill({ status: 429, headers: Object.assign({ 'Content-Type': 'application/json' }, cors), body: '{"status":"ERROR","message":"slow down"}' });
+            return route.fulfill({ status: 200, headers: Object.assign({ 'Content-Type': 'application/json' }, cors), body: DATAVERSE });
+        }
+        if (u === 'https://dataverse.harvard.edu/api/access/datafile/102') {
+            if (mode.dvFile === 'fail') return route.fulfill({ status: 500, headers: cors, body: 'boom' });
+            return route.fulfill({ status: 200, headers: Object.assign({ 'Content-Type': 'text/tab-separated-values' }, cors), body: DVTSV });
+        }
+        return route.fulfill({ status: 404, headers: cors, body: 'no' });
+    });
     await page.goto(PAGE); await page.waitForTimeout(1100);
     return { ctx, page, errors, seen, mode };
 }
+const DVTSV = 'item\tscore\nq1\t3\nq2\t4\nq3\t5\n';
+const DV_CITE = 'Doe, Jane; Roe, Rick; Poe, Edgar; Moe, Larry, 2023, "Test anxiety and achievement", https://doi.org/10.7910/DVN/ABC123, Harvard Dataverse, V2';
+const dvHit = (o) => Object.assign({ type: 'file', published_at: '2023-05-01T00:00:00Z', restricted: false,
+    dataset_name: 'Test anxiety and achievement', dataset_id: '10', dataset_persistent_id: 'doi:10.7910/DVN/ABC123', dataset_citation: DV_CITE }, o,
+    { url: 'https://dataverse.harvard.edu/api/access/datafile/' + o.file_id });
+const DATAVERSE = JSON.stringify({ status: 'OK', data: { q: 'anxiety', total_count: 60, start: 0, spelling_alternatives: {}, count_in_response: 7, items: [
+  dvHit({ name: 'scores.csv', file_id: '101', file_content_type: 'text/csv', size_in_bytes: 2048 }),
+  dvHit({ name: 'items.tab', file_id: '102', file_content_type: 'text/tab-separated-values', size_in_bytes: 4096 }),
+  dvHit({ name: 'scores.csv', file_id: '103', file_content_type: 'text/csv', size_in_bytes: 2000 }),
+  dvHit({ name: 'Supplement 2', file_id: '107', file_content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size_in_bytes: 10276 }),
+  dvHit({ name: 'codebook.pdf', file_id: '104', file_content_type: 'application/pdf', size_in_bytes: 90000 }),
+  dvHit({ name: 'secret.tab', file_id: '105', file_content_type: 'text/tab-separated-values', size_in_bytes: 5000, restricted: true,
+    dataset_name: 'Locked study', dataset_id: '11', dataset_persistent_id: 'doi:10.7910/DVN/LOCKED', dataset_citation: 'Solo, Han, 2021, "Locked study", https://doi.org/10.7910/DVN/LOCKED, Harvard Dataverse, V1' }),
+  dvHit({ name: 'huge.csv', file_id: '106', file_content_type: 'text/csv', size_in_bytes: 300 * 1024 * 1024,
+    dataset_name: 'Huge table', dataset_id: '12', dataset_persistent_id: 'doi:10.7910/DVN/HUGE', dataset_citation: 'Big, Data, 2022, "Huge table", https://doi.org/10.7910/DVN/HUGE, Harvard Dataverse, V1' })
+] } });
 const state = page => page.evaluate(() => {
     const S = window.PS_SHELL, d = document.getElementById('ps-finddata-dialog');
     const rows = Array.from(document.querySelectorAll('#ps-finddata-results .ps-finddata-row')).map(r => r.textContent.replace(/\s+/g, ' ').trim());
@@ -114,7 +154,7 @@ const state = page => page.evaluate(() => {
     const { ctx, page, errors } = await boot();
     const action = await page.evaluate(() => { const b = document.getElementById('ps-welcome-find'); const r = b && b.getBoundingClientRect(); return b ? { text: b.textContent.replace(/\s+/g, ' ').trim(), visible: r.width > 0 } : null; });
     const tabs = await page.evaluate(() => Array.from(document.querySelectorAll('#ps-finddata-dialog [data-source]')).map(b => b.getAttribute('data-source')));
-    ok(action && action.visible && /Open data from the web/.test(action.text) && tabs.join(',') === 'rdatasets,zenodo,link', '1: the welcome offers Open data from the web, a dialog with three sources (' + (action && action.text) + ')');
+    ok(action && action.visible && /Open data from the web/.test(action.text) && tabs.join(',') === 'rdatasets,zenodo,dataverse,link', '1: the welcome offers Open data from the web, a dialog with four sources (' + (action && action.text) + ')');
     await page.click('#ps-welcome-find'); await page.waitForTimeout(500);
     let s = await state(page);
     ok(s.open && !s.welcome && s.focused === 'ps-finddata-q' && s.source === 'rdatasets', '1: it opens the dialog on Teaching datasets with the search box focused and the welcome away');
@@ -196,6 +236,52 @@ const state = page => page.evaluate(() => {
     await page.keyboard.press('Escape'); await page.waitForTimeout(400);
     s = await state(page);
     ok(!s.open && s.welcome, '7: Escape does the same');
+    await ctx.close();
+}
+// ---- 8. Harvard Dataverse
+{
+    const { ctx, page, errors, seen, mode } = await boot();
+    await page.click('#ps-welcome-find'); await page.waitForTimeout(400);
+    await page.click('#ps-finddata-dialog [data-source="dataverse"]'); await page.waitForTimeout(300);
+    let s = await state(page);
+    ok(s.source === 'dataverse' && /dataverse\.harvard\.edu/.test(s.note) && /nothing is uploaded/i.test(s.note) && /press Enter/i.test(s.status), '8: the Replication data note names dataverse.harvard.edu and the status asks for Enter');
+    await page.type('#ps-finddata-q', 'anxiety'); await page.waitForTimeout(500);
+    ok(seen.dataverse.length === 0, '8: typing alone sends nothing to dataverse.harvard.edu');
+    await page.keyboard.press('Enter'); await page.waitForTimeout(800);
+    s = await state(page);
+    const sent = seen.dataverse.length === 1 ? decodeURIComponent(seen.dataverse[0]) : '';
+    ok(seen.dataverse.length === 1 && /type=file/.test(sent) && /per_page=50/.test(sent) && /q=anxiety/.test(sent) && /fq=fileContentType:\("text\/csv" OR "text\/tab-separated-values"/.test(sent), '8: Enter sends one search for files of the readable content types (' + sent + ')');
+    ok(s.rows.length === 1 && /Test anxiety and achievement/.test(s.rows[0]) && /Doe, Jane, Roe, Rick, Poe, Edgar, and others/.test(s.rows[0]) && /2023/.test(s.rows[0]) && /DOI 10\.7910\/DVN\/ABC123/.test(s.rows[0]), '8: the readable files group under one dataset row with authors, year and DOI from the citation (' + s.rows[0] + ')');
+    ok(s.opens.length === 3 && s.opens[0].name === 'scores.csv' && s.opens[1].name === 'items.tab' && s.opens[1].url === 'https://dataverse.harvard.edu/api/access/datafile/102' && s.opens[2].name === 'Supplement 2.xlsx' && s.opens[2].url === 'https://dataverse.harvard.edu/api/access/datafile/107', '8: the row lists the CSV, the .tab and the extension-less Excel file (as .xlsx) once each; the older-version repeat, the PDF, the restricted file and the oversized file are dropped (' + s.opens.map(o => o.name).join(',') + ')');
+    ok(s.abouts.length === 1 && s.abouts[0] === 'https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi%3A10.7910%2FDVN%2FABC123', '8: About links the dataset page by its persistent id (' + s.abouts[0] + ')');
+    ok(/1 dataset from the first 7 of about 60 matching files/.test(s.status), '8: the status counts the datasets shown against the files that matched (' + s.status + ')');
+    await page.click('#ps-finddata-results [data-find-open][data-find-name="items.tab"]'); await page.waitForTimeout(1200);
+    s = await state(page);
+    ok(!s.open && s.preview, '8: Open on the .tab file closes the dialog and lands in the import preview');
+    await page.click('#ps-import-use'); await page.waitForTimeout(900);
+    s = await state(page);
+    ok(s.cols && s.cols.join(',') === 'item,score' && /^items\b/.test(s.name || '') && /from dataverse\.harvard\.edu/.test(s.detail), '8: the tab-separated table, the file\'s real name and the provenance all land (' + s.name + '; ' + s.detail + ')');
+    ok(errors.length === 0, '8: no page errors' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    await ctx.close();
+}
+{
+    const { ctx, page, seen, mode } = await boot();
+    await page.click('#ps-welcome-find'); await page.waitForTimeout(400);
+    await page.click('#ps-finddata-dialog [data-source="dataverse"]'); await page.waitForTimeout(300);
+    mode.dataverse = 'abort';
+    await page.type('#ps-finddata-q', 'anxiety'); await page.keyboard.press('Enter'); await page.waitForTimeout(800);
+    let s = await state(page);
+    ok(s.open && /Could not reach dataverse\.harvard\.edu/.test(s.status) && s.rows.length === 0, '8: a failed search names the host (' + s.status + ')');
+    mode.dataverse = 'rate';
+    await page.keyboard.press('Enter'); await page.waitForTimeout(800);
+    s = await state(page);
+    ok(/limiting searches/.test(s.status) && /minute/.test(s.status), '8: a rate-limited search says to wait (' + s.status + ')');
+    mode.dataverse = 'ok'; mode.dvFile = 'fail';
+    await page.keyboard.press('Enter'); await page.waitForTimeout(800);
+    await page.click('#ps-finddata-results [data-find-open][data-find-name="items.tab"]'); await page.waitForTimeout(1000);
+    s = await state(page);
+    ok(s.open && /answered 500/.test(s.status) && s.opens.length === 3 && !s.opens[1].disabled && s.opens[1].text === 'Open', '8: a failed fetch reports in the dialog and the Open button is usable again (' + s.status + ')');
+    ok(seen.dataverse.length === 3, '8: three searches were sent in all (' + seen.dataverse.length + ')');
     await ctx.close();
 }
 await browser.close();
