@@ -34,9 +34,14 @@ jobs:
       # install step picks the installer by uname -m) and so builds the Intel
       # file. GitHub has said its Intel Macs end around August 2027; after
       # that the same leg can build under Rosetta on an Apple-chip runner.
+      # The Apple-chip legs run on macos-15: GitHub retired the macos-14
+      # image on 2026-11-02, and the three macos-14 jobs of the v3.3.0 tag
+      # build were cancelled at start ("The configuration
+      # 'macos-14-arm64-us-default' is not supported"). The Intel legs
+      # already build on macOS 15.
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             line: '2.7'
           - os: macos-15-intel
@@ -45,7 +50,7 @@ jobs:
           - os: windows-latest
             platform: win-x64
             line: '2.7'
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
             line: '28'
           - os: macos-15-intel
@@ -414,7 +419,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-latest]
+        os: [macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
     name: Desktop (${{ matrix.os }})
     timeout-minutes: 60
