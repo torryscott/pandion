@@ -520,7 +520,7 @@
   function pageSizeText(page) {
     return pxToUnit(page.w) + " \u00d7 " + pxToUnit(page.h) + " " + unitLabel();
   }
-  var APP_VERSION = "3.2.0";
+  var APP_VERSION = "3.3.0";
   // The build stamp. The version alone cannot identify the code that
   // drew a figure: the hosted app deploys from main ahead of tagged
   // releases, so one version number covers weeks of builds, and a
@@ -552,19 +552,19 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
-    { id: "histogram-auto-bins-top-edge", since: "3.2.1",
+    { id: "histogram-auto-bins-top-edge", since: "3.3.0",
       label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
-    { id: "cg-single-value-group-pooled-pairs", since: "3.2.1",
+    { id: "cg-single-value-group-pooled-pairs", since: "3.3.0",
       label: "Compare Groups comparisons under a pooled correction include a group that holds a single value, which changes the adjusted p of the other pairs" },
-    { id: "anova-effect-size-table-total", since: "3.2.1",
+    { id: "anova-effect-size-table-total", since: "3.3.0",
       label: "eta squared and omega squared on two-way and three-way Compare Groups designs with unequal cell sizes match jamovi's ANOVA table" },
-    { id: "freq-pairwise-two-category-once", since: "3.2.1",
+    { id: "freq-pairwise-two-category-once", since: "3.3.0",
       label: "the Frequencies Pairwise tab lists a two-category outcome once per pair of groups, so its Holm-adjusted p is no longer doubled" },
-    { id: "likert-means-own-codes", since: "3.2.1",
+    { id: "likert-means-own-codes", since: "3.3.0",
       label: "survey item means, their intervals and Cronbach's alpha use the responses' own numbers (items coded from 0, or with an unused level, read differently)" },
-    { id: "corrections-follow-test-menu", since: "3.2.1",
+    { id: "corrections-follow-test-menu", since: "3.3.0",
       label: "Compare Groups comparisons under Bonferroni, Holm or FDR keep a Welch's or Student's t picked by hand as each pair's own test" },
-    { id: "ptukey-df-scaled-grid", since: "3.2.1",
+    { id: "ptukey-df-scaled-grid", since: "3.3.0",
       label: "Tukey and Games-Howell adjusted p values are accurate for large samples (error df above about 150) and for groups of two" },
     { id: "cg-posthoc-pooled-error-term", since: "3.2.0",
       label: "Compare Groups comparisons under a correction run on the ANOVA's pooled error term, with Cohen's d on the model SD" },
@@ -4021,9 +4021,23 @@
   // unfolded; -1 = none. Reset when the dialog opens, kept across edits
   // so the trace follows the formula while it is being written.
   var FORMULA_EXPLAIN_ROW = -1;
+  // A computed number as a person reads it: six significant digits, with
+  // the whole-number part and three decimals always kept (3.9333333333333336
+  // reads 3.93333, 1000.495 stays 1000.495), and no more than the 15 digits
+  // a double holds faithfully, so float noise (6.3999999999999995) reads
+  // 6.4. The preview and the grid share it, so a value never reads one way
+  // in the dialog and another in the column. Display only: the stored
+  // double keeps full precision for charts, chained formulas, copy and
+  // saved files (recomputeFormulas).
+  function fmtComputedNumber(v) {
+    var a = Math.abs(v);
+    var whole = a >= 1 ? Math.floor(Math.log10(a)) + 1 : 0;
+    if (!isFinite(v) || whole > 15) return String(v);
+    return String(Number(v.toPrecision(Math.min(15, Math.max(6, whole + 3)))));
+  }
   function fmtPreviewValue(v) {
     return v == null ? "missing"
-      : typeof v === "number" ? String(Number(v.toPrecision(6))) : String(v);
+      : typeof v === "number" ? fmtComputedNumber(v) : String(v);
   }
   // Why a sub-expression came out the way it did, in plain words, from
   // the facts the engine's explain mode returns. Only the lines that
@@ -18235,7 +18249,12 @@
     var note = (v == null && !excl)
       ? unreadReason(t, col, i) : "";
     if (note) note += ", so this cell is missing";
-    return { cls: cls, text: v == null ? "\u2014" : String(v),
+    // A computed column holds full doubles, so 6.4 arrives as
+    // 6.3999999999999995; it reads the way the formula preview showed it.
+    return { cls: cls,
+             text: v == null ? "\u2014"
+               : typeof v === "number" && isComputedColumn(t, col)
+               ? fmtComputedNumber(v) : String(v),
              note: note, tip: tip,
              title: note ? (tip ? note + ". " + tip : note) : tip };
   }
@@ -21961,13 +21980,13 @@
       var altLikert = null;
       if (summary.repeatedTimeNames)
         altLikert = choice("rm",
-          "Choose this instead if those columns are the same rating recorded at different times or sessions.");
+          "those columns are the same rating recorded at different times or sessions.");
       else if (num === 2)
         altLikert = choice("scatter",
-          "Choose this instead if the two numeric columns are different measurements whose relationship matters.");
+          "the two numeric columns are different measurements whose relationship matters.");
       else if (num >= 3)
         altLikert = choice("corr",
-          "Choose this instead if these are different measurements and you want their pairwise relationships.");
+          "these are different measurements and you want their pairwise relationships.");
       return { primary: primaryLikert, alternative: altLikert, warning: warning,
                batteryNames: summary.likertNames.slice() };
     }
@@ -21985,19 +22004,19 @@
       return { primary: choice("compare-all",
         "One numeric outcome plus categorical variables is a group-comparison design."),
         alternative: choice("dist",
-          "Choose this instead if the grouping variables are not part of the question and you only want the outcome's distribution."),
+          "the grouping variables are not part of the question and you only want the outcome's distribution."),
         warning: warning };
     if (num === 2) {
       if (summary.repeatedLikely)
         return { primary: choice("rm",
           "The two numeric columns have sequential names, suggesting the same measure at two occasions."),
           alternative: choice("scatter",
-            "Choose this instead if they are different measurements and the relationship between them is the question."),
+            "they are different measurements and the relationship between them is the question."),
           warning: warning };
       return { primary: choice("scatter",
         "Exactly two numeric variables naturally form the X and Y axes of a scatter plot."),
         alternative: choice("rm",
-          "Choose this instead if they are the same measure recorded at two times or conditions."),
+          "they are the same measure recorded at two times or conditions."),
         warning: warning };
     }
     if (num >= 3) {
@@ -22006,12 +22025,12 @@
           "Several numeric columns appear to be repeated occasions" +
           (cat ? ", with a categorical variable available for between-group comparison." : ".")),
           alternative: choice("corr",
-            "Choose this instead if the numeric columns are different measurements whose pairwise relationships matter."),
+            "the numeric columns are different measurements whose pairwise relationships matter."),
           warning: warning };
       return { primary: choice("corr",
         "Several numeric variables with no grouping variable are naturally summarized in a correlation matrix."),
         alternative: choice("rm",
-          "Choose this instead if the columns are one measure recorded at different times or conditions."),
+          "the columns are one measure recorded at different times or conditions."),
         warning: warning };
     }
     return { primary: null, alternative: null,
@@ -36440,6 +36459,21 @@
         : "Assign variables to this chart first to use the chart help " +
           "panels.");
     })();
+    // The click that asked for this panel (a Help menu row, the status-line
+    // receipt, a palette row, a dialog's link) is still on its way up to the
+    // document when the first step returns, and the engine closes its panel
+    // on any click outside it. With a help panel already open the first step
+    // switches tabs at once, so that same click closed the tab it had just
+    // opened (Oct 1 2026 report, Which graph? over Check my graph and the
+    // receipt over Which graph? both left nothing open). The "?" route only
+    // looked right because the poll reopened the panel 60ms later. The engine
+    // keeps a suppression window for clicks that belong to a gesture rather
+    // than land outside it, as the splitters use it. Armed after the step, so
+    // the step's own work cannot use it up, and never shortened.
+    try {
+      window.__gb2_suppressOutsideClickUntil = Math.max(
+        window.__gb2_suppressOutsideClickUntil || 0, Date.now() + 400);
+    } catch (e) {}
   }
   // ---- punch list 4: the user guide ----
   // docs/user-guide.html is 2.46 MB with 15 screenshots, and was orphaned:
@@ -36491,6 +36525,62 @@
   // discipline: the newest entry's version must equal APP_VERSION, so shipping
   // a release without a note here fails the suite.
   var RELEASE_NOTES = [
+    { version: "3.3.0", date: "November 2026", notes: [
+      "Pandion Plots works on a phone and a tablet. The four " +
+        "workspaces are tabs along the bottom, a tap on a chart part " +
+        "opens its editor and keeps its values on screen, and a finger " +
+        "drags bars, labels and layout items directly. Touch and hold " +
+        "opens a part's menu or shows a button's tip. Export on a " +
+        "phone offers Share first, which hands the figure to Messages, " +
+        "Mail or AirDrop, and the app can be added to the home screen. " +
+        "Building a chart from scratch is still easier on a larger " +
+        "screen.",
+      "The Statistics panel says what a test assumes. A one-way " +
+        "Omnibus shows Welch's F under the classic F, and a line " +
+        "appears when the groups' spreads differ a lot. A 2 by 2 " +
+        "Frequencies table gets Fisher's exact test, and the Pairwise " +
+        "tab warns on small counts. A Repeated Measures chart names " +
+        "its within-subject error bars wherever they appear, and its " +
+        "Omnibus says how many subjects the test used when someone is " +
+        "missing an occasion.",
+      "Some numbers changed, and the numerical changes ledger lists " +
+        "each one. Survey item means, their intervals and Cronbach's " +
+        "alpha use the responses' own numbers, so items coded from 0 " +
+        "read correctly. Eta squared and omega squared on unbalanced " +
+        "factorial designs match jamovi's ANOVA table. Under " +
+        "Bonferroni, Holm or FDR, a Welch's or Student's t picked by " +
+        "hand stays each pair's own test. Tukey and Games-Howell p " +
+        "values are accurate for large samples and for groups of two. " +
+        "A project saved earlier opens with a notice of what changed.",
+      "Check graph catches five more charts that used to read \"Looks " +
+        "good\": a correlation that rests on one point, a curved " +
+        "pattern under a straight line, a mean drawn over fewer than " +
+        "five values, a mean that sits outside the middle of its own " +
+        "group, and a survey item that runs against the rest.",
+      "Every chart part answers the same gestures. Bars, markers, " +
+        "boxes and heatmap tiles show their values under the pointer. " +
+        "The keyboard steps through every part, the X axis numbers and " +
+        "the legend's text included. Delete hides a part wherever its " +
+        "panel has a Hide button, single bars on ungrouped charts " +
+        "among them. A double-click renames a Likert item or a " +
+        "correlation variable on the chart. Renaming, adding or " +
+        "clearing a title is its own undo step.",
+      "Figures travel better. An exported SVG keeps its look in " +
+        "PowerPoint after the deck is saved and reopened, where error " +
+        "bars could come back as black boxes. Pattern fills export as " +
+        "plain shapes, so a PDF shows no hairlines across striped " +
+        "bars. In Layouts, grips on the page's edges size the page to " +
+        "the figure, and Fit page to content does it in one step.",
+      "Also: Find in the Data workspace matches column names, Open " +
+        "data from the web searches Harvard Dataverse, a column typed " +
+        "into a blank sheet takes its type from its first value, a " +
+        "value excluded in Data is left out of every statistic and " +
+        "scale, a computed column reads in the grid as it does in the " +
+        "formula preview, shared links open the app at " +
+        "pandionplots.com, a help tab switches to the one you ask for, " +
+        "and a significance bracket pushed off the axis no longer " +
+        "grows the canvas."
+    ] },
     { version: "3.2.0", date: "October 2026", notes: [
       "Post hoc comparisons match jamovi's tables line for line. With a " +
         "correction on, Compare Groups brackets and the Compare pairs table " +
