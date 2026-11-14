@@ -28,7 +28,7 @@ in what they computed, and the build stamp and id list are what tell
 them apart. The "live on the web app" date is when the fix reached
 the hosted page.
 
-## v3.2.1 (unreleased; deployment dates noted per change)
+## v3.3.0 (released 2026-11-14; deployment dates noted per change)
 
 **Automatic histogram bins no longer add a last bin for the largest value alone.** <!-- ledger: histogram-auto-bins-top-edge -->
 With automatic bins on data that is not all whole numbers, the bin
@@ -45,7 +45,7 @@ count or width set by hand were never affected. Checked by counting
 bins and values on the review's eight-value sample
 (`stats-judgment-check`). Affects: histograms and the Frequency table
 tab on Distribution, both hosts, automatic bins on non-integer data.
-Implemented 2026-11-11. Not yet live on the web app.
+Implemented 2026-11-11. Live on the web app 2026-11-14.
 
 **A group with a single value joins the pooled comparisons, as in jamovi's post hoc.** <!-- ledger: cg-single-value-group-pooled-pairs -->
 On Compare Groups, a pooled correction (Tukey, Dunnett, or Bonferroni,
@@ -64,7 +64,7 @@ hoc (`stats-judgment-check`; the rendered fuzzer's pooled reference
 covers one-observation groups). Affects: brackets and Compare pairs
 under a pooled correction on Compare Groups, both hosts, only when a
 group has a single value or two compared groups have no spread.
-Implemented 2026-11-11. Not yet live on the web app.
+Implemented 2026-11-11. Live on the web app 2026-11-14.
 
 **Eta squared and omega squared on factorial designs divide by the ANOVA table's own total, as jamovi's do.** <!-- ledger: anova-effect-size-table-total -->
 On the Omnibus tab of a Compare Groups chart with two or three factors,
@@ -83,7 +83,7 @@ tables. Checked against jamovi's ANOVA on the same data
 reference uses the same total). Affects: the eta squared and omega
 squared columns of the Omnibus tab on Compare Groups with a Group By or
 a Panels variable, both hosts, unequal cell sizes only. Implemented
-2026-11-11. Not yet live on the web app.
+2026-11-11. Live on the web app 2026-11-14.
 
 **Frequencies Pairwise counts a two-category outcome once, so Holm no longer doubles its p.** <!-- ledger: freq-pairwise-two-category-once -->
 On a grouped Frequencies bar chart whose outcome has exactly two
@@ -101,7 +101,7 @@ Contingency Tables and R's `prop.test` (`stats-judgment-check`; the
 rendered fuzzer's two-category reference lists each pair once).
 Affects: the Holm column and the significance tally of the Statistics
 panel's Pairwise tab on Frequencies, both hosts, two-category outcomes
-only. Implemented 2026-11-11. Not yet live on the web app.
+only. Implemented 2026-11-11. Live on the web app 2026-11-14.
 
 **Survey item means, their intervals and alpha use the responses' own numbers.** <!-- ledger: likert-means-own-codes -->
 On a Likert / Survey chart whose responses are numbers, item means,
@@ -121,8 +121,8 @@ Reliability Analysis on the same data (`stats-judgment-check`); the R
 side and the app's own data code are held equal by the parity check.
 Affects: the Item means tab, the means chart's dots and intervals, mean
 sorting, and Reliability, in both hosts, for numeric responses that are
-not coded 1 to k with every level used. Implemented 2026-11-11. Not yet
-live on the web app.
+not coded 1 to k with every level used. Implemented 2026-11-11. Live on the
+web app 2026-11-14.
 
 **Bonferroni, Holm and FDR keep a test picked by hand as each pair's own test.** <!-- ledger: corrections-follow-test-menu -->
 Since 3.2.0 every correction but Games-Howell ran each Compare Groups
@@ -140,8 +140,8 @@ Checked against R's `pairwise.t.test` and `p.adjust`
 (`stats-judgment-check`, and the rendered fuzzer's new reference for
 Holm over each pair's Welch test). Affects: brackets and Compare pairs
 on Compare Groups, both hosts, only where Test was changed from Auto
-and Correct is Bonferroni, Holm or FDR. Implemented 2026-11-11. Not yet
-live on the web app.
+and Correct is Bonferroni, Holm or FDR. Implemented 2026-11-11. Live on the
+web app 2026-11-14.
 
 **Tukey and Games-Howell adjusted p values are accurate for large samples and for groups of two.** <!-- ledger: ptukey-df-scaled-grid -->
 The studentized-range integral behind Tukey HSD and Games-Howell
@@ -165,7 +165,7 @@ df 1 to 50,000 (`stats-range-check`, source and compiled bundle); the
 rendered fuzzer gained three large-sample sets. Affects: brackets and
 Compare pairs under Tukey or Games-Howell on Compare Groups, and Tukey
 on Repeated Measures, in both hosts, wherever the error df is above
-about 150 or below 2. Implemented 2026-11-10. Not yet live on the web app.
+about 150 or below 2. Implemented 2026-11-10. Live on the web app 2026-11-14.
 
 ## v3.2.0 (released 2026-10-29; deployment dates noted per change)
 
