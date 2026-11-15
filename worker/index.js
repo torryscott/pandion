@@ -24,6 +24,9 @@
 //                          (Nov 2026): one more scan on the "card" count,
 //                          then straight on to the home page. See
 //                          isScanCountable.
+//   GET  /bsky             the link shared on Bluesky (Nov 2026): one more
+//                          visit on the "bsky" count, then straight on to
+//                          the home page, exactly like /card. See LINKS.
 //
 // And one scheduled job (wrangler.jsonc "triggers"): every hour it reads
 // GitHub's running download totals for the installers and the jamovi
@@ -67,7 +70,7 @@ function sameSite(req) {
 // well-behaved majority (search engines, link previewers, AI crawlers,
 // monitors, HTTP libraries). A scraper pretending to be Chrome gets past
 // it, as it gets past every counter.
-const BOT_UA = /bot|crawl|spider|slurp|scan|monitor|headless|lighthouse|pagespeed|python-requests|python-urllib|curl\/|wget\/|httpclient|java\/|go-http-client|libwww|okhttp|axios\/|node-fetch|undici|phantomjs|facebookexternalhit|embedly|whatsapp|telegrambot|skypeuripreview|discordbot|pinterest|linkedinbot|twitterbot|applebot|gptbot|claudebot|anthropic|ccbot|bytespider|petalbot|semrush|ahrefs|mj12|yandex|baidu|duckduck|bingpreview|ia_archiver|archive\.org|feedfetcher|validator|uptime|pingdom|datadog|newrelic|siteimprove/i;
+const BOT_UA = /bot|crawl|spider|slurp|scan|monitor|headless|lighthouse|pagespeed|python-requests|python-urllib|curl\/|wget\/|httpclient|java\/|go-http-client|libwww|okhttp|axios\/|node-fetch|undici|phantomjs|facebookexternalhit|embedly|whatsapp|telegrambot|skypeuripreview|discordbot|cardyb|pinterest|linkedinbot|twitterbot|applebot|gptbot|claudebot|anthropic|ccbot|bytespider|petalbot|semrush|ahrefs|mj12|yandex|baidu|duckduck|bingpreview|ia_archiver|archive\.org|feedfetcher|validator|uptime|pingdom|datadog|newrelic|siteimprove/i;
 
 // Would a person's browser have sent this? Three tests, each free:
 //   1. the User-Agent does not name a crawler or an HTTP library;
@@ -89,35 +92,40 @@ function isCountable(req) {
   return true;
 }
 
-// The printed cards (Nov 2026, Torry: how many people scan them?). The QR
-// code on the handout cards opens pandionplots.com/card; the Worker adds
-// one to the "card" count and redirects to the home page at once, so the
-// visitor lands where the card promised. "card" is deliberately not in
-// KINDS: no page can ping it, only opening the address counts.
-const CARD_PATH = /^\/card\/?$/i;
+// The counted links (Nov 2026). Each is an address that adds one to its
+// own count and redirects to the home page at once, so the visitor lands
+// where the link promised:
+//   /card   the QR code on the printed handout cards (Torry: how many
+//           people scan them?)
+//   /bsky   the link shared on Bluesky (Nov 15 2026, Torry: a custom
+//           counter for the Bluesky app)
+// Neither kind is in KINDS: no page can ping it, only opening the address
+// counts. The table itself is LINKS, below isScanCountable.
 
 // Was this a person opening the address? A scan is a phone handing the
-// address to its browser, not a page sending a ping, so the test differs
-// from isCountable. There is no Origin to check (nothing referred it), so
-// the Sec-Fetch headers are required rather than optional: every current
-// browser sends them on a page load, and scripts, crawlers and
-// address-guessing tools send none. The price is that a phone too old to
-// send them (Safari before 16.4) is redirected but not counted. Not counted
-// either, though each still gets the redirect: crawlers and link previews
-// (the User-Agent list, less the word "scan", which a QR app's own browser
-// may carry), a HEAD or any other method but GET, a browser loading the
-// address ahead of time in case it is opened (prefetch, prerender), the
-// address loaded inside another page or by a script, a click from this
-// site's own pages (not a scan), and Cloudflare's verified bots.
+// address to its browser, and a tap on the Bluesky link is the Bluesky app
+// (or a browser on bsky.app) doing the same; neither is a page sending a
+// ping, so the test differs from isCountable. There is no Origin to check
+// (nothing on this site referred it), so the Sec-Fetch headers are required
+// rather than optional: every current browser sends them on a page load,
+// and scripts, crawlers, link-preview fetchers and address-guessing tools
+// send none. The price is that a phone too old to send them (Safari before
+// 16.4) is redirected but not counted. Not counted either, though each
+// still gets the redirect: crawlers and link previews (the User-Agent list
+// the link names; the card's leaves out the word "scan", which a QR app's
+// own browser may carry), a HEAD or any other method but GET, a browser
+// loading the address ahead of time in case it is opened (prefetch,
+// prerender), the address loaded inside another page or by a script, a
+// click from this site's own pages, and Cloudflare's verified bots.
 const SCAN_BOT_UA = new RegExp(BOT_UA.source.replace("|scan|", "|"), "i");
-function isScanCountable(req) {
+function isScanCountable(req, bots) {
   if (req.method !== "GET") return false;
   if (req.headers.get("Sec-Fetch-Mode") !== "navigate") return false;
   if (req.headers.get("Sec-Fetch-Dest") !== "document") return false;
   const site = req.headers.get("Sec-Fetch-Site");
   if (site === "same-origin" || site === "same-site") return false;
   const ua = req.headers.get("User-Agent") || "";
-  if (!ua || SCAN_BOT_UA.test(ua)) return false;
+  if (!ua || (bots || SCAN_BOT_UA).test(ua)) return false;
   const purpose = [req.headers.get("Sec-Purpose"), req.headers.get("Purpose"),
     req.headers.get("X-Purpose"), req.headers.get("X-Moz")].join(" ");
   if (/prefetch|prerender|preview/i.test(purpose)) return false;
@@ -126,6 +134,19 @@ function isScanCountable(req) {
   if (cf.botManagement && cf.botManagement.verifiedBot) return false;
   return true;
 }
+
+// Each counted link: its address (with or without a trailing slash, any
+// letter case, any query string), the kind it counts, and the User-Agent
+// list it is judged by. The Bluesky link keeps the full list: nothing that
+// opens it should call itself a scanner. Bluesky's own link-preview fetcher
+// (Cardyb), which reads the page when the link is pasted into a post, is
+// on that list, sends no Sec-Fetch headers and is a Cloudflare verified
+// bot, so a post's preview card never counts as a visit. A new link needs
+// a row here and its two paths in wrangler.jsonc's run_worker_first.
+const LINKS = [
+  { path: /^\/card\/?$/i, kind: "card", bots: SCAN_BOT_UA },
+  { path: /^\/bsky\/?$/i, kind: "bsky", bots: BOT_UA },
+];
 
 // The D1 binding as wrangler.jsonc names it (pandion_counts; DB is
 // accepted too, the name the README first suggested).
@@ -309,16 +330,17 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
 
-    if (CARD_PATH.test(url.pathname) && (req.method === "GET" || req.method === "HEAD")) {
-      if (db(env) && isScanCountable(req)) {
+    const link = LINKS.find(l => l.path.test(url.pathname));
+    if (link && (req.method === "GET" || req.method === "HEAD")) {
+      if (db(env) && isScanCountable(req, link.bots)) {
         // The count is written after the redirect has gone out, so the
-        // scan never waits on the database; a failed write is an
+        // visitor never waits on the database; a failed write is an
         // undercount, never an error page.
-        const write = bump(env, "card").catch(() => {});
+        const write = bump(env, link.kind).catch(() => {});
         if (ctx && ctx.waitUntil) ctx.waitUntil(write); else await write;
       }
       // A temporary redirect that nothing may keep: a browser that kept
-      // it would skip the count on the next scan.
+      // it would skip the count the next time the link is opened.
       return new Response(null, { status: 302, headers: Object.assign({ "Location": new URL("/", url).href }, NO_STORE) });
     }
 

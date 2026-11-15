@@ -16,6 +16,7 @@ counters on. Read this before touching `worker/` or `wrangler.jsonc`.
 | How long a page stayed in front | this Worker | once per page, when it first goes into the background or away: `time:<id>:<band>`, the band being under 10 seconds, under a minute, under five minutes, or five minutes or more; nothing finer |
 | The Learn tours started and finished | this Worker | `tour:<id>:start` the first time a film's play button turns to Pause, `tour:<id>:done` the first time it turns to Replay (three-rules, data, charts, notebook, layouts); once each per page view |
 | Scans of the QR code on the printed cards (Nov 2026) | this Worker | the code opens `pandionplots.com/card`; the Worker adds one to `card` and redirects to the home page; see "Printed cards" below |
+| Visits through the link shared on Bluesky (Nov 2026) | this Worker | the link is `pandionplots.com/bsky`; the Worker adds one to `bsky` and redirects to the home page; see "Bluesky link" below |
 
 The app pings only when `psUpdateHosted()` is true (hostname is
 pandionplots.com) and `navigator.webdriver` is false; the site pings
@@ -127,6 +128,37 @@ printed on paper: keep `/card` answering for as long as cards are in
 circulation, even if the counter itself is ever retired (a plain redirect
 then).
 
+## Bluesky link (Nov 2026)
+
+`https://pandionplots.com/bsky` is the address to share on Bluesky, in
+posts and in the profile (Torry, Nov 15 2026: a custom counter for the
+Bluesky app). It works exactly like `/card`, through the same `LINKS`
+table in `worker/index.js`: `GET /bsky` (also `/bsky/`, any letter case, any query
+string) adds one to the `bsky` kind and answers `302` to the home page with
+`Cache-Control: no-store`, the count written through `ctx.waitUntil`;
+`HEAD` gets the redirect uncounted; any other method and every look-alike
+path (`/bskyx`, `/bsky/x`, `/bsky.html`, `/bluesky`) is the static site.
+`wrangler.jsonc` lists `/bsky` and `/bsky/` under `run_worker_first` for
+the same reason as the card (a tap on a link is a navigation).
+
+What counts is `isScanCountable` again, with one difference: the Bluesky
+link is judged by the full User-Agent list, the word "scan" included,
+since nothing that follows a Bluesky link should call itself a scanner. A
+tap in the Bluesky app (its in-app browser sends `Sec-Fetch-Site: none`)
+and a click on bsky.app in a browser (`cross-site`) both count. Pasting
+the link into a post makes Bluesky's link-preview service (`Bluesky
+Cardyb`) read the page to build the preview card; it follows the redirect,
+so the card shows the home page's title and image, and it is not counted
+three ways over (no Sec-Fetch headers, `cardyb` on the User-Agent list, a
+Cloudflare verified bot). `worker/verify-worker.mjs` case 15 pins every
+rule. The visit also lands on the home page, which sends its own
+`page:home` ping like any other visit.
+
+The usage page lists the count as "Bluesky link, visits" in the first
+table, with the same history chart as every row. Keep `/bsky` answering
+for as long as posts link to it, even if the counter itself is ever
+retired (a plain redirect then).
+
 ## One-time setup (needs a Cloudflare login)
 
 The live project serves `./website` as Workers static assets
@@ -170,8 +202,9 @@ design" pillar, about.html's "Free, private, open" paragraph, the usage
 page's introduction) and support.html says "no tracking". Since Nov 2026
 they also say that the site counts which of its pages are read and how
 long they stay open, in those four bands, and how often the QR code on a
-printed card is scanned: still no data, no identifier, no cookie, and
-nothing that could follow one visitor from page to page.
+printed card is scanned; since Nov 15 2026 also how often the Bluesky link
+is followed: still no data, no identifier, no cookie, and nothing that
+could follow one visitor from page to page.
 A new site page needs a row on usage.html (the Worker accepts any
 well-formed page id); a new tour needs a row there and a film frame
 attribute the script recognises. The app's own

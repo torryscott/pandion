@@ -41,11 +41,23 @@
 //      previews, crawlers, curl and verified bots are redirected but not
 //      counted; a QR app's browser that names itself a scanner counts; no
 //      page can ping "card"; no database or a failing one still redirects;
-//  14. wrangler.jsonc runs the Worker first for /card, /card/ and /api/*:
-//      a phone opening /card is a navigation, which Cloudflare otherwise
-//      answers with the 404 page without running the Worker
+//  14. wrangler.jsonc runs the Worker first for /card, /card/, /bsky,
+//      /bsky/ and /api/*: a phone opening /card or /bsky is a navigation,
+//      which Cloudflare otherwise answers with the 404 page without
+//      running the Worker
 //      look-alike paths are the static site; /api/counts and /api/daily
 //      carry the card kind like any other.
+//
+// The Bluesky link (Nov 2026):
+//  15. a tap on pandionplots.com/bsky in the Bluesky app, or a click on it
+//      on bsky.app in a browser, is redirected to the home page and counted
+//      once as bsky (never as card); Bluesky's own link preview (Cardyb),
+//      however it asks, a browser that calls itself a scanner (the card's
+//      one exception does not apply here), HEAD, prefetch, a script, a
+//      click from this site and curl are redirected but not counted; no
+//      page can ping "bsky"; no database or a failing one still redirects;
+//      look-alike paths are the static site; /api/counts and /api/daily
+//      carry the bsky kind.
 //
 // Usage: node worker/verify-worker.mjs
 import worker, { isCountable, isScanCountable, kindOk, totalsFromReleases, downloadIncrements, snapshotDownloads } from './index.js';
@@ -437,9 +449,104 @@ const human = { 'Origin': 'https://pandionplots.com', 'User-Agent': CHROME, 'Sec
     const conf = JSON.parse(raw.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n'));
     const first = (conf.assets && conf.assets.run_worker_first) || [];
     const covered = p => Array.isArray(first) && first.some(pat => pat.endsWith('/*') ? p.startsWith(pat.slice(0, -1)) : p === pat);
-    const need = ['/card', '/card/', '/api/hit/page:home', '/api/counts', '/api/daily'];
+    const need = ['/card', '/card/', '/bsky', '/bsky/', '/api/hit/page:home', '/api/counts', '/api/daily'];
     ok(conf.assets && conf.assets.not_found_handling && need.every(covered),
        'wrangler.jsonc runs the Worker first for every address it answers (' + JSON.stringify(first) + ')');
+}
+// 15
+{
+    const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+    const ANDROID = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+    const SCANNER = ANDROID.replace('Pixel 8)', 'Pixel 8; wv)') + ' QRScanner/3.1';
+    // Bluesky's link-preview service, which reads the page when the link
+    // is pasted into a post (it is also a Cloudflare verified bot).
+    const CARDYB = 'Mozilla/5.0 (compatible; Bluesky Cardyb/1.1; +mailto:support@bsky.app)';
+    // A tap in the Bluesky app: its in-app browser opens the address with
+    // nothing referring it, exactly as a phone opens a scanned code.
+    const tap = { 'User-Agent': IPHONE, 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-User': '?1' };
+    // A click on bsky.app in a desktop browser: a new tab, from another site.
+    const click = { 'User-Agent': CHROME, 'Referer': 'https://bsky.app/', 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-User': '?1' };
+    const visit = (p, headers, { method, cf } = {}) => {
+        const r = new Request('https://pandionplots.com' + p, { method: method || 'GET', headers });
+        if (cf) Object.defineProperty(r, 'cf', { value: cf });
+        return r;
+    };
+    const HOME = 'https://pandionplots.com/';
+    let m = mockEnv();
+    let res = await worker.fetch(visit('/bsky', tap), m.env);
+    ok(res.status === 302 && res.headers.get('location') === HOME && (await res.text()) === '',
+       'a tap on the Bluesky link goes straight on to the home page (' + res.status + ' to ' + res.headers.get('location') + ')');
+    ok(/no-store/.test(res.headers.get('cache-control') || ''), 'and nothing may keep the redirect, so the next tap comes back to be counted');
+    ok(m.bumps.length === 1 && m.bumps[0] === 'bsky', 'and it is counted once as bsky, not as card (' + JSON.stringify(m.bumps) + ')');
+    m = mockEnv();
+    await worker.fetch(visit('/bsky', click), m.env);
+    await worker.fetch(visit('/bsky', Object.assign({}, tap, { 'User-Agent': ANDROID })), m.env);
+    ok(m.bumps.length === 2 && m.bumps.every(k => k === 'bsky'),
+       'a click on bsky.app in a browser and a tap on an Android phone count too (' + JSON.stringify(m.bumps) + ')');
+    m = mockEnv();
+    for (const p of ['/bsky/', '/BSKY', '/Bsky?ref=profile']) {
+        res = await worker.fetch(visit(p, tap), m.env);
+        if (res.status !== 302 || res.headers.get('location') !== HOME) ok(false, p + ' redirects home (' + res.status + ')');
+    }
+    ok(m.bumps.length === 3 && m.bumps.every(k => k === 'bsky'), '/bsky/, /BSKY and /Bsky?ref=... count and redirect the same (' + m.bumps.length + ' of 3)');
+    m = mockEnv(); const waits = [];
+    res = await worker.fetch(visit('/bsky', tap), m.env, { waitUntil: p => waits.push(p) });
+    const countedBefore = m.bumps.length;
+    await Promise.all(waits);
+    ok(res.status === 302 && waits.length === 1 && m.bumps.length === 1 && m.bumps[0] === 'bsky',
+       'the count rides waitUntil here too, so the redirect never waits on the database (' + countedBefore + ' then ' + m.bumps.length + ')');
+    const notCounted = [
+        ['Bluesky\'s link preview as it really asks (no Sec-Fetch headers)', visit('/bsky', { 'User-Agent': CARDYB, 'Accept': 'text/html' })],
+        ['Bluesky\'s link preview even with browser headers', visit('/bsky', Object.assign({}, tap, { 'User-Agent': CARDYB }))],
+        ['Bluesky\'s link preview flagged by Cloudflare under a browser name', visit('/bsky', tap, { cf: { verifiedBotCategory: 'Page Preview' } })],
+        ['a browser that calls itself a scanner', visit('/bsky', Object.assign({}, tap, { 'User-Agent': SCANNER }))],
+        ['a HEAD request', visit('/bsky', tap, { method: 'HEAD' })],
+        ['a prefetch', visit('/bsky', Object.assign({}, click, { 'Sec-Purpose': 'prefetch' }))],
+        ['a script fetching it', visit('/bsky', Object.assign({}, click, { 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' }))],
+        ['the address inside another page', visit('/bsky', Object.assign({}, click, { 'Sec-Fetch-Dest': 'iframe' }))],
+        ['a click from this site\'s own pages', visit('/bsky', Object.assign({}, tap, { 'Sec-Fetch-Site': 'same-origin' }))],
+        ['a phone too old to send Sec-Fetch headers', visit('/bsky', { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Mobile/15E148 Safari/604.1' })],
+        ['curl', visit('/bsky', { 'User-Agent': 'curl/8.4.0' })],
+    ];
+    let quiet = 0;
+    for (const [name, req] of notCounted) {
+        const mm = mockEnv();
+        const r = await worker.fetch(req, mm.env);
+        if (r.status === 302 && r.headers.get('location') === HOME && mm.bumps.length === 0) quiet++;
+        else ok(false, name + ' should be redirected but not counted (' + r.status + ', ' + mm.bumps.length + ' counted)');
+    }
+    ok(quiet === notCounted.length, 'redirected home but not counted: ' + notCounted.map(x => x[0]).join(', ') + ' (' + quiet + ' of ' + notCounted.length + ')');
+    m = mockEnv();
+    await worker.fetch(visit('/card', Object.assign({}, tap, { 'User-Agent': SCANNER })), m.env);
+    ok(m.bumps.length === 1 && m.bumps[0] === 'card', 'while the card still lets a QR app\'s browser that names itself a scanner through');
+    m = mockEnv();
+    await worker.fetch(ping('bsky', human), m.env);
+    ok(m.bumps.length === 0 && !kindOk('bsky'), 'no page can ping the bsky count: only opening /bsky counts');
+    res = await worker.fetch(visit('/bsky', tap), { ASSETS: { fetch: async () => new Response('asset') } });
+    ok(res.status === 302 && res.headers.get('location') === HOME, 'without a database the Bluesky link still goes home');
+    const refusing = { pandion_counts: { prepare: () => ({ bind: () => ({ run: async () => { throw new Error('D1_ERROR: daily quota'); } }) }) },
+                       ASSETS: { fetch: async () => new Response('asset') } };
+    res = await worker.fetch(visit('/bsky', tap), refusing);
+    ok(res.status === 302 && res.headers.get('location') === HOME, 'and a database that refuses the write still sends the visitor home');
+    let lookalike = 0;
+    const paths = ['/bskyx', '/bsky/x', '/bsky.html', '/bluesky', '/x/bsky', '/api/bsky'];
+    for (const p of paths) {
+        const mm = mockEnv();
+        const r = await worker.fetch(visit(p, tap), mm.env);
+        if (r.status === 200 && (await r.text()) === 'asset' && mm.bumps.length === 0) lookalike++;
+        else ok(false, p + ' should be the static site');
+    }
+    ok(lookalike === paths.length, 'look-alike paths are the static site, uncounted: ' + paths.join(', '));
+    m = mockEnv();
+    res = await worker.fetch(visit('/bsky', tap, { method: 'POST' }), m.env);
+    ok(res.status === 200 && (await res.text()) === 'asset' && m.bumps.length === 0, 'a POST to /bsky is no visit: the static site answers it');
+    const { env: envC } = mockEnv([{ kind: 'bsky', n: 9, since: '2026-11-16' }]);
+    const cj = await (await worker.fetch(new Request('https://pandionplots.com/api/counts'), envC)).json();
+    ok(cj.bsky && cj.bsky.count === 9 && cj.bsky.since === '2026-11-16', '/api/counts carries the bsky kind with its first day (' + JSON.stringify(cj.bsky) + ')');
+    const { env: envD } = mockEnv([{ day: '2026-09-25', kind: 'launch', n: 3 }, { day: '2026-11-16', kind: 'bsky', n: 6 }, { day: '2026-11-18', kind: 'bsky', n: 2 }]);
+    const dj = await (await worker.fetch(new Request('https://pandionplots.com/api/daily'), envD)).json();
+    ok(dj.hitsSinceOf.bsky === '2026-11-16' && JSON.stringify(dj.hits.bsky) === '[["2026-11-16",6],["2026-11-18",2]]',
+       '/api/daily lists the visits day by day from their own first day (' + JSON.stringify(dj.hits.bsky) + ')');
 }
 if (fails) { console.log('COUNTER WORKER: ' + fails + ' failure(s)'); process.exit(1); }
 console.log('COUNTER WORKER: ALL GREEN');

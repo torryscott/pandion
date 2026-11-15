@@ -64,7 +64,7 @@ let fails = 0; const ok = (c, m) => { console.log((c ? '  ok  ' : ' FAIL ') + m)
 
 const COUNTS = { updated: '2026-09-25T10:00:00Z',
     launch: { count: 1234, since: '2026-09-25' }, 'launch-day': { count: 321, since: '2026-09-25' }, portable: { count: 45, since: '2026-09-26' },
-    card: { count: 12, since: '2026-10-12' } };
+    card: { count: 12, since: '2026-10-12' }, bsky: { count: 7, since: '2026-10-16' } };
 const asset = (name, n, at) => ({ name, download_count: n, created_at: at });
 const RELEASES = [
     { tag_name: 'v3.1.3', assets: [asset('Pandion-Plots-macOS.dmg', 16, '2026-09-14T10:00:00Z'), asset('Pandion-Plots-Windows-x64.exe', 26, '2026-09-14T10:00:00Z'),
@@ -146,6 +146,7 @@ try {
         ok(g('launch-day').count === '321', 'Usage page: the launch-day row fills (' + g('launch-day').count + ')');
         ok(g('portable').count === '45' && g('portable').since === '26 Sep 2026', 'Usage page: the portable row fills from our counter (' + JSON.stringify(g('portable')) + ')');
         ok(g('card').count === '12' && g('card').since === '12 Oct 2026' && /QR code scans/.test(g('card').item || ''), 'Usage page: the printed cards\' scans fill from our counter (' + JSON.stringify(g('card')) + ')');
+        ok(g('bsky').count === '7' && g('bsky').since === '16 Oct 2026' && /^Bluesky link, visits$/.test(g('bsky').item || ''), 'Usage page: the Bluesky link\'s visits fill from our counter (' + JSON.stringify(g('bsky')) + ')');
         ok(g('Pandion-Plots-macOS.dmg').count === '29' && g('Pandion-Plots-macOS.dmg').since === '23 Aug 2026', 'Usage page: the macOS installer sums across releases with the earliest date (' + JSON.stringify(g('Pandion-Plots-macOS.dmg')) + ')');
         ok(g('Pandion-Plots-Windows-x64.exe').count === '36', 'Usage page: the Windows installer sums (' + g('Pandion-Plots-Windows-x64.exe').count + ')');
         ok(g('pandion-macos-arm64.jmo').count === '49' && g('pandion-macos-arm64.jmo').since === '25 Jul 2026', 'Usage page: the jamovi 2.7 macOS row folds the old plotstudio name in (' + JSON.stringify(g('pandion-macos-arm64.jmo')) + ')');
@@ -201,10 +202,12 @@ try {
         }
         const DAILY = {
             updated: NOW, hitsSince: '2026-09-25',
-            hits: { launch: Object.entries(launch), 'launch-day': Object.entries(launchDay), card: [['2026-10-12', 2], ['2026-10-19', 3]] },
-            // Only the cards have their own first day here: every other row
-            // falls back to hitsSince, as with a Worker from before hitsSinceOf.
-            hitsSinceOf: { card: '2026-10-12' },
+            hits: { launch: Object.entries(launch), 'launch-day': Object.entries(launchDay), card: [['2026-10-12', 2], ['2026-10-19', 3]],
+                bsky: [['2026-10-16', 1], ['2026-10-20', 2]] },
+            // Only the cards and the Bluesky link have their own first day
+            // here: every other row falls back to hitsSince, as with a Worker
+            // from before hitsSinceOf.
+            hitsSinceOf: { card: '2026-10-12', bsky: '2026-10-16' },
             downloadsSince: '2026-10-01', downloadsChecked: '2026-10-20T14:59:00.000Z',
             downloads: {
                 'Pandion-Plots-macOS.dmg': [['2026-10-02', 2], ['2026-10-09', 1], ['2026-10-20', 3]],
@@ -238,7 +241,7 @@ try {
 
         const armed = await page.evaluate(() => [document.querySelectorAll('[data-role="usage-table"] tbody tr').length,
             document.querySelectorAll('[data-role="usage-table"] tbody tr .usage-row-btn[aria-controls="usage-chart"]').length]);
-        ok(armed[0] === 11 && armed[1] === 11, 'History: every row, the added Intel one too, becomes a button that controls the chart (' + armed.join(' of ') + ')');
+        ok(armed[0] === 12 && armed[1] === 12, 'History: every row, the added Intel one too, becomes a button that controls the chart (' + armed.join(' of ') + ')');
         let c = await chart();
         ok(c.hidden === true, 'History: the chart stays closed until a row is clicked');
 
@@ -304,6 +307,12 @@ try {
         await clickRow('card'); c = await chart();
         ok(c.points === 9 && c.total === '5 scans in the last 30 days (counting began 12 Oct 2026)' && c.title === 'Printed cards, QR code scans',
            'History: the cards row counts scans from its own first day (' + c.points + ', ' + c.total + ')');
+
+        // The Bluesky link: visits, from the link's own first day.
+        await clickRow('bsky'); c = await chart();
+        ok(c.points === 5 && c.total === '3 visits in the last 30 days (counting began 16 Oct 2026)' && c.title === 'Bluesky link, visits' &&
+           JSON.stringify(c.numbers[0]) === '["Tue 20 Oct 2026, so far","2"]' && JSON.stringify(c.numbers[4]) === '["Fri 16 Oct 2026","1"]',
+           'History: the Bluesky row counts visits from its own first day (' + c.points + ', ' + c.total + ')');
 
         // A row that has never been clicked: zeros, honestly.
         await clickRow('portable'); c = await chart();
