@@ -109,7 +109,26 @@
     color: var(--navy); background: #fff; border-color: #c3d0df;
   }
   .btn-secondary:hover { border-color: var(--cobalt); color: var(--cobalt); }
-  .cta-note { flex-basis: 100%; color: var(--muted); font-size: 13px; }
+  .cta-note {
+    flex-basis: 100%; color: var(--muted); font-size: 13px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  }
+  /* The donate link, findable at a glance (Torry, Nov 16 2026: people
+     who had used Pandion for months had never found it under
+     Contribute). Ko-fi's own symbol, unmodified and self-hosted as on
+     support.html, so the page still makes no third-party requests. */
+  .kofi-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 12px 4px 9px; border: 1px solid #c3d0df;
+    border-radius: 999px; background: #fff; color: var(--navy);
+    font-weight: 650; font-size: 13px; line-height: 1.4;
+    text-decoration: none;
+  }
+  .kofi-chip img { display: block; width: 20px; height: auto; }
+  .kofi-chip:hover { border-color: var(--cobalt); color: var(--cobalt); }
+  .kofi-chip:focus-visible {
+    outline: 3px solid rgba(55, 92, 160, 0.24); outline-offset: 2px;
+  }
   .hero-art { display: flex; justify-content: center; }
   /* Presented as a brand card. The art is a TRANSPARENT vector, so the
      card supplies its own white ground and inner padding (the old PNG
@@ -503,7 +522,10 @@
         <div class="cta-row">
           <a class="btn btn-primary" href="app/">Open the browser app</a>
           <a class="btn btn-secondary" href="#downloads">See download options</a>
-          <span class="cta-note">Free, open source, and private by design.</span>
+          <span class="cta-note">Free, open source, and private by design.
+            <a class="kofi-chip" href="https://ko-fi.com/pandionplots"><img
+               src="assets/kofi-symbol.svg" alt="" data-image-kind="decorative"
+               width="20" height="16">Support on Ko-fi</a></span>
         </div>
       </div>
       <div class="hero-art">
