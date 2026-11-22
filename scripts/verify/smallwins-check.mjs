@@ -3,7 +3,8 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 const req = createRequire('/tmp/x.js');
 const pw = req('playwright');
-const OUT = '/tmp/gb2-verify';
+// The battery passes its output folder; the default is where a plain run writes.
+const OUT = process.env.GB2_VERIFY_OUT || '/tmp/gb2-verify';
 let fails = 0;
 const ok = (l, c) => { console.log((c ? ' ok  ' : 'FAIL ') + l); if (!c) fails++; };
 const b = await pw.chromium.launch();
