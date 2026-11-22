@@ -28,6 +28,32 @@ in what they computed, and the build stamp and id list are what tell
 them apart. The "live on the web app" date is when the fix reached
 the hosted page.
 
+## v3.3.1 (unreleased; deployment dates noted per change)
+
+**The repeated-measures Omnibus chooses its sphericity correction by epsilon.** <!-- ledger: rm-sphericity-automatic -->
+The within-subject rows of a repeated-measures or mixed ANOVA were
+always Greenhouse-Geisser corrected. That estimate of epsilon runs low
+when sphericity nearly holds, so with few subjects the test corrected
+when nothing was wrong (in a simulation with four conditions and ten
+subjects it flagged 3.4% of null effects at .05), and it could never
+show the uncorrected row jamovi prints by default. The correction is
+now a saved choice on the Omnibus tab, and its default, Automatic,
+follows the textbook rule: Huynh-Feldt when the Greenhouse-Geisser
+epsilon is above .75, Greenhouse-Geisser at .75 or below. Where
+epsilon is above .75 the degrees of freedom are slightly larger and p
+slightly smaller than before (at epsilon .817: df 1.71, 53.12 where
+1.63, 50.68 was shown), and where Huynh-Feldt's epsilon reaches 1
+nothing is corrected (df 2, 62 where 1.92, 59.47 was shown). At .75
+and below nothing changes; F and partial eta squared never change;
+two conditions were never corrected. Choosing Greenhouse-Geisser on
+the Omnibus tab gives the old numbers. Checked against jamovi's
+Repeated Measures ANOVA under each of its three corrections on four
+datasets, a mixed design among them (`stats-judgment-check`,
+`spher-unit`). Affects: the Omnibus tab, the repeated-measures ANOVA
+bracket and a placed stat box on Repeated Measures charts with three
+or more conditions, both hosts. Implemented 2026-11-21. Not yet live
+on the web app.
+
 ## v3.3.0 (released 2026-11-14; deployment dates noted per change)
 
 **Automatic histogram bins no longer add a last bin for the largest value alone.** <!-- ledger: histogram-auto-bins-top-edge -->

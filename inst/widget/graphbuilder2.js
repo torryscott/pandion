@@ -2303,6 +2303,37 @@
             var x = 1 / (1 + (df1 / df2) * f);
             return this._incompleteBeta(x, df2 / 2, df1 / 2);
         },
+        // R pchisq(x, df, lower.tail = FALSE): the regularized upper
+        // incomplete gamma Q(df/2, x/2). A series below a + 1 and Lentz's
+        // continued fraction above it (the Numerical Recipes pair), on the
+        // same _logGamma that backs the beta functions. Used by Mauchly's
+        // test of sphericity.
+        chiSqSurvival: function (x, df) {
+            if (!(df > 0) || isNaN(x)) return NaN;
+            if (x <= 0) return 1;
+            if (x === Infinity) return 0;
+            var a = df / 2, xx = x / 2, gln = this._logGamma(a), i;
+            var lead = Math.exp(-xx + a * Math.log(xx) - gln);
+            if (xx < a + 1) {
+                var ap = a, sum = 1 / a, del = sum;
+                for (i = 0; i < 2000; i++) {
+                    ap += 1; del *= xx / ap; sum += del;
+                    if (Math.abs(del) < Math.abs(sum) * 1e-16) break;
+                }
+                return Math.min(1, Math.max(0, 1 - sum * lead));
+            }
+            var FPMIN = 1e-300, b = xx + 1 - a, c = 1 / FPMIN, d = 1 / b, h = d;
+            for (i = 1; i < 2000; i++) {
+                var an = -i * (i - a);
+                b += 2;
+                d = an * d + b; if (Math.abs(d) < FPMIN) d = FPMIN;
+                c = b + an / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+                d = 1 / d;
+                var dl = d * c; h *= dl;
+                if (Math.abs(dl - 1) < 1e-16) break;
+            }
+            return Math.min(1, Math.max(0, lead * h));
+        },
         // One-way ANOVA across k level-arrays (each an array of raw
         // values; non-finite entries dropped). Returns the omnibus
         // F-test plus eta-squared (SSB / SST), or null when fewer than
@@ -2453,17 +2484,84 @@
             // means. Their cross-product is the GG covariance numerator;
             // its common scaling cancels from epsilon. Normalize first to
             // avoid squaring very large or very small covariance entries.
-            var tr = 0, ss = 0;
-            if (maxError > 0) for (var a = 0; a < k; a++) for (var b = 0; b < k; b++) {
-                var cross = 0;
-                for (i = 0; i < errorRows.length; i++)
-                    cross += (errorRows[i][a] / maxError) * (errorRows[i][b] / maxError);
-                if (a === b) tr += cross;
-                ss += cross * cross;
+            var tr = 0, ss = 0, Em = [];
+            if (maxError > 0) for (var a = 0; a < k; a++) {
+                Em.push([]);
+                for (var b = 0; b < k; b++) {
+                    var cross = 0;
+                    for (i = 0; i < errorRows.length; i++)
+                        cross += (errorRows[i][a] / maxError) * (errorRows[i][b] / maxError);
+                    if (a === b) tr += cross;
+                    ss += cross * cross;
+                    Em[a].push(cross);
+                }
             }
             var eps = k === 2 ? 1 : (ss > 0 ? tr * tr / ((k - 1) * ss) : 1);
             eps = Math.min(1, Math.max(1 / (k - 1), eps));
-            return { rows: centered, z: z, cellMeans: cellMeans, sse: sse, eps: eps };
+            // The sphericity check (Nov 2026), from the same error cross-
+            // product: Mauchly's W and its p (R's mauchly.test, which is
+            // what jamovi prints), and the Huynh-Feldt epsilon (the car /
+            // afex formula on the between-subjects error df, capped at 1).
+            // With two conditions sphericity cannot fail, so there is no
+            // check. gg is the Greenhouse-Geisser epsilon above, unchanged.
+            var spher = null;
+            if (k >= 3 && maxError > 0 && ss > 0) {
+                var nCells = 0;
+                for (var ck in cells) {
+                    if (Object.prototype.hasOwnProperty.call(cells, ck)) nCells++;
+                }
+                var pp = k - 1, nu = N - nCells, r, c2, c3;
+                var Wm = NaN, pM = NaN;
+                if (nu >= pp && tr > 0) {
+                    // Orthonormal (Helmert) contrasts, M = C E C' scaled so
+                    // that its trace is pp: then W is simply det(M).
+                    var Cm = [];
+                    for (r = 1; r <= pp; r++) {
+                        var rowC = [], nrm = Math.sqrt(r * (r + 1));
+                        for (c2 = 0; c2 < k; c2++)
+                            rowC.push(c2 < r ? 1 / nrm : (c2 === r ? -r / nrm : 0));
+                        Cm.push(rowC);
+                    }
+                    var Ad = [], scl = tr / pp;
+                    for (r = 0; r < pp; r++) {
+                        Ad.push([]);
+                        for (c2 = 0; c2 < pp; c2++) {
+                            var s3 = 0;
+                            for (a = 0; a < k; a++) for (b = 0; b < k; b++)
+                                s3 += Cm[r][a] * Em[a][b] * Cm[c2][b];
+                            Ad[r].push(s3 / scl);
+                        }
+                    }
+                    var det = 1;
+                    for (r = 0; r < pp; r++) {
+                        var pv = r;
+                        for (c2 = r + 1; c2 < pp; c2++)
+                            if (Math.abs(Ad[c2][r]) > Math.abs(Ad[pv][r])) pv = c2;
+                        if (!(Math.abs(Ad[pv][r]) > 0)) { det = 0; break; }
+                        if (pv !== r) { var tmpR = Ad[r]; Ad[r] = Ad[pv]; Ad[pv] = tmpR; det = -det; }
+                        det *= Ad[r][r];
+                        for (c2 = r + 1; c2 < pp; c2++) {
+                            var fct = Ad[c2][r] / Ad[r][r];
+                            for (c3 = r; c3 < pp; c3++) Ad[c2][c3] -= fct * Ad[r][c3];
+                        }
+                    }
+                    if (det > 0 && isFinite(det)) {
+                        Wm = Math.min(1, det);
+                        var rho = 1 - (2 * pp * pp + pp + 2) / (6 * pp * nu);
+                        var w2 = (pp + 2) * (pp - 1) * (pp - 2) *
+                            (2 * pp * pp * pp + 6 * pp * pp + 3 * pp + 2) /
+                            (288 * Math.pow(nu * pp * rho, 2));
+                        var zM = -nu * rho * Math.log(Wm), fM = pp * (pp + 1) / 2 - 1;
+                        var P1 = this.chiSqSurvival(zM, fM), P2 = this.chiSqSurvival(zM, fM + 4);
+                        pM = Math.min(1, Math.max(0, P1 + w2 * (P2 - P1)));
+                    }
+                }
+                var hfDen = pp * (nu - pp * eps);
+                var hf = hfDen > 0 ? ((nu + 1) * pp * eps - 2) / hfDen : 1;
+                hf = Math.max(eps, Math.min(1, hf));
+                spher = { W: Wm, p: pM, gg: eps, hf: hf, nu: nu };
+            }
+            return { rows: centered, z: z, cellMeans: cellMeans, sse: sse, eps: eps, spher: spher };
         },
         // Full factorial residual SS is within-cell variation. Subtract a
         // cell observation before averaging, so tiny real residuals survive
@@ -16126,6 +16224,41 @@
             for (var o = 0; o < order.length; o++) out.push(byKey[order[o]]);
             return out;
         }
+        // ---- Sphericity correction choice (Nov 2026) -------------------
+        // data.rmSphericity (chartSpec-routed on Repeated Measures):
+        // "auto" (the default; absent or unknown = auto), "none", "gg",
+        // "hf". Automatic is the textbook rule: Huynh-Feldt when the
+        // Greenhouse-Geisser epsilon is above .75, Greenhouse-Geisser at
+        // .75 or below. It is graded by the estimate, never switched by a
+        // significance test, so sphericity is never assumed on the
+        // strength of a non-significant Mauchly's test. Two conditions
+        // cannot violate sphericity: the answer there is "none", eps 1.
+        function _rmSpherChoice() {
+            var v = (data && typeof data.rmSphericity === "string")
+                ? data.rmSphericity : "auto";
+            return (v === "none" || v === "gg" || v === "hf") ? v : "auto";
+        }
+        function _rmSpherPick(sp, choice) {
+            if (!sp) return { kind: "none", eps: 1 };
+            if (choice === "none") return { kind: "none", eps: 1 };
+            if (choice === "gg") return { kind: "gg", eps: sp.gg };
+            if (choice === "hf") return { kind: "hf", eps: sp.hf };
+            return (sp.gg > 0.75) ? { kind: "hf", eps: sp.hf }
+                                  : { kind: "gg", eps: sp.gg };
+        }
+        function _rmSpherApply(moments, k) {
+            var sp = (k >= 3 && moments && moments.spher) ? moments.spher : null;
+            var choice = _rmSpherChoice();
+            var pick = _rmSpherPick(sp, choice);
+            return { eps: pick.eps, kind: pick.kind, choice: choice,
+                     has: !!sp,
+                     W: sp ? sp.W : NaN, pW: sp ? sp.p : NaN,
+                     gg: sp ? sp.gg : 1, hf: sp ? sp.hf : 1 };
+        }
+        function _rmSpherName(kind) {
+            return kind === "hf" ? "Huynh-Feldt"
+                 : (kind === "none" ? "No" : "Greenhouse-Geisser");
+        }
         // ---- One-way repeated-measures ANOVA (pure RM, Jul 2026) -----
         // Subjects are joined across occasions by rowIds (the paired-
         // bracket convention): listwise complete — a subject counts only
@@ -16197,7 +16330,8 @@
             var sse = moments.sse, df1 = k - 1, df2 = (k - 1) * (n - 1);
             if (!(sse > 0) || !isFinite(sse) || df2 < 1)
                 return { ok: false, reason: "anova-degenerate" };
-            var F = (sstr / df1) / (sse / df2), eps = moments.eps;
+            var F = (sstr / df1) / (sse / df2);
+            var _sph = _rmSpherApply(moments, k), eps = _sph.eps;
             var df1c = eps * df1, df2c = eps * df2;
             var p = _gb2Stats.fSurvival(F, df1c, df2c);
             return {
@@ -16205,7 +16339,8 @@
                 testKind: "rmAnova",
                 testFamily: "anova",
                 res: { F: F, df1: df1c, df2: df2c, df1u: df1, df2u: df2,
-                       eps: eps, p: p, k: k, n: n },
+                       eps: eps, corr: _sph.kind, spher: _sph,
+                       p: p, k: k, n: n },
                 effect: sstr / (sstr + sse),
                 excludedHidden: _rmExHid,
                 effectKind: "etaSqP",
@@ -16357,8 +16492,9 @@
             var msErr = tw.sse / dfErr;
             var Focc = (tw.A.ss / dfOcc) / msErr;
             var Fint = (tw.AB.ss / dfInt) / msErr;
-            // GG eps from the POOLED within-group occasion covariance
-            var eps = moments.eps;
+            // The sphericity correction the chart asks for; its epsilons
+            // come from the POOLED within-group occasion covariance.
+            var _sph = _rmSpherApply(moments, k), eps = _sph.eps;
             var pOcc = _gb2Stats.fSurvival(Focc, eps * dfOcc, eps * dfErr);
             var pInt = _gb2Stats.fSurvival(Fint, eps * dfInt, eps * dfErr);
             return {
@@ -16374,7 +16510,7 @@
                     inter: { F: Fint, df1: eps * dfInt, df2: eps * dfErr,
                              df1u: dfInt, df2u: dfErr, p: pInt,
                              eta: tw.AB.ss / (tw.AB.ss + tw.sse) },
-                    eps: eps, k: k, G: G, n: N
+                    eps: eps, corr: _sph.kind, spher: _sph, k: k, G: G, n: N
                 },
                 excludedHidden: _mxExHid,
                 effectKind: "etaSqP",
@@ -16498,7 +16634,7 @@
                 dfErr = (N - nBC) * (k - 1);
             if (dfErr < 1 || !(thw.sse > 0)) return { ok: false, reason: "anova-degenerate" };
             var msErr = thw.sse / dfErr;
-            var eps = moments.eps;
+            var _sph = _rmSpherApply(moments, k), eps = _sph.eps;
             var wTerm = function (tm, dfN) {
                 var F = (tm.ss / dfN) / msErr;
                 return { F: F, df1: eps * dfN, df2: eps * dfErr,
@@ -16516,7 +16652,7 @@
                     grp: bTerm(twB.A), fac: bTerm(twB.B), gf: bTerm(twB.AB),
                     occ: wTerm(thw.A, dfOcc), og: wTerm(thw.AB, dfOG),
                     of: wTerm(thw.AC, dfOF), ogf: wTerm(thw.ABC, dfOGF),
-                    eps: eps, k: k, G: G, Fc: Fc, n: N
+                    eps: eps, corr: _sph.kind, spher: _sph, k: k, G: G, Fc: Fc, n: N
                 },
                 excludedHidden: _exHid,
                 effectKind: "etaSqP", effectSym: "η²p",
@@ -17529,7 +17665,7 @@
                                        : "");
                         if (typeof resForFmt.eps === "number" &&
                             resForFmt.eps < 0.9995) {
-                            _rmS += ", Greenhouse-Geisser corrected";
+                            _rmS += ", " + _rmSpherName(resForFmt.corr) + " corrected";
                         }
                         return _rmS;
                     }
@@ -52565,6 +52701,10 @@
             welchF: { name: "Welch's F", sym: "F", body: "A one-way ANOVA that does not assume the groups share one spread. Each group counts by its own precision, and the second degrees of freedom are estimated from the data, so they are rarely a whole number.", read: "Read it like the F above it: it asks whether the group means differ anywhere. When the groups' spreads differ a lot it is the safer of the two rows; when the spreads are similar the two rows nearly agree." },
             fStat: { name: "F statistic", sym: "F", body: "A ratio of effect-related variation to error variation. Larger F means the group or condition differences are large relative to the noise used for that test.", read: "A big F signals detectability, not importance; use an effect size to judge how large the difference is." },
             df: { name: "degrees of freedom", sym: "df", body: "How many values in the calculation are free to vary: depending on the test it tracks your sample size, the number of groups, or the size of the table. It sets the shape of the distribution the test uses.", read: "This is bookkeeping for the test, not a finding on its own." },
+            spherChoice: { name: "Sphericity correction", sym: "", body: "How the repeated-measures test allows for conditions whose differences do not vary equally. Automatic uses Huynh-Feldt when the Greenhouse-Geisser epsilon is above .75 and Greenhouse-Geisser at .75 or below. None leaves the degrees of freedom as they are, which is what jamovi shows unless a correction is ticked.", read: "Leave it on Automatic unless you need to match a particular report. None is safe only when epsilon is 1; the note under this control says when a choice does not suit the data, and why." },
+            mauchlyW: { name: "Mauchly's test of sphericity", sym: "W", body: "A check on the sphericity assumption of repeated-measures ANOVA: whether the differences between every pair of conditions vary about equally. W runs from 0 to 1, and 1 fits the assumption exactly.", read: "A small p says the data depart from sphericity. A large p does not prove they don't, especially in a small sample, which is why the correction goes by epsilon." },
+            epsGG: { name: "Greenhouse-Geisser epsilon", sym: "", body: "An estimate of how far the data are from sphericity, between 1/(k - 1) and 1 for k conditions. Both degrees of freedom are multiplied by it, which makes the p value larger.", read: "1 means no departure and no correction. The estimate runs a little low in small samples, so it is the one to use when epsilon is .75 or below, where the departure is large." },
+            epsHF: { name: "Huynh-Feldt epsilon", sym: "", body: "The Greenhouse-Geisser estimate adjusted upward for the number of subjects and conditions, because that estimate runs low when sphericity nearly holds. It is never smaller than Greenhouse-Geisser's and is capped at 1.", read: "1 means no correction is applied. It is the one to use when epsilon is above .75; below that it corrects too little." },
             omnibusEffect: { name: "Effect (the ANOVA term)", sym: "", body: "Which factor or term this row tests, such as the main effect of your grouping variable, or an interaction between two factors.", read: "A main effect is one factor's effect averaged over the levels of the other factor, not that factor acting by itself; an interaction means one factor's effect depends on the level of the other." },
             mainEffect: { name: "Main effect", sym: "", body: "One factor's overall effect: whether its levels differ on the outcome when you average over the other factor(s) in the design.", read: "A small p is evidence this factor's levels differ on average. When an interaction is significant, read a main effect with care: the factor's effect is not the same at every level of the other factor." },
             interactionEffect: { name: "Interaction", sym: "", body: "An interaction means that the pattern for one factor changes across the levels of another. In ANOVA terms, the factors are not simply additive on the outcome scale being analyzed.", read: "A small interaction p is evidence that the modeled difference is not the same at every level of the other factor. Examine the cell means or simple effects instead of relying only on overall main effects." },
@@ -54092,9 +54232,11 @@
             {g:3,n:"Main effect",y:"",m:["Compare"],s:["main effect"],b:"A main effect compares one factor's model-based averages after averaging over the levels of the other factor. It asks whether those marginal means differ; it does not mean the factor acts 'by itself.'",r:"A small p is evidence that those modeled averages are not all equal.",w:"A main effect is not a factor acting 'by itself.' Under interaction, averaging can conceal reversals or changing effects, so inspect cell means and simple effects."},
             {g:3,n:"Interaction",y:"",m:["Compare"],s:["interaction","moderation","it depends"],b:"An interaction means the effect of one factor depends on the level of the other factor. In plain terms, the pattern for one variable changes depending on the other variable.",r:"A small p for the interaction is evidence that one factor's effect changes across the levels of the other, so read each factor's effect within the levels of the other rather than on its own.",w:"A non-significant interaction is not proof the effect is truly constant across conditions; it just means you did not detect a difference in the pattern."},
             {g:3,n:"F statistic",y:"F",m:["Compare","RM"],s:["f","f ratio","f test"],b:"F compares the variation represented by an ANOVA term with the error variation used for that term. Larger F values mean the term is large relative to the model's noise.",r:"Interpret F with both degrees of freedom and its p value. A large F with a small p is evidence against the relevant null under the model, not proof of a real or important difference.",w:"F is not an effect size and different ANOVA terms can use different denominators, especially in repeated-measures designs."},
-            {g:3,n:"One-way repeated-measures ANOVA",y:"",m:["RM"],s:["repeated measures anova","rm anova","within subjects anova","occasions"],b:"A test of condition means when the same subjects are measured in every displayed condition. Pandion Plots uses subjects with complete data for all conditions and applies the Greenhouse-Geisser correction; with two conditions, F equals paired t squared.",r:"A small p is evidence that the condition means are not all equal. Use paired follow-up comparisons with a multiple-testing adjustment to find and estimate the differences.",w:"Subjects must be independent of one another and observations correctly paired. Greenhouse-Geisser addresses sphericity, not outliers, missing-data bias, carryover, or dependence between subjects."},
-            {g:3,n:"Greenhouse-Geisser correction",y:"eps",m:["RM"],s:["greenhouse geisser","gg","epsilon","sphericity correction"],b:"A correction for repeated-measures ANOVA when the sphericity assumption may not hold. Pandion Plots estimates a number called epsilon and uses it to reduce both degrees of freedom before calculating the p value.",r:"For k repeated conditions, epsilon lies between 1/(k - 1) and 1. Values below 1 produce a more conservative test; epsilon = 1 leaves the degrees of freedom unchanged.",w:"Epsilon is an estimated correction factor, not a test result or an effect size. Automatic correction does not repair other design or model problems."},
-            {g:3,n:"Sphericity",y:"",m:["RM"],s:["sphericity","mauchly","assumption"],b:"An assumption of repeated-measures ANOVA: the differences between every pair of conditions should have roughly equal variances. When it does not hold, the ordinary test can flag differences too readily, which is why the Greenhouse-Geisser correction exists.",r:"You do not read a number here; a lower epsilon on the ANOVA line means a stronger correction is being applied.",w:""},
+            {g:3,n:"One-way repeated-measures ANOVA",y:"",m:["RM"],s:["repeated measures anova","rm anova","within subjects anova","occasions"],b:"A test of condition means when the same subjects are measured in every displayed condition. Pandion Plots uses subjects with complete data for all conditions and applies a sphericity correction chosen by epsilon (Huynh-Feldt above .75, Greenhouse-Geisser at .75 or below); with two conditions, F equals paired t squared.",r:"A small p is evidence that the condition means are not all equal. Use paired follow-up comparisons with a multiple-testing adjustment to find and estimate the differences.",w:"Subjects must be independent of one another and observations correctly paired. A sphericity correction addresses sphericity, not outliers, missing-data bias, carryover, or dependence between subjects."},
+            {g:3,n:"Greenhouse-Geisser correction",y:"eps",m:["RM"],s:["greenhouse geisser","gg","epsilon","sphericity correction"],b:"A correction for repeated-measures ANOVA when the sphericity assumption may not hold. A number called epsilon is estimated from the data and multiplies both degrees of freedom before the p value is calculated. On the Automatic setting Pandion Plots uses it when epsilon is .75 or below.",r:"For k repeated conditions, epsilon lies between 1/(k - 1) and 1. Values below 1 produce a more conservative test; epsilon = 1 leaves the degrees of freedom unchanged.",w:"Epsilon is an estimated correction factor, not a test result or an effect size. The estimate runs low in small samples, so this correction is too cautious when sphericity nearly holds; Huynh-Feldt is used there. No correction repairs other design or model problems."},
+            {g:3,n:"Huynh-Feldt correction",y:"eps",m:["RM"],s:["huynh feldt","hf","epsilon","sphericity correction"],b:"A sphericity correction for repeated-measures ANOVA that adjusts the Greenhouse-Geisser epsilon upward, because that estimate runs low when sphericity nearly holds. The adjusted epsilon is capped at 1, where nothing is corrected. On the Automatic setting Pandion Plots uses it when the Greenhouse-Geisser epsilon is above .75.",r:"An epsilon of 1.00 means the result equals the uncorrected test, the one jamovi shows by default.",w:"It corrects too little when sphericity is badly off, which is why Greenhouse-Geisser takes over at .75 and below."},
+            {g:3,n:"Mauchly's test",y:"W",m:["RM"],s:["mauchly","mauchlys test","mauchly's test","sphericity test"],b:"A test of the sphericity assumption of repeated-measures ANOVA, shown on the Omnibus tab with three or more conditions. W runs from 0 to 1, and values near 1 fit the assumption.",r:"A small p says the data depart from sphericity.",w:"A large p does not prove sphericity holds. In a small sample the test misses real departures, and in a large one it flags trivial ones, so Pandion Plots shows it for information and chooses the correction by epsilon."},
+            {g:3,n:"Sphericity",y:"",m:["RM"],s:["sphericity","mauchly","assumption"],b:"An assumption of repeated-measures ANOVA: the differences between every pair of conditions should have roughly equal variances. When it does not hold, the ordinary test can flag differences too readily, which is why the Greenhouse-Geisser and Huynh-Feldt corrections exist.",r:"The Omnibus tab shows Mauchly's test and two epsilons. Epsilon is the number to read: 1 means no departure, and a lower epsilon means a stronger correction. The Sphericity choice there sets which correction is applied.",w:"A non-significant Mauchly's test is not proof of sphericity. With only two conditions sphericity cannot fail, and nothing is corrected."},
             {g:3,n:"Cousineau-Morey within-subject error correction",y:"",m:["RM"],s:["cousineau morey","within subject error","error bars repeated","cm correction"],b:"An error-bar method for repeated-measures data. Pandion Plots first removes each subject's overall level across the displayed conditions, then applies Morey's correction before computing SD, SE, or a confidence interval. The plotted mean itself does not change.",r:"The bars reduce stable person-to-person differences and summarize normalized condition-level spread or uncertainty. They can be wider or narrower than ordinary bars.",w:"These are not error bars for a particular pairwise difference, not a measure of how reliably each person changed, and not suitable for comparing independent groups. Bar overlap is not a general significance test."},
             {g:4,n:"None (no correction)",y:"",m:["Compare","RM","Freq"],s:["no correction","uncorrected","none"],b:"With no correction, each test keeps its own p value and alpha without accounting for the rest of the family. If several null hypotheses are true, the chance of at least one false positive is usually greater than the per-test alpha.",r:"Use unadjusted results only when the tests genuinely stand alone under the analysis plan, or when controlling a family-level error rate is not the goal.",w:"Calling results exploratory does not make the accumulated false-positive risk disappear; disclose the number and selection of tests."},
             {g:4,n:"Bonferroni",y:"",m:["Compare","RM","Freq","Corr"],s:["bonferroni","strict correction"],b:"Bonferroni limits the chance of one or more false positives across a chosen family to no more than alpha. It does this by multiplying each p value by the number of tests, up to 1, which is equivalent to dividing alpha by that number. The guarantee does not require independent tests.",r:"Compare the adjusted p values with the original alpha and report what counted as the family.",w:"It controls an error probability; it does not guarantee zero false positives. Its conservatism can reduce power, especially with many dependent tests."},
@@ -56984,8 +57126,10 @@
                     if (mx2 && mx2.ok) {
                         var m2 = mx2.res;
                         oLines.subjUsed = m2.n;
+                        oLines.spher = { sp: m2.spher, F: m2.occ.F, df1u: m2.occ.df1u,
+                                         df2u: m2.occ.df2u, mixed: true };
                         var gg2 = (m2.eps < 0.9995)
-                            ? ", Greenhouse-Geisser (eps = " + _stStrip0(m2.eps) + ")"
+                            ? ", " + _rmSpherName(m2.corr) + " (eps = " + _stStrip0(m2.eps) + ")"
                             : "";
                         var gN2 = mx2.groupLabel, fN2 = mx2.facetLabel;
                         var mkB2 = function (nm, tm) {
@@ -57026,8 +57170,10 @@
                     if (mxR && mxR.ok) {
                         var mr = mxR.res;
                         oLines.subjUsed = mr.n;
+                        oLines.spher = { sp: mr.spher, F: mr.occ.F, df1u: mr.occ.df1u,
+                                         df2u: mr.occ.df2u, mixed: true };
                         var ggTail = (mr.eps < 0.9995)
-                            ? ", Greenhouse-Geisser (eps = " + _stStrip0(mr.eps) + ")"
+                            ? ", " + _rmSpherName(mr.corr) + " (eps = " + _stStrip0(mr.eps) + ")"
                             : "";
                         var bName2 = mxR.groupLabel;
                         oLines.push("Main effect of " + bName2 + ": F(" +
@@ -57059,12 +57205,14 @@
                 if (rawR && rawR.ok) {
                     var rr = rawR.res;
                     oLines.subjUsed = rr.n;
+                    oLines.spher = { sp: rr.spher, F: rr.F, df1u: rr.df1u,
+                                     df2u: rr.df2u, mixed: false };
                     var line = "Main effect of " + _stOccName() + ": F(" +
                         dfF(rr.df1) + ", " + dfF(rr.df2) + ") = " +
                         rr.F.toFixed(2) + ", " + _stP(rr.p) + ", " +
                         rawR.effectSym + " = " + _stStrip0(rawR.effect);
                     if (typeof rr.eps === "number" && rr.eps < 0.9995) {
-                        line += ", Greenhouse-Geisser (eps = " +
+                        line += ", " + _rmSpherName(rr.corr) + " (eps = " +
                             _stStrip0(rr.eps) + ")";
                     }
                     oLines.push(line);
@@ -59003,6 +59151,101 @@
                           '<option value="omega"' + (omniEff === "omega" ? ' selected' : '') + '>Omega² (ω²)</option>' +
                           '</select></span></div>'
                         : "";
+                    // Sphericity (repeated measures with three or more
+                    // conditions): the choice, the check and a note that
+                    // reads the data against the choice (Nov 2026).
+                    var spherHtml = "", spherCorrName = "Greenhouse-Geisser";
+                    var spherInfo = (mk === "rm" && oLines.spher && oLines.spher.sp &&
+                        oLines.spher.sp.has) ? oLines.spher : null;
+                    if (spherInfo) {
+                        var sS = spherInfo.sp;
+                        spherCorrName = _rmSpherName(sS.kind);
+                        var sDf = function (dv) {
+                            return (Math.abs(dv - Math.round(dv)) < 1e-9)
+                                ? String(Math.round(dv)) : dv.toFixed(2);
+                        };
+                        var sRes = function (e) {
+                            return "F(" + sDf(e * spherInfo.df1u) + ", " + sDf(e * spherInfo.df2u) +
+                                ") = " + spherInfo.F.toFixed(2) + ", " +
+                                _stP(_gb2Stats.fSurvival(spherInfo.F, e * spherInfo.df1u, e * spherInfo.df2u));
+                        };
+                        var sE = function (v) { return _stStrip0(v, 3); };
+                        var sAuto = _rmSpherPick({ gg: sS.gg, hf: sS.hf }, "auto");
+                        var sAutoFlat = !(sAuto.eps < 0.9995);
+                        var sWhat = spherInfo.mixed ? "the within-subject rows reach" : "this test reaches";
+                        var sState, sWarn = false, sNote;
+                        if (sS.choice === "auto") {
+                            if (sAutoFlat) {
+                                sState = "auto-flat";
+                                sNote = "No correction was needed: Huynh-Feldt's epsilon is 1.00.";
+                            } else if (sAuto.kind === "hf") {
+                                sState = "auto-hf";
+                                sNote = "Automatic used Huynh-Feldt (epsilon = " + sE(sS.hf) +
+                                    "). The departure from sphericity is small, where Greenhouse-Geisser would be too cautious.";
+                            } else {
+                                sState = "auto-gg";
+                                sNote = "Automatic used Greenhouse-Geisser (epsilon = " + sE(sS.gg) +
+                                    "). The departure from sphericity is large, where Huynh-Feldt would correct too little.";
+                            }
+                        } else if (sS.choice === "none") {
+                            if (sAutoFlat) {
+                                sState = "none-flat";
+                                sNote = "No correction is applied, and none was needed: Huynh-Feldt's epsilon is 1.00.";
+                            } else {
+                                sWarn = true;
+                                sState = (sAuto.kind === "gg") ? "none-large" : "none-small";
+                                sNote = "Without a correction " + sWhat + " significance " +
+                                    (sAuto.kind === "gg" ? "too easily" : "a little too easily") +
+                                    " here (epsilon = " + sE(sS.gg) +
+                                    ((isFinite(sS.pW) && sS.pW < 0.05) ? ", Mauchly's " + _stP(sS.pW) : "") +
+                                    "). Automatic gives " + sRes(sAuto.eps) + ".";
+                            }
+                        } else if (sS.choice === "gg") {
+                            if (sAuto.kind === "gg") {
+                                sState = "gg-same";
+                                sNote = "Same as Automatic for these data: epsilon is " + sE(sS.gg) + ", at or below .75.";
+                            } else {
+                                sWarn = true;
+                                sState = "gg-cautious";
+                                sNote = "Epsilon is above .75 (" + sE(sS.gg) +
+                                    "), where Greenhouse-Geisser is a little too cautious. Automatic " +
+                                    (sAutoFlat ? "applies no correction" : "uses Huynh-Feldt") +
+                                    " here: " + sRes(sAuto.eps) + ".";
+                            }
+                        } else {
+                            if (sAuto.kind === "hf") {
+                                sState = "hf-same";
+                                sNote = "Same as Automatic for these data: epsilon is " + sE(sS.gg) + ", above .75.";
+                            } else {
+                                sWarn = true;
+                                sState = "hf-generous";
+                                sNote = "Epsilon is .75 or below (" + sE(sS.gg) +
+                                    "), where Huynh-Feldt corrects too little. Automatic uses Greenhouse-Geisser here: " +
+                                    sRes(sAuto.eps) + ".";
+                            }
+                        }
+                        var sOpt = function (v, lbl) {
+                            return '<option value="' + v + '"' + (sS.choice === v ? ' selected' : '') + '>' + lbl + '</option>';
+                        };
+                        spherHtml =
+                            '<div data-role="spher-band" style="display:flex;align-items:center;column-gap:12px;row-gap:4px;flex-wrap:wrap;margin:0 0 6px;padding:5px 8px;background:#f7f8fa;border:1px solid #eee;border-radius:4px;">' +
+                            '<span style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap;">' +
+                            '<span style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#666;font-weight:600;">' +
+                            _stTerm("Sphericity", "spherChoice") + '</span>' +
+                            '<select data-st-act="omnispher" aria-label="Sphericity correction" style="font-size:10.5px;padding:2px 4px;border:1px solid #aaa;border-radius:3px;font-family:var(--gb2-ui-font);">' +
+                            sOpt("auto", "Automatic") + sOpt("none", "None") +
+                            sOpt("gg", "Greenhouse-Geisser") + sOpt("hf", "Huynh-Feldt") +
+                            '</select></span>' +
+                            '<span data-role="spher-check" style="font-size:10.5px;color:#444;">' +
+                            _stTerm("Mauchly's W", "mauchlyW") + ' = ' + sE(sS.W) +
+                            (isFinite(sS.pW) ? ', ' + _stEsc(_stP(sS.pW)) : '') +
+                            '. Epsilon: ' + _stTerm("Greenhouse-Geisser", "epsGG") + ' ' + sE(sS.gg) +
+                            ', ' + _stTerm("Huynh-Feldt", "epsHF") + ' ' + sE(sS.hf) + '.</span></div>' +
+                            '<div data-role="spher-note" data-spher-state="' + sState + '" style="font-size:10.5px;line-height:1.45;margin:0 0 8px;' +
+                            (sWarn
+                                ? 'padding:5px 8px;background:#fff7e6;border:1px solid #f0d9a8;border-radius:4px;color:#5a4200;'
+                                : 'color:#444;') + '">' + _stEsc(sNote) + '</div>';
+                    }
                     var omniFaceted = (typeof data.facetSeparator === "string" && data.facetSeparator &&
                         bars.length && typeof bars[0].x === "string" &&
                         bars[0].x.indexOf(data.facetSeparator) >= 0);
@@ -59011,7 +59254,7 @@
                         var _rmFacF = false;
                         try { _rmFacF = _stRmFaceted(); } catch (_eRfF) {}
                         if (data.hasGroups && _rmFacF) {
-                            omniFoot = "Three-way mixed (split-plot) ANOVA over the visible chart: " + _stOccName() + " is the within-subjects factor (the chart's X axis - each level is one measurement of the same subjects); the grouping variable and the panels variable are both between subjects. Between rows are tested against subjects-within-cells; the within rows share the within-subject error (Greenhouse-Geisser corrected). Partial eta-squared uses each row's own error term. Subjects need complete data across the visible levels (listwise).";
+                            omniFoot = "Three-way mixed (split-plot) ANOVA over the visible chart: " + _stOccName() + " is the within-subjects factor (the chart's X axis - each level is one measurement of the same subjects); the grouping variable and the panels variable are both between subjects. Between rows are tested against subjects-within-cells; the within rows share the within-subject error. Partial eta-squared uses each row's own error term. Subjects need complete data across the visible levels (listwise).";
                         } else if (data.hasGroups || _rmFacF) {
                             omniFoot = "Mixed (split-plot) ANOVA over the visible chart: " + _stOccName() + " is the within-subjects factor (the chart's X axis - each level is one measurement of the same subjects); " + (data.hasGroups ? "the grouping variable" : "the panels variable") + " is between subjects. The between row is tested against subjects-within-groups; the within and interaction rows share the within-subject error. Partial eta-squared uses each row's own error term. Subjects need complete data across the visible levels (listwise).";
                         } else {
@@ -59067,7 +59310,7 @@
                     };
                     for (var ol2 = 0; ol2 < oLines.length; ol2++) {
                         var mLn = oLines[ol2].match(
-                            /^(.*): F\(([0-9.]+), ([0-9.]+)\) = ([-0-9.]+), (p [=<] [.0-9]+), ([^=]+) = ([-.0-9]+)(, Greenhouse-Geisser \(eps = ([.0-9]+)\))?$/);
+                            /^(.*): F\(([0-9.]+), ([0-9.]+)\) = ([-0-9.]+), (p [=<] [.0-9]+), ([^=]+) = ([-.0-9]+)(, (?:Greenhouse-Geisser|Huynh-Feldt) \(eps = ([.0-9]+)\))?$/);
                         if (!mLn) { omniPlain.push(oLines[ol2]); continue; }
                         if (!omniSym) omniSym = mLn[6].trim();
                         if (mLn[9]) omniGG = mLn[9];
@@ -59167,7 +59410,7 @@
                                 : "these F tests assume the groups share one spread, so read them with that in mind.");
                     }
                     omniCardHtml = _stCard("",
-                        effSel +
+                        effSel + spherHtml +
                         (omniRows.length
                             ? _stTable([{ html: _stTerm("Effect", "omnibusEffect") }, { html: _stTerm("F", "fStat") }, { html: _stTerm("df", "df") }, { html: _stTerm("p", "p") },
                                         // the th uppercase transform turns
@@ -59180,9 +59423,26 @@
                         _stFoot(omniFoot + omniSpread +
                             (omniGG
                                 ? ((mk === "rm" && data.hasGroups)
-                                    ? " The within-subject rows (" + _stOccName() + " + its interactions) are Greenhouse-Geisser-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
-                                    : " Degrees of freedom are Greenhouse-Geisser-corrected (eps = " + omniGG + ").")
-                                : "")));
+                                    ? " The within-subject rows (" + _stOccName() + " + its interactions) are " + spherCorrName + "-corrected (eps = " + omniGG + "); the between-subjects rows need no sphericity correction."
+                                    : " Degrees of freedom are " + spherCorrName + "-corrected (eps = " + omniGG + ").")
+                                // A correction switched off by hand is part
+                                // of the record a kept or copied table needs.
+                                : ((spherInfo && spherInfo.sp.choice === "none")
+                                    ? " No sphericity correction is applied."
+                                    : ""))));
+                    wire.push(["omnispher", function (selS) {
+                        selS.addEventListener("change", function () {
+                            var sv = selS.value;
+                            data.rmSphericity = sv;
+                            if (hasSetOption) {
+                                try { _setOption("rmSphericity", sv); } catch (_eSs) {}
+                            }
+                            // Bracket labels and a placed stat box recompute
+                            // per draw, so they follow the choice too.
+                            try { redraw(); } catch (_eSr) {}
+                            renderInspectorStats(body);
+                        });
+                    }]);
                     wire.push(["omnieff", function (sel3) {
                         sel3.addEventListener("change", function () {
                             window.__gb2_statsOmniEff = sel3.value;
@@ -97970,7 +98230,7 @@
                                ") = " + r.res.F.toFixed(2));
                     if (r.testKind === "rmAnova") {
                         if (typeof r.res.eps === "number" && r.res.eps < 0.9995) {
-                            lines.push("Greenhouse-Geisser eps = " +
+                            lines.push(_rmSpherName(r.res.corr) + " eps = " +
                                        r.res.eps.toFixed(2).replace(/^0/, "") +
                                        "  (sphericity correction)");
                         }
@@ -102315,7 +102575,7 @@
                 if (_findHasOmni) {
                     add("stats.omnibus", "Omnibus tests", "Statistics \u203a Omnibus",
                         (mk === "rm"
-                            ? "anova analysis variance f test overall global main effect interaction factorial repeated measures mixed split plot within subjects between subjects greenhouse geisser sphericity eta squared partial eta omega effect size"
+                            ? "anova analysis variance f test overall global main effect interaction factorial repeated measures mixed split plot within subjects between subjects greenhouse geisser huynh feldt mauchly sphericity epsilon eta squared partial eta omega effect size"
                             : "anova analysis variance f test overall global main effect interaction factorial one way two way three way eta squared partial eta omega effect size"),
                         "stats", prepStats("omnibus"), '[data-st-act="omnieff"], [data-st-pane="omnibus"]', true);
                 }

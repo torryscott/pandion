@@ -388,10 +388,14 @@ corr_refs <- function(x, y) {
 }
 
 rm_omni_ref <- function(mat) {
-    # One-way repeated-measures ANOVA with Greenhouse-Geisser, computed
-    # from first principles: SS decomposition over the complete-case
-    # subject x occasion matrix, eps from the double-centered occasion
-    # covariance (clamped to [1/(k-1), 1]), corrected dfs and p, and
+    # One-way repeated-measures ANOVA with the default (Automatic)
+    # sphericity correction, computed from first principles: SS
+    # decomposition over the complete-case subject x occasion matrix, the
+    # Greenhouse-Geisser eps from the double-centered occasion covariance
+    # (clamped to [1/(k-1), 1]), the Huynh-Feldt eps from it (the car /
+    # jamovi formula on the n - 1 error df, capped at 1), Huynh-Feldt applied
+    # when the Greenhouse-Geisser eps is above .75 and Greenhouse-Geisser
+    # otherwise, nothing with two occasions, then corrected dfs and p, and
     # partial eta squared - the widget's exact display contract.
     X <- do.call(cbind, mat)
     X <- X[stats::complete.cases(X), , drop = FALSE]
@@ -410,6 +414,14 @@ rm_omni_ref <- function(mat) {
     Sc <- sweep(sweep(S, 1, rowMeans(S)), 2, colMeans(S)) + mean(S)
     eps <- sum(diag(Sc))^2 / ((k - 1) * sum(Sc^2))
     eps <- min(1, max(eps, 1 / (k - 1)))
+    if (k < 3) {
+        eps <- 1
+    } else if (eps > 0.75) {
+        nu <- n - 1; pp <- k - 1
+        den <- pp * (nu - pp * eps)
+        hf <- if (den > 0) ((nu + 1) * pp * eps - 2) / den else 1
+        eps <- max(eps, min(1, hf))
+    }
     list(F = num_or_null(F_),
          df1 = df1 * eps, df2 = df2 * eps, eps = eps,
          p = num_or_null(stats::pf(F_, df1 * eps, df2 * eps, lower.tail = FALSE)),

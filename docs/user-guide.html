@@ -953,7 +953,7 @@ control, is identical in both.</div>
 <ul>
 <li data-channel="jamovi"><b>Crossed within-subjects factors</b> (jamovi only): put the occasion columns in <b>Repeated Measures Cells</b> and name the factors in <b>Repeated Measures Factors</b>, and two within-subjects factors share one chart, one along the axis and one as colored series.</li>
 <li><b>Per-subject overlays</b> ("+" menu): <b>Data points</b> shows every subject's raw values; <b>Connect subjects</b> draws each person's own line across occasions ("spaghetti"), so you can see whether individuals follow the average trend.</li>
-<li><b>Paired and mixed tests by design.</b> Significance brackets between occasions default to a paired t-test, joined subject-by-subject. The Statistics panel's Omnibus tab reports repeated-measures effects for within-subject designs and mixed (split-plot) effects when supported between-subject factors or panels are present; within-subject rows use the Greenhouse-Geisser correction when needed.</li>
+<li><b>Paired and mixed tests by design.</b> Significance brackets between occasions default to a paired t-test, joined subject-by-subject. The Statistics panel's Omnibus tab reports repeated-measures effects for within-subject designs and mixed (split-plot) effects when supported between-subject factors or panels are present; within-subject rows carry a sphericity correction chosen from the data (see <a href="#sphericity">Sphericity on the Omnibus tab</a>).</li>
 <li>Box / violin / raincloud show each occasion's full distribution.</li>
 <li>The Y-axis title starts <i>empty</i> on purpose, as a nudge to name your measure (the Check graph tab reminds you until you do).</li>
 </ul>
@@ -1259,7 +1259,7 @@ control, is identical in both.</div>
 <p>The toolbar <b>Σ</b> button opens the numbers behind the chart, with tabs per analysis:</p>
 <div class="tablewrap"><table>
 <tr><th>Analysis</th><th>Tabs</th><th>Highlights</th></tr>
-<tr><td>Compare Groups / Repeated Measures</td><td>Compare pairs · Omnibus · Descriptives</td><td>Every pairwise test with corrections and one-click bracket placement; supported one- to three-factor ANOVA effects, including repeated-measures and mixed (split-plot) effects with Greenhouse-Geisser correction on within-subject rows when needed; full descriptives (N, mean, median, mode, SD, SE, and the confidence-interval bounds).</td></tr>
+<tr><td>Compare Groups / Repeated Measures</td><td>Compare pairs · Omnibus · Descriptives</td><td>Every pairwise test with corrections and one-click bracket placement; supported one- to three-factor ANOVA effects, including repeated-measures and mixed (split-plot) effects with a sphericity correction on within-subject rows (Automatic, None, Greenhouse-Geisser or Huynh-Feldt); full descriptives (N, mean, median, mode, SD, SE, and the confidence-interval bounds).</td></tr>
 <tr><td>Frequencies</td><td>Chi-square · Pairwise · Counts</td><td>χ² with plain-language "biggest departure" lines; Holm-adjusted pairwise proportions; raw counts with per-panel percents.</td></tr>
 <tr><td>Distribution</td><td>Normality · Descriptives · Frequency table</td><td>Shapiro-Wilk per cell with careful verdict copy; mean, median, mode, spread, skew / kurtosis; the classic sortable class-interval table (histogram types).</td></tr>
 <tr><td>Scatter</td><td>Correlation + fit (per cell)</td><td>A <b>Method</b> selector (Pearson r / Spearman ρ / Kendall τ-b) sets what the table reports; only the selected method's columns are shown, alongside N and the linear slope and R², per group × panel. Pearson adds a Fisher-z confidence interval.</td></tr>
@@ -1290,6 +1290,16 @@ control, is identical in both.</div>
 <li><b>Tick the rows you want on the figure</b>, then click <b>Place brackets</b>: brackets are drawn collision-free, tiered above the data, expanding the axis if needed. The ▾ half of the button picks the label style (Asterisks, p value, p + effect size, or Full APA) and re-labels already-placed brackets live. <b>Clear placed</b> removes only the auto-placed set; hand-made brackets are never touched.</li>
 </ol>
 <p>Rows are grouped into sections ("Within Ctrl", "Across x", "Mixed pairs") with per-section significant counts; section headers fold; sorting by chart order or by p is one click on the column headers.</p>
+
+<h3 id="sphericity">Sphericity on the Omnibus tab</h3>
+<p>A repeated-measures ANOVA assumes <b>sphericity</b>: the differences between every pair of conditions vary about equally. When they do not, the uncorrected test reaches significance too easily. With three or more conditions, the Omnibus tab on Repeated Measures shows a <b>Sphericity</b> choice, a check line, and a note about the choice in force.</p>
+<ul>
+<li><b>The check line</b> shows Mauchly's W and its p, and two estimates of epsilon (Greenhouse-Geisser and Huynh-Feldt). These are the numbers in jamovi's Tests of Sphericity table. Epsilon is the one to read: 1 means no departure, and a lower value means the data are further from sphericity.</li>
+<li><b>Automatic</b> (the default) follows the textbook rule: Huynh-Feldt when the Greenhouse-Geisser epsilon is above .75, and Greenhouse-Geisser at .75 or below. Each is used where it is the more accurate of the two. When Huynh-Feldt's epsilon is 1.00 nothing is corrected, and the result equals the uncorrected test.</li>
+<li><b>None</b> leaves the degrees of freedom as they are. This is the row jamovi shows unless a correction is ticked under Assumption Checks. <b>Greenhouse-Geisser</b> and <b>Huynh-Feldt</b> apply that correction whatever epsilon is.</li>
+<li><b>The note</b> says what Automatic did and why. If you pick a correction by hand that does not suit the data, it says so and gives the result Automatic would show.</li>
+</ul>
+<p><b>What to do when:</b> leave it on Automatic unless you need to match a particular report or a jamovi table. A non-significant Mauchly's test is not proof of sphericity (in a small sample it misses real departures), which is why the correction goes by epsilon and not by that test. The choice is saved with the chart, and a repeated-measures ANOVA bracket, a placed stat box and a kept or copied table follow it. With two conditions sphericity cannot fail, so there is nothing to choose.</p>
 
 <h3 id="brackets">Significance brackets</h3>
 <p>Add one from the "+" menu, then drag each bracket <b>leg onto a bar</b> to anchor which two cells it compares. The bracket's Stats tab computes a real test from your raw data:</p>
@@ -1631,20 +1641,33 @@ control, is identical in both.</div>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>One-way repeated-measures ANOVA</b><span style="color:#666;font-size:.85em"> · RM</span></p>
-<p style="margin:2px 0">A test of condition means when the same subjects are measured in every displayed condition. Pandion Plots uses subjects with complete data for all conditions and applies the Greenhouse-Geisser correction; with two conditions, F equals paired t squared.</p>
+<p style="margin:2px 0">A test of condition means when the same subjects are measured in every displayed condition. Pandion Plots uses subjects with complete data for all conditions and applies a sphericity correction chosen by epsilon (Huynh-Feldt above .75, Greenhouse-Geisser at .75 or below); with two conditions, F equals paired t squared.</p>
 <p style="margin:2px 0"><b>How to read it.</b> A small p is evidence that the condition means are not all equal. Use paired follow-up comparisons with a multiple-testing adjustment to find and estimate the differences.</p>
-<p style="margin:2px 0"><b>Common misread.</b> Subjects must be independent of one another and observations correctly paired. Greenhouse-Geisser addresses sphericity, not outliers, missing-data bias, carryover, or dependence between subjects.</p>
+<p style="margin:2px 0"><b>Common misread.</b> Subjects must be independent of one another and observations correctly paired. A sphericity correction addresses sphericity, not outliers, missing-data bias, carryover, or dependence between subjects.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Greenhouse-Geisser correction</b> <span style="color:#666;font-weight:400">(eps)</span><span style="color:#666;font-size:.85em"> · RM</span></p>
-<p style="margin:2px 0">A correction for repeated-measures ANOVA when the sphericity assumption may not hold. Pandion Plots estimates a number called epsilon and uses it to reduce both degrees of freedom before calculating the p value.</p>
+<p style="margin:2px 0">A correction for repeated-measures ANOVA when the sphericity assumption may not hold. A number called epsilon is estimated from the data and multiplies both degrees of freedom before the p value is calculated. On the Automatic setting Pandion Plots uses it when epsilon is .75 or below.</p>
 <p style="margin:2px 0"><b>How to read it.</b> For k repeated conditions, epsilon lies between 1/(k - 1) and 1. Values below 1 produce a more conservative test; epsilon = 1 leaves the degrees of freedom unchanged.</p>
-<p style="margin:2px 0"><b>Common misread.</b> Epsilon is an estimated correction factor, not a test result or an effect size. Automatic correction does not repair other design or model problems.</p>
+<p style="margin:2px 0"><b>Common misread.</b> Epsilon is an estimated correction factor, not a test result or an effect size. The estimate runs low in small samples, so this correction is too cautious when sphericity nearly holds; Huynh-Feldt is used there. No correction repairs other design or model problems.</p>
+</div>
+<div class="glossentry" style="margin:0 0 14px">
+<p style="margin:10px 0 2px"><b>Huynh-Feldt correction</b> <span style="color:#666;font-weight:400">(eps)</span><span style="color:#666;font-size:.85em"> · RM</span></p>
+<p style="margin:2px 0">A sphericity correction for repeated-measures ANOVA that adjusts the Greenhouse-Geisser epsilon upward, because that estimate runs low when sphericity nearly holds. The adjusted epsilon is capped at 1, where nothing is corrected. On the Automatic setting Pandion Plots uses it when the Greenhouse-Geisser epsilon is above .75.</p>
+<p style="margin:2px 0"><b>How to read it.</b> An epsilon of 1.00 means the result equals the uncorrected test, the one jamovi shows by default.</p>
+<p style="margin:2px 0"><b>Common misread.</b> It corrects too little when sphericity is badly off, which is why Greenhouse-Geisser takes over at .75 and below.</p>
+</div>
+<div class="glossentry" style="margin:0 0 14px">
+<p style="margin:10px 0 2px"><b>Mauchly's test</b> <span style="color:#666;font-weight:400">(W)</span><span style="color:#666;font-size:.85em"> · RM</span></p>
+<p style="margin:2px 0">A test of the sphericity assumption of repeated-measures ANOVA, shown on the Omnibus tab with three or more conditions. W runs from 0 to 1, and values near 1 fit the assumption.</p>
+<p style="margin:2px 0"><b>How to read it.</b> A small p says the data depart from sphericity.</p>
+<p style="margin:2px 0"><b>Common misread.</b> A large p does not prove sphericity holds. In a small sample the test misses real departures, and in a large one it flags trivial ones, so Pandion Plots shows it for information and chooses the correction by epsilon.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Sphericity</b><span style="color:#666;font-size:.85em"> · RM</span></p>
-<p style="margin:2px 0">An assumption of repeated-measures ANOVA: the differences between every pair of conditions should have roughly equal variances. When it does not hold, the ordinary test can flag differences too readily, which is why the Greenhouse-Geisser correction exists.</p>
-<p style="margin:2px 0"><b>How to read it.</b> You do not read a number here; a lower epsilon on the ANOVA line means a stronger correction is being applied.</p>
+<p style="margin:2px 0">An assumption of repeated-measures ANOVA: the differences between every pair of conditions should have roughly equal variances. When it does not hold, the ordinary test can flag differences too readily, which is why the Greenhouse-Geisser and Huynh-Feldt corrections exist.</p>
+<p style="margin:2px 0"><b>How to read it.</b> The Omnibus tab shows Mauchly's test and two epsilons. Epsilon is the number to read: 1 means no departure, and a lower epsilon means a stronger correction. The Sphericity choice there sets which correction is applied.</p>
+<p style="margin:2px 0"><b>Common misread.</b> A non-significant Mauchly's test is not proof of sphericity. With only two conditions sphericity cannot fail, and nothing is corrected.</p>
 </div>
 <div class="glossentry" style="margin:0 0 14px">
 <p style="margin:10px 0 2px"><b>Cousineau-Morey within-subject error correction</b><span style="color:#666;font-size:.85em"> · RM</span></p>

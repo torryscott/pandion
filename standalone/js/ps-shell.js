@@ -552,6 +552,8 @@
   // Files from before the id list fall back to the version compare.
   // The check is a pure function so the gate can probe it directly.
   var NUMERICAL_CHANGES = [
+    { id: "rm-sphericity-automatic", since: "3.3.1",
+      label: "the repeated-measures Omnibus picks its sphericity correction by epsilon (Huynh-Feldt above .75, Greenhouse-Geisser at .75 and below), which changes df and p where epsilon is above .75" },
     { id: "histogram-auto-bins-top-edge", since: "3.3.0",
       label: "automatic histogram bins on non-integer data no longer add a last bin holding only the largest value" },
     { id: "cg-single-value-group-pooled-pairs", since: "3.3.0",
@@ -7774,7 +7776,7 @@
     return /^[<>]/.test(cell) ? "p " + cell : "p = " + cell;
   }
   // The Omnibus tab: every effect row (main effects, the interaction) plus
-  // the model footnote (the design, Type III, a Greenhouse-Geisser note on
+  // the model footnote (the design, Type III, the sphericity correction on
   // Repeated Measures) become one page with the chart.
   function composeOmnibusMoment() {
     var pane = document.querySelector('[data-gb2-inspector] [data-st-pane="omnibus"]');
@@ -7809,9 +7811,13 @@
     var clause = sentences.length ? sentences[0].split(/ over the visible chart|, | \(|: /)[0].trim() : "";
     var title = /ANOVA/.test(clause) ? clause
       : (statsPanelModuleName() === "Repeated Measures" ? "Repeated-measures ANOVA" : "ANOVA");
+    // The sphericity sentence names whichever correction was applied
+    // (Greenhouse-Geisser or Huynh-Feldt), or says that none is when the
+    // correction was switched off by hand.
     var gg = "";
     for (var si = 0; si < sentences.length; si++)
-      if (sentences[si].indexOf("Greenhouse-Geisser") !== -1) gg = sentences[si].trim();
+      if (/(Greenhouse-Geisser|Huynh-Feldt)-corrected|No sphericity correction is applied/.test(sentences[si]))
+        gg = sentences[si].trim();
     var eyebrow = [statsPanelModuleName(), "Omnibus"].filter(Boolean).join(" \u00b7 ");
     return composeMomentCard(chart, { eyebrow: eyebrow, title: title || "ANOVA",
                                       paragraphs: lines.concat(gg ? [gg] : []) });

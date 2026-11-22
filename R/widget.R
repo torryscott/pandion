@@ -206,6 +206,13 @@ graphbuilder2_html <- function(bars,
                                stats_alpha = NULL,
                                error_bar_type = NULL,
                                error_bar_method = NULL,
+                               # Sphericity correction for the repeated-
+                               # measures omnibus: "auto" (Huynh-Feldt above
+                               # a Greenhouse-Geisser epsilon of .75, else
+                               # Greenhouse-Geisser), "none", "gg" or "hf".
+                               # Repeated Measures only; NULL elsewhere keeps
+                               # every other module's payload unchanged.
+                               rm_sphericity = NULL,
                                # "Mark points by" (Compare Groups): the mark
                                # levels drawn and the variable's name. NULL =
                                # no marks, and the payload omits both keys.
@@ -2309,6 +2316,10 @@ graphbuilder2_html <- function(bars,
         payload$xyYNominal <- isTRUE(xy_y_nominal)
     if (!is.null(error_bar_method))
         payload$errorBarMethod <- as.character(error_bar_method)
+    if (!is.null(rm_sphericity)) {
+        .rs <- as.character(rm_sphericity)[1]
+        payload$rmSphericity <- if (isTRUE(.rs %in% c("auto", "none", "gg", "hf"))) .rs else "auto"
+    }
     # Chi-square test entries (freqplotbuilder only): shipped whenever the
     # module forwards them (even while freqShowChisq is off) so toggling
     # the readout from the "+" menu / eye is a pure draw-time filter with

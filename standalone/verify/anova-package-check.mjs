@@ -181,7 +181,10 @@ try {
                     const types=Object.fromEntries(columns.map(n=>[n,factorNames.includes(n)?'nominal':'continuous']));
                     S.loadTable(c.id,columns,rows,types);
                     const module=['two','three'].includes(c.family)?'plotbuilder':'rmplotbuilder';
-                    S.chart().options[module]={};
+                    // The references are Greenhouse-Geisser throughout, so the
+                    // repeated-measures charts pin that correction (the default
+                    // Automatic rule is verified against jamovi elsewhere).
+                    S.chart().options[module]=module==='rmplotbuilder'?{chartSpec:'{"rmSphericity":"gg"}'}:{};
                     S.setRoles(module,module==='rmplotbuilder'?{measures,betweenVar:factorNames[0]||null,facetVar:factorNames[1]||null}:
                         {xvar:'A',yvar:'t1',groupVar:'B',facetVar:factorNames[2]||null});
                     S.setModule(module);if(window.__anovaVerification.revision<=prior)throw Error('fresh renderer hook required');

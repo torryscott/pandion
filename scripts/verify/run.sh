@@ -144,6 +144,10 @@ node "$HERE/catstride-unit.mjs"
 
 echo "== facet key split: category and panel level may both hold the separator (pure unit)"
 node "$HERE/facetkey-unit.mjs"
+# The sphericity check's arithmetic (the chi-square tail behind Mauchly's p,
+# Mauchly's W, the Greenhouse-Geisser and Huynh-Feldt epsilons) against R's
+# full-precision values. Source bundle only, like the two unit checks above.
+node "$HERE/spher-unit.mjs"
 
 echo "== installed export surface (syntax-mode wrappers stay public)"
 if Rscript "$HERE/export-surface-check.R"; then :; else

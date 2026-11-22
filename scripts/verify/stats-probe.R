@@ -340,6 +340,17 @@ BJ <- SJ - outer(rowMeans(SJ), rep(1, kJ)) -
       outer(rep(1, kJ), colMeans(SJ)) + mean(SJ)
 epsJ <- sum(diag(BJ))^2 / ((kJ - 1) * sum(BJ^2))
 epsJ <- min(1, max(epsJ, 1 / (kJ - 1)))
+# The Automatic sphericity rule (Nov 2026, the default): Huynh-Feldt when
+# the Greenhouse-Geisser epsilon is above .75, Greenhouse-Geisser at .75 or
+# below. Huynh-Feldt is the car / jamovi formula on the between-subjects
+# error df (nu = subjects - groups), capped at 1; p = conditions - 1.
+spherAuto <- function(gg, nu, p) {
+    hf <- min(1, ((nu + 1) * p * gg - 2) / (p * (nu - p * gg)))
+    if (gg > 0.75) list(eps = hf, name = if (hf < 0.9995) "Huynh-Feldt" else "")
+    else list(eps = gg, name = "Greenhouse-Geisser")
+}
+autoJ <- spherAuto(epsJ, nJ - 1, kJ - 1)
+epsJ <- autoJ$eps
 df1c <- epsJ * (kJ - 1); df2c <- epsJ * (kJ - 1) * (nJ - 1)
 pJ <- pf(FJ, df1c, df2c, lower.tail = FALSE)
 etaPJ <- sstr / (sstr + sse)
@@ -360,8 +371,8 @@ wr(rmplotbuilder(data = rmk, measures = c("o1", "o2", "o3"),
    "k_rm_mixed")
 
 exp4 <- sub("}$", sprintf(
-    ',"rmF":"%s","rmP":"%s","rmEta":"%s","rmEps":"%s"}',
-    rmF, fmtP(pJ), rmEta, rmEps), exp3)
+    ',"rmF":"%s","rmP":"%s","rmEta":"%s","rmEps":"%s","rmCorr":"%s"}',
+    rmF, fmtP(pJ), rmEta, rmEps, autoJ$name), exp3)
 con <- file(file.path(OUT, "expected.json"), open = "wb")
 writeLines(exp4, con, useBytes = TRUE)
 close(con)
@@ -892,6 +903,8 @@ local({
         matrix(rowMeans(SpMX), kMX, kMX, byrow = TRUE) + mean(SpMX)
     epsMX <- (sum(diag(CbMX))^2) / ((kMX - 1) * sum(CbMX^2))
     epsMX <- min(1, max(epsMX, 1 / (kMX - 1)))
+    autoMX <- spherAuto(epsMX, NMX - GMX, kMX - 1)
+    epsMX <- autoMX$eps
     Fg <- (ssGrp / dfGrp) / (ssSub / dfSub)
     Fo <- (ssOcc / dfOcc) / (ssErr / dfErr)
     Fi <- (ssInt / dfInt) / (ssErr / dfErr)
@@ -899,7 +912,7 @@ local({
     exp15 <- sub("}$", sprintf(paste0(
         ',"mxGrpF":"%s","mxGrpDf":"%s","mxGrpP":"%s","mxGrpEta":"%s",',
         '"mxOccF":"%s","mxOccDf":"%s","mxOccP":"%s","mxOccEta":"%s",',
-        '"mxIntF":"%s","mxIntP":"%s","mxIntEta":"%s","mxEps":"%s"}'),
+        '"mxIntF":"%s","mxIntP":"%s","mxIntEta":"%s","mxEps":"%s","mxCorr":"%s"}'),
         sprintf("%.2f", Fg), paste0(dfFmt(dfGrp), ", ", dfFmt(dfSub)),
         sub("^p ", "", sub("^p = ", "", fmtP(pf(Fg, dfGrp, dfSub, lower.tail = FALSE)))),
         s0(ssGrp / (ssGrp + ssSub)),
@@ -908,7 +921,7 @@ local({
         s0(ssOcc / (ssOcc + ssErr)),
         sprintf("%.2f", Fi),
         sub("^p ", "", sub("^p = ", "", fmtP(pf(Fi, epsMX * dfInt, epsMX * dfErr, lower.tail = FALSE)))),
-        s0(ssInt / (ssInt + ssErr)), s0(epsMX)), exp14)
+        s0(ssInt / (ssInt + ssErr)), s0(epsMX), autoMX$name), exp14)
     con <- file(file.path(OUT, "expected.json"), open = "wb")
     writeLines(exp15, con, useBytes = TRUE)
     close(con)

@@ -483,7 +483,9 @@ for (const [name, rs] of Object.entries(refs.rmsets || {})) {
     if (m) closeTo(m[1], ref.V, name + ' ' + pk + ' signed-rank V');
     pClose(row.cells[4] || '', ref.p, name + ' ' + pk + ' signed-rank p');
   }
-  // One-way RM omnibus with Greenhouse-Geisser, from first principles.
+  // One-way RM omnibus with the default (Automatic) sphericity correction,
+  // from first principles: Huynh-Feldt above a Greenhouse-Geisser epsilon
+  // of .75, Greenhouse-Geisser at .75 or below.
   if (rs.omni && rs.omni.F !== null) {
     await openStats(/Omnibus/);
     const omni = await readVisiblePaneTable();
@@ -498,13 +500,13 @@ for (const [name, rs] of Object.entries(refs.rmsets || {})) {
         matched = true;
         closeTo(fCell, rs.omni.F, name + ' rm omnibus F');
         const pCell = r.find(c => /^(<\s*\.001|\.\d+|1\.000)$/.test(c.replace(/\s+/g, ' ')));
-        if (pCell) pClose(pCell, rs.omni.p, name + ' rm omnibus p (GG)');
+        if (pCell) pClose(pCell, rs.omni.p, name + ' rm omnibus p (corrected)');
         const etaCell = [...r].reverse().find(c => /^\.\d+$/.test(c));
         if (etaCell && etaCell !== pCell) closeTo(etaCell, rs.omni.etaP, name + ' rm omnibus eta2p');
         break;
       }
     }
-    ok(matched, name + ': GG omnibus row found (df ' +
+    ok(matched, name + ': corrected omnibus row found (df ' +
       rs.omni.df1.toFixed(2) + ', ' + rs.omni.df2.toFixed(2) + ')');
     await openStats(/Compare pairs/);
   }

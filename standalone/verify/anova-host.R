@@ -23,11 +23,17 @@ for(cs in refs$cases) {
     if(cs$family %in% c("two","three")) {
         res<-do.call(plotbuilder,list(data=d,xvar="A",yvar="t1",groupVar="B",facetVar=if(cs$family=="three") "C" else NULL,graphType="bar"))
     } else if(cs$family=="mixed2") {
+        # The references are Greenhouse-Geisser throughout (car's GG eps and
+        # an 80-digit oracle), so these charts pin that correction. The default
+        # Automatic rule and Huynh-Feldt are verified against jamovi's own
+        # numbers in stats-judgment-check (case sphericity) and spher-unit.
         res<-do.call(rmplotbuilder,list(data=d,measures=NULL,betweenVar=NULL,bs=c("A","B"),graphType="bar",
+            chartSpec='{"rmSphericity":"gg"}',
             rm=list(list(label="Occasions",levels=as.list(measures))),
             rmCells=lapply(measures,function(m) list(measure=m,cell=list(m)))))
     } else {
-        res<-do.call(rmplotbuilder,list(data=d,measures=measures,bs=NULL,betweenVar=if(cs$family=="mixed") "A" else NULL,graphType="bar"))
+        res<-do.call(rmplotbuilder,list(data=d,measures=measures,bs=NULL,betweenVar=if(cs$family=="mixed") "A" else NULL,graphType="bar",
+            chartSpec='{"rmSphericity":"gg"}'))
     }
     html<-tryCatch(res$widget$content,error=function(e) res$widget$.__enclos_env__$private$.content)
     stopifnot(grepl("ANOVA_VERIFICATION_RENDERER",html,fixed=TRUE))

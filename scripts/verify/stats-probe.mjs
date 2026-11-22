@@ -522,21 +522,26 @@ async function openLint(page) {
     console.log('case J (RM-ANOVA omnibus):');
     check('no page errors', errs.length === 0, errs.join(' | '));
     const labels = await bracketLabels(page);
-    check('F + GG dfs match hand R (' + EXP.rmF + ')',
+    // The default sphericity correction is Automatic (Nov 2026): the R
+    // reference applies the same rule, and names what it picked in rmCorr
+    // ("" when Huynh-Feldt's epsilon is 1 and nothing is corrected).
+    check('F + corrected dfs match hand R (' + EXP.rmF + ')',
           labels.some(l => l.includes(EXP.rmF)), 'labels=' + JSON.stringify(labels));
-    check('GG-corrected p matches (' + EXP.rmP + ')',
+    check('corrected p matches (' + EXP.rmP + ')',
           labels.some(l => l.includes(EXP.rmP)), 'labels=' + JSON.stringify(labels));
     check('label carries partial eta-squared (' + EXP.rmEta + ')',
           labels.some(l => l.includes(EXP.rmEta)), 'labels=' + JSON.stringify(labels));
-    check('label names Greenhouse-Geisser',
-          labels.some(l => l.includes('Greenhouse-Geisser')),
+    check('label names the correction applied (' + (EXP.rmCorr || 'none') + ')',
+          EXP.rmCorr ? labels.some(l => l.includes(EXP.rmCorr + ' corrected'))
+                     : !labels.some(l => /corrected/.test(l)),
           'labels=' + JSON.stringify(labels));
     const p = await openPanel(page);
     check('readout names the RM-ANOVA',
           !!p.readout && p.readout.includes('One-way repeated-measures ANOVA'),
           'readout=' + JSON.stringify(p.readout));
-    check('readout shows eps = ' + EXP.rmEps,
-          !!p.readout && p.readout.includes('Greenhouse-Geisser eps = ' + EXP.rmEps),
+    check('readout shows ' + (EXP.rmCorr ? EXP.rmCorr + ' eps = ' + EXP.rmEps : 'no correction line'),
+          !!p.readout && (EXP.rmCorr ? p.readout.includes(EXP.rmCorr + ' eps = ' + EXP.rmEps)
+                                     : !/ eps = /.test(p.readout)),
           'readout=' + JSON.stringify(p.readout));
     check('readout shows n subjects / k occasions',
           !!p.readout && p.readout.includes('n = 12 subjects, k = 3 occasions'),
@@ -592,15 +597,16 @@ async function openLint(page) {
     check('between row matches R (' + EXP.mxGrpF + ')',
           !!rGrp && rGrp[1] === EXP.mxGrpF && rGrp[2] === EXP.mxGrpDf &&
           rGrp[3] === EXP.mxGrpP && rGrp[4] === EXP.mxGrpEta, JSON.stringify(rGrp));
-    check('within row matches R Type III + GG (' + EXP.mxOccF + ')',
+    check('within row matches R Type III + the Automatic correction (' + EXP.mxOccF + ')',
           !!rOcc && rOcc[1] === EXP.mxOccF && rOcc[2] === EXP.mxOccDf &&
           rOcc[3] === EXP.mxOccP && rOcc[4] === EXP.mxOccEta, JSON.stringify(rOcc));
     check('interaction row matches R (' + EXP.mxIntF + ')',
           !!rInt && rInt[1] === EXP.mxIntF && rInt[3] === EXP.mxIntP &&
           rInt[4] === EXP.mxIntEta, JSON.stringify(rInt));
-    check('foot names the mixed model + GG eps (' + EXP.mxEps + ')',
+    check('foot names the mixed model + the correction applied (' + (EXP.mxCorr || 'none') + ', eps ' + EXP.mxEps + ')',
           /Mixed \(split-plot\) ANOVA/.test(mx.foot) &&
-          mx.foot.includes('Greenhouse-Geisser-corrected (eps = ' + EXP.mxEps + ')'),
+          (EXP.mxCorr ? mx.foot.includes(EXP.mxCorr + '-corrected (eps = ' + EXP.mxEps + ')')
+                      : !/-corrected/.test(mx.foot)),
           mx.foot.slice(-240));
     await ctx.close();
 }
