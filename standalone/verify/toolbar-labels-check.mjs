@@ -73,6 +73,22 @@ ok(await page.evaluate(() => {
     const name = (b.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().toLowerCase();
     return visible === '\u03c3 stats' && name.indexOf(visible) === 0;
 }), 'the Statistics button reads Sigma Stats and its accessible name begins with exactly that');
+// The space in that name is a text node the flex button never draws, so the
+// gap on screen is the label's own margin: it must match the other labeled
+// buttons (a 1px margin read as "SigmaStats" with no space, Nov 2026).
+{
+    const gaps = await page.evaluate(() => {
+        const gapOf = b => {
+            const lb = b.querySelector('[data-role="toolbar-btn-label"]'), icon = lb && lb.previousElementSibling;
+            return (lb && icon) ? Math.round((lb.getBoundingClientRect().left - icon.getBoundingClientRect().right) * 10) / 10 : null;
+        };
+        const all = [...document.querySelectorAll('[data-role="chart-toolbar"] button')].filter(b => b.querySelector('[data-role="toolbar-btn-label"]'));
+        const stats = all.find(x => x.title === 'Statistics');
+        return { stats: gapOf(stats), others: all.filter(b => b !== stats).map(gapOf).filter(v => v !== null) };
+    });
+    ok(gaps.stats >= 4 && gaps.others.length >= 2 && gaps.others.every(v => Math.abs(v - gaps.stats) <= 1),
+       `the sigma and the word Stats are spaced like the other labeled buttons (${gaps.stats}px against ${gaps.others.join(', ')}px)`);
+}
 
 console.log('case 2: the labeled button still does its job');
 await page.evaluate(() => {

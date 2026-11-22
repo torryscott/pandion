@@ -41,10 +41,14 @@ const terms = Function('return ' +
     literalAfter('var _GB_STAT_TERMS = {', '{', '}'))();
 
 // 133 since Sep 19 2026: the Mode entry joined beside Median.
-check('glossary inventory remains 133 entries', glossary.length === 133);
+// 135 since Nov 21 2026: Huynh-Feldt correction and Mauchly's test joined
+// with the Sphericity choice on the Omnibus tab.
+check('glossary inventory remains 135 entries', glossary.length === 135);
 // 105 since Sep 19 2026: the Mode term joined with the Mode column.
 // 106 since Nov 11 2026: Welch's F joined with its row on the Omnibus tab.
-check('linked Sigma inventory remains 106 terms', Object.keys(terms).length === 106);
+// 110 since Nov 21 2026: the Sphericity choice, Mauchly's test and the two
+// epsilons joined with the sphericity check on the Omnibus tab.
+check('linked Sigma inventory remains 110 terms', Object.keys(terms).length === 110);
 check('glossary names are unique', new Set(glossary.map(e => e.n)).size === glossary.length);
 
 const modules = new Set(['Compare', 'RM', 'Freq', 'Dist', 'Corr', 'Likert', 'Scatter']);
@@ -83,6 +87,13 @@ hasAll('Top-box (favorable percentage)', ['single highest category', 'full agree
 hasAll('Skewness', ['does not by itself prove symmetry']);
 hasAll('Diagonal (correlation matrix)', ['displays 1', 'no variation', 'undefined', 'display convention']);
 hasAll('Density contours', ['changing more quickly', 'does not by itself mean']);
+// The sphericity entries (Nov 21 2026): a non-significant Mauchly's test is
+// not proof, the correction goes by epsilon, and each correction says where
+// it is the wrong one.
+hasAll("Mauchly's test", ['does not prove sphericity holds', 'chooses the correction by epsilon']);
+hasAll('Huynh-Feldt correction', ['capped at 1', 'corrects too little']);
+hasAll('Greenhouse-Geisser correction', ['.75 or below', 'too cautious when sphericity nearly holds']);
+hasAll('Sphericity', ['not proof of sphericity', 'two conditions']);
 
 const allTeachingCopy = [
     ...glossary.flatMap(e => [e.b, e.r, e.w]),
@@ -95,7 +106,9 @@ const forbidden = [
     /closeness-to-normal score/i,
     /how reliable is the change/i,
     /confidence ellipse is an oval drawn to enclose a chosen percentage/i,
-    /adjusted p[^\n]*generally larger than the raw/i
+    /adjusted p[^\n]*generally larger than the raw/i,
+    // The engine no longer applies one correction always (Nov 21 2026).
+    /applies the Greenhouse-Geisser correction;/i
 ];
 for (const pattern of forbidden)
     check('misconception absent: ' + pattern, !pattern.test(allTeachingCopy));
@@ -114,6 +127,9 @@ const linked = [
     ['Top-box (favorable percentage)', 'topBox', ['single highest category']],
     ['Cousineau-Morey within-subject error correction', 'cmCorrection',
         ['square-root(k/(k - 1))', 'not the SE or CI of a difference']],
+    ["Mauchly's test", 'mauchlyW', ["does not prove they don't", 'correction goes by epsilon']],
+    ['Huynh-Feldt correction', 'epsHF', ['capped at 1', 'corrects too little']],
+    ['Greenhouse-Geisser correction', 'epsGG', ['.75 or below']],
     ['Center / split-middle boundary', 'centerSplit',
         ['not an observed response value', 'does not necessarily represent a neutral response']]
 ];

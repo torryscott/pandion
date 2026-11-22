@@ -103906,10 +103906,14 @@
                         // The sigma is text, so the button's visible text
                         // becomes "Sigma Stats" and its accessible name
                         // must begin with exactly that (axe-core 4.14).
-                        // A real space makes the two words one phrase;
-                        // the margin shrinks so the gap stays as it was.
+                        // A real space makes the two words one phrase
+                        // for the accessible name. It draws nothing: the
+                        // button is a flex box, which drops a text node
+                        // that is only white space. So the label keeps
+                        // the 5px margin the other four labels have (a
+                        // 1px margin here read as "SigmaStats" with no
+                        // space, Nov 2026).
                         b.appendChild(document.createTextNode(" "));
-                        lb.style.marginLeft = "1px";
                         b.setAttribute("aria-label", "\u03a3 " + pair[1] + ", statistics");
                     }
                     b.appendChild(lb);
