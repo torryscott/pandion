@@ -20,13 +20,16 @@ if (window.navigator.standalone === true) {
      and website/build.sh from scripts/build-stamp.sh (commit date + sha of
      the last commit that touched the shipped sources). ps-shell reads it
      into APP_BUILD for exports, saved projects, and the About dialog. -->
-<meta name="pandion-build" content="2026-11-22T03:16Z 6b26166">
+<meta name="pandion-build" content="2026-11-28T05:20Z 05ebc0b">
 <title>Pandion Plots (next build)</title>
 <!-- PREVIEW COPY. The work queued for the next release, shown here before
-     it ships (2026-11-22): the Sphericity choice on the Repeated Measures
-     Omnibus tab, and the spacing of the toolbar's Stats label. Not linked
-     from the site, not indexed, refreshed or removed as the queue moves.
-     The app at /app/ is the released one. -->
+     it ships (2026-11-28): the Sphericity choice on the Repeated Measures Omnibus
+     tab, and the Layouts diagrams work (diagram wizards, diagram from text,
+     shapes, layers, drawing tools, magnified views, more export formats)
+     with timelines that keep their table. Projects saved here are format 4,
+     which the released app cannot open until this ships. Not linked from
+     the site, not indexed, refreshed or removed as the queue moves. The app
+     at /app/ is the released one. -->
 <meta name="robots" content="noindex, nofollow">
 <style>
   body::after {
@@ -1302,8 +1305,102 @@ if (window.navigator.standalone === true) {
     font-family: sans-serif; line-height: 1.25; text-align: center;
     white-space: pre-wrap; overflow-wrap: anywhere;
   }
-  .ps-lbox > span { display: block; max-width: 100%; }
+  .ps-lbox > span { display: block; max-width: 100%; position: relative; }
+  /* A shaped box: the outline is an svg under the text (Oct 2026). */
+  .ps-lbox { position: relative; }
+  .ps-lbox > svg.ps-lshape {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    display: block; pointer-events: none; overflow: visible;
+  }
+  .ps-lbox-shapes { display: flex; flex-wrap: wrap; gap: 3px; }
+  .ps-lbox-shapes button {
+    width: 30px; height: 26px; padding: 2px; cursor: pointer;
+    color: var(--ps-ink-3); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-sm);
+  }
+  .ps-lbox-shapes button[aria-pressed="true"] {
+    color: var(--ps-accent-ink); border-color: var(--ps-accent);
+    background: var(--ps-tint-2);
+  }
+  .ps-lbox-shapes svg { display: block; width: 100%; height: 100%; }
+  /* The Layers list rows. */
+  .ps-ltx-symbols { display: flex; flex-wrap: wrap; gap: 3px; }
+  .ps-ltx-symbols button {
+    min-width: 26px; height: 24px; padding: 0 5px; cursor: pointer;
+    font-size: 13px; line-height: 1; color: var(--ps-ink-2);
+    background: var(--ps-s0); border: 1px solid var(--ps-l3);
+    border-radius: var(--ps-r-sm);
+  }
+  .ps-ltx-symbols button:hover { border-color: var(--ps-accent); }
+  /* Inline marks on the canvas: raised and lowered runs at 70%, the
+     same offsets the file writes. */
+  .ps-ltext sup, .ps-lbox sup, .ps-ltext sub, .ps-lbox sub {
+    font-size: 70%; line-height: 0; position: relative; vertical-align: baseline;
+  }
+  .ps-ltext sup, .ps-lbox sup { top: -0.36em; }
+  .ps-ltext sub, .ps-lbox sub { top: 0.18em; }
+  .ps-llayers { display: flex; flex-direction: column; gap: 2px; }
+  .ps-llayer {
+    display: flex; align-items: center; gap: 3px; padding: 1px 2px;
+    border-radius: var(--ps-r-sm);
+  }
+  .ps-llayer-sel { background: var(--ps-tint-2); }
+  .ps-llayer-hidden .ps-llayer-name { color: var(--ps-muted); font-style: italic; }
+  .ps-llayer-btn {
+    width: 24px; height: 22px; padding: 0; display: inline-flex;
+    align-items: center; justify-content: center; flex: 0 0 auto;
+    color: var(--ps-ink-3); background: transparent; border: 1px solid transparent;
+    border-radius: var(--ps-r-sm); cursor: pointer; font-size: 10px;
+  }
+  .ps-llayer-btn:hover { border-color: var(--ps-l3); background: var(--ps-s0); }
+  .ps-llayer-btn:disabled { color: var(--ps-l3); cursor: default; }
+  .ps-llayer-btn svg { width: 15px; height: 12px; display: block; }
+  .ps-llayer-eye[aria-pressed="false"], .ps-llayer-lock[aria-pressed="true"] {
+    color: var(--ps-accent-ink);
+  }
+  .ps-llayer-name {
+    flex: 1 1 auto; min-width: 0; text-align: left; padding: 2px 5px;
+    font-size: 11.5px; color: var(--ps-ink-2); background: transparent;
+    border: 1px solid transparent; border-radius: var(--ps-r-sm); cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ps-llayer-name:hover { border-color: var(--ps-l3); }
+  .ps-llayer-name[aria-pressed="true"] { font-weight: 600; }
+  .ps-llayer-rename {
+    flex: 1 1 auto; min-width: 0; height: 24px !important; padding: 2px 5px !important;
+    font-size: 11.5px !important;
+  }
+  .ps-llayer-empty { font-size: 11px; color: var(--ps-muted); }
+  /* A locked item lets the pointer through; selected from the Layers
+     list it shows a dashed outline and no handles. */
+  .ps-export-checks { display: flex; flex-direction: column; gap: 5px; }
+  .ps-export-check-row {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--ps-ink-2);
+  }
+  .ps-export-check-row::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    background: var(--ps-accent);
+  }
+  .ps-export-check-warn::before { background: #d98b1e; }
+  .ps-export-check-show { margin-left: auto; flex: 0 0 auto; min-height: 24px; padding: 2px 9px; }
+  .ps-lreplace-opts { display: flex; gap: 16px; margin: 4px 0 8px; }
+  .ps-lreplace-opts .ps-limg-check { margin-left: 0; }
+  .ps-litem-locked { pointer-events: none; }
+  .ps-litem-locked.ps-litem-sel { outline-style: dashed; }
   .ps-litem[data-kind="arrow"] { pointer-events: none; }
+  /* Drawn paths (Oct 2026): like arrows, the box lets the pointer through
+     and only the line itself (or a filled shape's inside) is hit. */
+  .ps-litem[data-kind="path"] { pointer-events: none; }
+  .ps-litem[data-kind="path"] > svg { display: block; overflow: visible; width: 100%; height: 100%; }
+  .ps-litem[data-kind="path"].ps-litem-sel { outline: 1px dashed var(--ps-accent); outline-offset: 3px; }
+  .ps-lpath-hit { pointer-events: stroke; cursor: grab; fill: none; stroke: transparent; }
+  .ps-lpath-hit-filled { pointer-events: all; fill: transparent; }
+  .ps-litem[data-kind="path"] > .ps-lhandle-end, .ps-litem[data-kind="path"] > .ps-lhandle,
+  .ps-litem[data-kind="path"] > .ps-lbar { pointer-events: auto; }
+  .ps-lhandle-node { cursor: move; }
+  .ps-ldraw-on, .ps-ldraw-on * { cursor: crosshair !important; }
+  #ps-ldraw-preview { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 40; }
   .ps-litem[data-kind="arrow"] > svg {
     display: block; overflow: visible; width: 100%; height: 100%;
   }
@@ -1351,6 +1448,34 @@ if (window.navigator.standalone === true) {
     width: 52px; flex: 0 0 auto; height: 26px; padding: 2px 4px; font-size: 11px;
   }
   .ps-ltl-band { cursor: pointer; }
+  /* One event, phase, break or group in the rail: a row or two of fields,
+     ruled off from the next. */
+  .ps-ltl-item {
+    display: flex; flex-direction: column; gap: 3px; padding: 0 0 5px;
+    border-bottom: 1px solid var(--ps-l3);
+  }
+  .ps-ltl-item:last-child { border-bottom: 0; padding-bottom: 0; }
+  .ps-ltl-to { flex: 0 0 auto; font-size: 11px; color: var(--ps-muted); }
+  .ps-inspector-field .ps-ltl-row input.ps-ltl-when { flex: 1 1 0; }
+  .ps-inspector-field .ps-ltl-row input.ps-ltl-narrow { width: 44px; }
+  .ps-inspector-field .ps-ltl-item .ps-ltl-row input[type="number"] {
+    width: auto; flex: 1 1 0; min-width: 0;
+  }
+  .ps-inspector-field .ps-ltl-item .ps-ltl-row select { flex: 1 1 0; }
+  .ps-inspector-field .ps-ltl-row input[aria-invalid="true"] { border-color: var(--ps-danger); }
+  .ps-inspector-field.ps-ltl-axis input[type="number"] {
+    width: auto; flex: 1 1 0; min-width: 0; height: 26px; padding: 2px 4px; font-size: 11px;
+  }
+  .ps-inspector-field #ps-ltl-ax-unit {
+    width: auto; flex: 1 1 0; min-width: 0; height: 26px; padding: 2px 6px; font-size: 11.5px;
+  }
+  /* A name of a timeline, edited where it stands. */
+  .ps-ltl-edit {
+    position: absolute; z-index: 6; box-sizing: border-box; margin: 0; padding: 0 5px;
+    font-family: sans-serif; text-align: center; color: var(--ps-ink-2);
+    background: var(--ps-s0); border: 1px solid var(--ps-accent);
+    border-radius: var(--ps-r-sm); outline: none;
+  }
   /* The custom-color chip beside a swatch row and the popover it opens
      (slice three): the Text section's picker, floating. */
   .ps-lcp-open {
@@ -2687,7 +2812,7 @@ if (window.navigator.standalone === true) {
     outline-offset: 0;
   }
   .ps-export-formats {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px;
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px;
   }
   .ps-export-format { position: relative; min-width: 0; }
   .ps-export-format input {
@@ -3386,6 +3511,22 @@ if (window.navigator.standalone === true) {
   .ps-ltx-row .ps-layout-field-label { flex: 0 0 auto; }
   .ps-ltx-row input[type="range"] { flex: 1 1 auto; min-width: 0; }
   .ps-ltx-row input[type="number"] { width: 52px; flex: 0 0 auto; }
+  /* The Image section's calibration row: a unit select beside the
+     number, and a Label checkbox that must not take the rail's 100%
+     input width. */
+  .ps-ltx-row select { width: auto; flex: 0 0 auto; }
+  .ps-ltx-row input[type="checkbox"] { width: auto; height: auto; flex: 0 0 auto; margin: 0; }
+  .ps-limg-check {
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+    font-size: 11px; color: var(--ps-ink-3); cursor: pointer;
+  }
+  .ps-limg-decor {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    display: block; pointer-events: none; overflow: visible;
+  }
+  .ps-limg-wrap { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .ps-limg-clip { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; }
+  .ps-litem[data-kind="timeline"] > svg { transform-origin: center center; }
   .ps-ltx-stylerow { margin: 6px 0; }
   .ps-ltx-stylerow .ps-btn[aria-pressed="true"] {
     color: #ffffff; background: var(--ps-accent); border-color: var(--ps-accent);
@@ -4169,6 +4310,50 @@ if (window.navigator.standalone === true) {
     display: flex; flex-direction: column; gap: 9px; color: var(--ps-ink-4);
     font-size: 10.5px; line-height: 1.4;
   }
+  /* Diagram wizards: the list of wizards, the form and the live preview. */
+  .ps-wizard-grid {
+    display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 18px;
+    align-items: start;
+  }
+  .ps-wizard-list { display: flex; flex-direction: column; gap: 6px; }
+  /* A timeline's table reopened: the form and its preview, no list. */
+  .ps-wizard-editing .ps-wizard-grid { grid-template-columns: minmax(0, 1fr); }
+  .ps-wizard-editing .ps-wizard-list { display: none; }
+  .ps-wizard-option {
+    display: flex; flex-direction: column; gap: 3px; text-align: left;
+    padding: 9px 11px; color: var(--ps-ink-2); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md);
+    cursor: pointer; font: inherit;
+  }
+  .ps-wizard-option strong { font-size: 12px; }
+  .ps-wizard-option span { font-size: 10.5px; color: var(--ps-ink-4); line-height: 1.35; }
+  .ps-wizard-option[aria-selected="true"] {
+    border-color: var(--ps-accent); background: var(--ps-tint-2);
+    color: var(--ps-accent-ink);
+  }
+  .ps-wizard-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .ps-wizard-pick-title { font-size: 13px; color: var(--ps-ink-2); }
+  .ps-wizard-form {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px;
+  }
+  .ps-wizard-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ps-wizard-field-wide { grid-column: 1 / -1; }
+  .ps-wizard-label { font-size: 10.5px; color: var(--ps-muted); }
+  .ps-wizard-field input[type="text"], .ps-wizard-field input[type="number"],
+  .ps-wizard-field textarea {
+    min-width: 0; padding: 5px 7px; color: var(--ps-ink-2); background: var(--ps-s0);
+    border: 1px solid var(--ps-l3); border-radius: var(--ps-r-md); font: inherit;
+    font-size: 12px;
+  }
+  .ps-wizard-field textarea { resize: vertical; line-height: 1.35; }
+  .ps-wizard-check { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+  .ps-wizard-note { margin: 0; font-size: 10.5px; color: var(--ps-ink-4); line-height: 1.4; }
+  .ps-wizard-preview {
+    min-height: 160px; max-height: min(380px, calc(var(--ps-vh) * 0.42)); overflow: auto; padding: 8px;
+    background: #fff; border: 1px solid var(--ps-l2b); border-radius: var(--ps-r-md);
+  }
+  .ps-wizard-preview svg { display: block; }
+  .ps-wizard-empty { margin: 40px 0; text-align: center; color: var(--ps-ink-4); font-size: 12px; }
   .ps-layout-template-options label {
     display: flex; align-items: center; gap: 7px; font-weight: 650;
   }
@@ -6149,6 +6334,29 @@ if (window.navigator.standalone === true) {
             <label class="ps-inspector-field"><span class="ps-layout-field-label">Width (<span data-unit-label>in</span>)</span><input id="ps-ctx-lw" type="number" step="1"></label>
             <label class="ps-inspector-field"><span class="ps-layout-field-label">Height (<span data-unit-label>in</span>)</span><input id="ps-ctx-lh" type="number" step="1"></label>
           </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-ctx-lop-row">
+            <span class="ps-layout-field-label" id="ps-ctx-lop-label">Opacity</span>
+            <input id="ps-ctx-lop" type="range" min="0" max="100" step="1"
+                   aria-labelledby="ps-ctx-lop-label">
+            <input id="ps-ctx-lop-num" type="number" min="0" max="100"
+                   step="1" aria-label="Opacity in percent">
+          </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-ctx-lturn-row" style="display:none;">
+            <span class="ps-layout-field-label" id="ps-ctx-lturn-label">Turn</span>
+            <input id="ps-ctx-lturn" type="range" min="-180" max="180" step="1"
+                   aria-labelledby="ps-ctx-lturn-label">
+            <input id="ps-ctx-lturn-num" type="number" min="-180" max="180"
+                   step="1" aria-label="Turn in degrees">
+          </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-ctx-lflip-row" style="display:none;">
+            <span class="ps-layout-field-label" id="ps-ctx-lflip-label">Flip</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-ctx-lflip-label">
+              <button type="button" data-lflip="x" aria-pressed="false"
+                      data-tip="Mirror the picture left to right">Horizontal</button>
+              <button type="button" data-lflip="y" aria-pressed="false"
+                      data-tip="Mirror the picture top to bottom">Vertical</button>
+            </div>
+          </div>
         </div>
         <!-- Text styling in the RAIL (Torry, Aug 6 2026): capability
              parity with the chart workspace's text panel - size, bold,
@@ -6283,6 +6491,20 @@ if (window.navigator.standalone === true) {
             <input id="ps-ltx-rot-num" type="number" min="-90" max="90"
                    step="1" aria-label="Rotation in degrees">
           </div>
+          <!-- Symbols and marks (Oct 2026, from the Illustrations app): a
+               row of Greek letters and signs that insert at the caret of
+               the open editor (or append to the selected text), and the
+               marks the text understands. -->
+          <div class="ps-inspector-field">
+            <span class="ps-layout-field-label" id="ps-ltx-symbols-label">Symbols</span>
+            <div id="ps-ltx-symbols" class="ps-ltx-symbols" role="group"
+                 aria-labelledby="ps-ltx-symbols-label"></div>
+            <div class="ps-loader-hint">
+              Type a backslash and a name, \alpha or \to, and it becomes the
+              symbol when you finish editing. **bold**, *italic*, x^2 and
+              H_2O mark bold, italic, superscript and subscript.
+            </div>
+          </div>
         </div>
         <!-- Figure parts (Sep 2026). A box is a text item with a fill, a
              border and corners; its text is styled by the Text section
@@ -6291,6 +6513,11 @@ if (window.navigator.standalone === true) {
         <div class="ps-inspector-section" id="ps-layout-box-section"
              style="display:none;">
           <span class="ps-inspector-section-title">Box</span>
+          <div class="ps-inspector-field">
+            <span class="ps-layout-field-label" id="ps-lbox-shape-label">Shape</span>
+            <div id="ps-lbox-shapes" class="ps-lbox-shapes" role="group"
+                 aria-labelledby="ps-lbox-shape-label"></div>
+          </div>
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label">Fill</span>
             <div id="ps-lbox-fills" class="ps-ltx-swatches"></div>
@@ -6310,6 +6537,28 @@ if (window.navigator.standalone === true) {
                     data-tip="Border color"></button>
           </div>
           <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-lbox-grad-label">Gradient</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-lbox-grad-label">
+              <button type="button" data-lbox-grad="none" aria-pressed="false">None</button>
+              <button type="button" data-lbox-grad="on" aria-pressed="false"
+                      data-tip="Fade from the fill to a second color">Fade</button>
+            </div>
+            <span id="ps-lbox-gradopts" class="ps-lunit-seg" role="group"
+                  aria-label="Gradient direction and second color" style="display:none;">
+              <button type="button" data-lbox-gradangle="90" aria-pressed="false"
+                      aria-label="Downward" data-tip="Top to bottom">&#8595;</button>
+              <button type="button" data-lbox-gradangle="0" aria-pressed="false"
+                      aria-label="Rightward" data-tip="Left to right">&#8594;</button>
+              <button type="button" data-lbox-gradangle="45" aria-pressed="false"
+                      aria-label="Down and right" data-tip="Top left to bottom right">&#8600;</button>
+              <button type="button" data-lbox-gradangle="135" aria-pressed="false"
+                      aria-label="Down and left" data-tip="Top right to bottom left">&#8601;</button>
+              <button type="button" class="ps-lcp-open" id="ps-lbox-gradcolor"
+                      aria-pressed="false" aria-label="Choose the gradient's second color"
+                      data-tip="Second color"></button>
+            </span>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-lbox-corner-row">
             <span class="ps-layout-field-label" id="ps-lbox-corner-label">Corner</span>
             <input id="ps-lbox-corner" type="range" min="0" max="24" step="1"
                    aria-labelledby="ps-lbox-corner-label">
@@ -6325,7 +6574,16 @@ if (window.navigator.standalone === true) {
             <div class="ps-lunit-seg" role="group" aria-labelledby="ps-larrow-route-label">
               <button type="button" data-larrow-route="straight" aria-pressed="false">Straight</button>
               <button type="button" data-larrow-route="elbow" aria-pressed="false">Elbow</button>
+              <button type="button" data-larrow-route="curved" aria-pressed="false">Curved</button>
             </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-larrow-bend-row"
+               style="display:none;">
+            <span class="ps-layout-field-label" id="ps-larrow-bend-label">Bend</span>
+            <input id="ps-larrow-bend" type="range" min="-1" max="1" step="0.05"
+                   aria-labelledby="ps-larrow-bend-label">
+            <input id="ps-larrow-bend-num" type="number" min="-1" max="1"
+                   step="0.05" aria-label="Bend of the curve, from minus one to one">
           </div>
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label" id="ps-larrow-heads-label">Heads</span>
@@ -6333,8 +6591,22 @@ if (window.navigator.standalone === true) {
               <button type="button" data-larrow-heads="none" aria-pressed="false">None</button>
               <button type="button" data-larrow-heads="end" aria-pressed="false">End</button>
               <button type="button" data-larrow-heads="both" aria-pressed="false">Both</button>
+              <button type="button" data-larrow-heads="inhibit" aria-pressed="false"
+                      data-tip="A flat bar at the end, for inhibition">Inhibit</button>
             </div>
           </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-larrow-dash-label">Line</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-larrow-dash-label">
+              <button type="button" data-larrow-dash="solid" aria-pressed="false">Solid</button>
+              <button type="button" data-larrow-dash="dashed" aria-pressed="false">Dashed</button>
+            </div>
+          </div>
+          <label class="ps-inspector-field">
+            Label
+            <input id="ps-larrow-label" type="text" placeholder="None"
+                   aria-label="Arrow label" spellcheck="false">
+          </label>
           <div class="ps-inspector-field ps-ltx-row">
             <span class="ps-layout-field-label" id="ps-larrow-width-label">Width</span>
             <input id="ps-larrow-width" type="range" min="0.5" max="6" step="0.5"
@@ -6357,8 +6629,264 @@ if (window.navigator.standalone === true) {
             To
             <select id="ps-larrow-to"></select>
           </label>
+          <label class="ps-inspector-field">
+            Leaves from
+            <select id="ps-larrow-fromside" data-larrow-side="from">
+              <option value="">The side facing the other end</option>
+              <option value="l">Left side</option>
+              <option value="r">Right side</option>
+              <option value="t">Top</option>
+              <option value="b">Bottom</option>
+            </select>
+          </label>
+          <label class="ps-inspector-field">
+            Arrives at
+            <select id="ps-larrow-toside" data-larrow-side="to">
+              <option value="">The side facing the other end</option>
+              <option value="l">Left side</option>
+              <option value="r">Right side</option>
+              <option value="t">Top</option>
+              <option value="b">Bottom</option>
+            </select>
+          </label>
           <div class="ps-loader-hint">
-            Drag an arrow's end onto a box to attach it. An attached end follows its box.
+            Drag an arrow's end onto any item to attach it. An attached end follows its item.
+          </div>
+        </div>
+        <!-- Image items (Oct 2026, from the Illustrations app): a frame
+             around the painted picture and, for a raster, a scale bar from
+             a size per pixel. The scale bar block hides for SVG sources. -->
+        <div class="ps-inspector-section" id="ps-layout-image-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Image</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-limg-frame-label">Frame</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-frame-label">
+              <button type="button" data-limg-frame="none" aria-pressed="false">None</button>
+              <button type="button" data-limg-frame="thin" aria-pressed="false">Thin</button>
+              <button type="button" data-limg-frame="thick" aria-pressed="false">Thick</button>
+            </div>
+            <button type="button" class="ps-lcp-open" id="ps-limg-framecolor"
+                    aria-pressed="false" aria-label="Choose the frame color"
+                    data-tip="Frame color"></button>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-limg-mask-label">Mask</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-mask-label">
+              <button type="button" data-limg-cropshape="rect" aria-pressed="false">Rectangle</button>
+              <button type="button" data-limg-cropshape="rounded" aria-pressed="false">Rounded</button>
+              <button type="button" data-limg-cropshape="ellipse" aria-pressed="false">Ellipse</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-limg-crop-label"
+                  data-tip="Percent of the picture cut from each side; the rest fills the box">Crop %</span>
+            <input type="number" min="0" max="95" step="1" data-limg-crop="l" id="ps-limg-crop-l"
+                   aria-label="Crop from the left, percent" placeholder="L">
+            <input type="number" min="0" max="95" step="1" data-limg-crop="t" id="ps-limg-crop-t"
+                   aria-label="Crop from the top, percent" placeholder="T">
+            <input type="number" min="0" max="95" step="1" data-limg-crop="r" id="ps-limg-crop-r"
+                   aria-label="Crop from the right, percent" placeholder="R">
+            <input type="number" min="0" max="95" step="1" data-limg-crop="b" id="ps-limg-crop-b"
+                   aria-label="Crop from the bottom, percent" placeholder="B">
+          </div>
+          <div id="ps-limg-adjust">
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-bright-label">Brightness</span>
+              <input id="ps-limg-bright" type="range" min="-100" max="100" step="1"
+                     aria-labelledby="ps-limg-bright-label">
+              <input id="ps-limg-bright-num" type="number" min="-100" max="100" step="1"
+                     aria-label="Brightness, minus 100 to 100">
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-contrast-label">Contrast</span>
+              <input id="ps-limg-contrast" type="range" min="-100" max="100" step="1"
+                     aria-labelledby="ps-limg-contrast-label">
+              <input id="ps-limg-contrast-num" type="number" min="-100" max="100" step="1"
+                     aria-label="Contrast, minus 100 to 100">
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-sat-label">Saturation</span>
+              <input id="ps-limg-sat" type="range" min="-100" max="100" step="1"
+                     aria-labelledby="ps-limg-sat-label">
+              <input id="ps-limg-sat-num" type="number" min="-100" max="100" step="1"
+                     aria-label="Saturation, minus 100 to 100">
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-look-label">Look</span>
+              <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-look-label">
+                <button type="button" data-limg-look="grayscale" aria-pressed="false">Grayscale</button>
+                <button type="button" data-limg-look="invert" aria-pressed="false">Invert</button>
+              </div>
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-tint-label"
+                    data-tip="Color by brightness: dark stays dark, bright takes the color">Tint</span>
+              <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-tint-label">
+                <button type="button" data-limg-tint="off" aria-pressed="false">Off</button>
+                <button type="button" data-limg-tint="on" aria-pressed="false">On</button>
+              </div>
+              <button type="button" class="ps-lcp-open" id="ps-limg-tintcolor"
+                      aria-pressed="false" aria-label="Choose the tint color"
+                      data-tip="Tint color" style="display:none;"></button>
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-clear-label"
+                    data-tip="Make the background transparent by its nearness to white or black">Clear</span>
+              <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-clear-label">
+                <button type="button" data-limg-clear="none" aria-pressed="false">None</button>
+                <button type="button" data-limg-clear="white" aria-pressed="false">White</button>
+                <button type="button" data-limg-clear="black" aria-pressed="false">Black</button>
+              </div>
+            </div>
+            <div class="ps-inspector-field ps-ltx-row" id="ps-limg-clearamt-row" style="display:none;">
+              <span class="ps-layout-field-label" id="ps-limg-clearamt-label">Tolerance</span>
+              <input id="ps-limg-clearamt" type="range" min="1" max="60" step="1"
+                     aria-labelledby="ps-limg-clearamt-label">
+              <input id="ps-limg-clearamt-num" type="number" min="1" max="60" step="1"
+                     aria-label="Background tolerance, 1 to 60">
+            </div>
+          </div>
+          <div id="ps-limg-scalebar">
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-limg-bar-label">Scale bar</span>
+              <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-bar-label">
+                <button type="button" data-limg-bar="off" aria-pressed="false">Off</button>
+                <button type="button" data-limg-bar="on" aria-pressed="false">On</button>
+              </div>
+              <button type="button" class="ps-lcp-open" id="ps-limg-barcolor"
+                      aria-pressed="false" aria-label="Choose the scale bar color"
+                      data-tip="Scale bar color"></button>
+            </div>
+            <div id="ps-limg-barfields">
+              <div class="ps-inspector-field ps-ltx-row">
+                <span class="ps-layout-field-label" id="ps-limg-perpx-label">Per pixel</span>
+                <input id="ps-limg-perpx" type="number" min="0" step="any"
+                       aria-labelledby="ps-limg-perpx-label"
+                       data-tip="The size of one image pixel, from the microscope or the camera">
+                <select id="ps-limg-unit" aria-label="Scale bar unit">
+                  <option value="nm">nm</option>
+                  <option value="um">&micro;m</option>
+                  <option value="mm">mm</option>
+                </select>
+              </div>
+              <div class="ps-inspector-field ps-ltx-row">
+                <span class="ps-layout-field-label" id="ps-limg-len-label">Bar length</span>
+                <input id="ps-limg-len" type="number" min="0" step="any"
+                       aria-labelledby="ps-limg-len-label">
+                <span class="ps-layout-field-label" id="ps-limg-len-unit"
+                      aria-hidden="true">&micro;m</span>
+              </div>
+              <div class="ps-inspector-field ps-ltx-row">
+                <span class="ps-layout-field-label" id="ps-limg-corner-label">Corner</span>
+                <div class="ps-lunit-seg" role="group" aria-labelledby="ps-limg-corner-label">
+                  <button type="button" data-limg-corner="tl" aria-pressed="false"
+                          aria-label="TL, top left corner">TL</button>
+                  <button type="button" data-limg-corner="tr" aria-pressed="false"
+                          aria-label="TR, top right corner">TR</button>
+                  <button type="button" data-limg-corner="bl" aria-pressed="false"
+                          aria-label="BL, bottom left corner">BL</button>
+                  <button type="button" data-limg-corner="br" aria-pressed="false"
+                          aria-label="BR, bottom right corner">BR</button>
+                </div>
+                <label class="ps-limg-check">
+                  <input type="checkbox" id="ps-limg-barlabel"> Label
+                </label>
+              </div>
+              <div class="ps-loader-hint" id="ps-limg-hint"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Drawn paths (Oct 2026, from the Illustrations app): the pen
+             and pencil's lines and shapes, their nodes, and the brushes. -->
+        <div class="ps-inspector-section" id="ps-layout-path-section"
+             style="display:none;">
+          <span class="ps-inspector-section-title">Drawing</span>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-lpath-smooth-label">Curve</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-lpath-smooth-label">
+              <button type="button" data-lpath-smooth="straight" aria-pressed="false">Straight</button>
+              <button type="button" data-lpath-smooth="smooth" aria-pressed="false">Smooth</button>
+            </div>
+            <div class="ps-lunit-seg" role="group" aria-label="Open or closed">
+              <button type="button" data-lpath-closed="open" aria-pressed="false">Open</button>
+              <button type="button" data-lpath-closed="closed" aria-pressed="false">Closed</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" id="ps-lpath-brush-label">Brush</span>
+            <div class="ps-lunit-seg" role="group" aria-labelledby="ps-lpath-brush-label">
+              <button type="button" data-lpath-brush="none" aria-pressed="false">None</button>
+              <button type="button" data-lpath-brush="membrane" aria-pressed="false">Membrane</button>
+              <button type="button" data-lpath-brush="dna" aria-pressed="false">DNA</button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row">
+            <span class="ps-layout-field-label" aria-hidden="true"></span>
+            <div class="ps-lunit-seg" role="group" aria-label="More brushes">
+              <button type="button" data-lpath-brush="actin" aria-pressed="false">Actin</button>
+              <button type="button" data-lpath-brush="microtubule" aria-pressed="false">Microtubule</button>
+              <button type="button" data-lpath-brush="beads" aria-pressed="false">Beads</button>
+            </div>
+          </div>
+          <div id="ps-lpath-line-rows">
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-lpath-line-label">Line</span>
+              <button type="button" class="ps-lcp-open" id="ps-lpath-stroke"
+                      aria-pressed="false" aria-label="Choose the line color"
+                      data-tip="Line color"></button>
+              <button type="button" class="ps-btn" id="ps-lpath-nostroke"
+                      data-tip="No line">None</button>
+              <div class="ps-lunit-seg" role="group" aria-label="Line style">
+                <button type="button" data-lpath-dash="solid" aria-pressed="false">Solid</button>
+                <button type="button" data-lpath-dash="dashed" aria-pressed="false">Dashed</button>
+              </div>
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-lpath-width-label">Width</span>
+              <input id="ps-lpath-width" type="range" min="0.25" max="8" step="0.25"
+                     aria-labelledby="ps-lpath-width-label">
+              <input id="ps-lpath-width-num" type="number" min="0.25" max="8" step="0.25"
+                     aria-label="Line width in pixels">
+            </div>
+            <div class="ps-inspector-field ps-ltx-row" id="ps-lpath-heads-row">
+              <span class="ps-layout-field-label" id="ps-lpath-heads-label">Heads</span>
+              <div class="ps-lunit-seg" role="group" aria-labelledby="ps-lpath-heads-label">
+                <button type="button" data-lpath-heads="none" aria-pressed="false">None</button>
+                <button type="button" data-lpath-heads="end" aria-pressed="false">End</button>
+                <button type="button" data-lpath-heads="both" aria-pressed="false">Both</button>
+              </div>
+            </div>
+          </div>
+          <div id="ps-lpath-brush-rows" style="display:none;">
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-lpath-brushsize-label">Size %</span>
+              <input id="ps-lpath-brushsize" type="range" min="40" max="300" step="5"
+                     aria-labelledby="ps-lpath-brushsize-label">
+              <input id="ps-lpath-brushsize-num" type="number" min="40" max="300" step="5"
+                     aria-label="Brush size, percent">
+            </div>
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label">Colors</span>
+              <button type="button" class="ps-lcp-open" id="ps-lpath-brushcolor"
+                      aria-pressed="false" aria-label="Choose the brush color"
+                      data-tip="Brush color"></button>
+              <button type="button" class="ps-lcp-open" id="ps-lpath-brushcolor2"
+                      aria-pressed="false" aria-label="Choose the brush's second color"
+                      data-tip="Second color"></button>
+            </div>
+          </div>
+          <div class="ps-inspector-field ps-ltx-row" id="ps-lpath-fill-row">
+            <span class="ps-layout-field-label">Fill</span>
+            <button type="button" class="ps-lcp-open" id="ps-lpath-fill"
+                    aria-pressed="false" aria-label="Choose the fill color"
+                    data-tip="Fill color"></button>
+            <button type="button" class="ps-btn" id="ps-lpath-nofill"
+                    data-tip="No fill">None</button>
+          </div>
+          <div class="ps-loader-hint">
+            Drag a node to reshape. Alt-click a node removes it; double-click the
+            line adds one. The corner handle scales the whole drawing.
           </div>
         </div>
         <div class="ps-inspector-section" id="ps-layout-timeline-section"
@@ -6371,7 +6899,7 @@ if (window.navigator.standalone === true) {
             <input id="ps-ltl-size-num" type="number" min="8" max="24"
                    step="1" aria-label="Timeline text size in pixels">
           </div>
-          <div class="ps-inspector-field ps-ltx-row">
+          <div class="ps-inspector-field ps-ltx-row" id="ps-ltl-labels-row">
             <span class="ps-layout-field-label" id="ps-ltl-labels-label">Labels</span>
             <div class="ps-lunit-seg" role="group" aria-labelledby="ps-ltl-labels-label">
               <button type="button" data-ltl-labels="above" aria-pressed="false">Above</button>
@@ -6413,6 +6941,7 @@ if (window.navigator.standalone === true) {
             <input id="ps-ltl-tickl-num" type="number" min="4" max="40"
                    step="1" aria-label="Tick length in pixels">
           </div>
+          <div id="ps-ltl-free">
           <div class="ps-inspector-field">
             <span class="ps-layout-field-label" id="ps-ltl-ticks-label">Ticks</span>
             <div id="ps-ltl-ticks" class="ps-ltl-list" role="group"
@@ -6426,10 +6955,77 @@ if (window.navigator.standalone === true) {
             <button type="button" class="ps-btn" id="ps-ltl-add-band">Add band</button>
           </div>
           <div class="ps-loader-hint">
-            Drag a tick along the line. Double-click the line to add a tick where
-            you clicked, or a label to edit it here.
+            Drag a tick along the line, or type its place as a percent. Double-click
+            the line to add a tick where you clicked, or a label to edit it there.
+          </div>
+          </div>
+          <!-- A timeline made by the wizard keeps its table (Nov 2026): the
+               axis, then one entry per event, phase, break in time and
+               group. Times are typed here or dragged on the figure, and
+               the whole table reopens from the last button. -->
+          <div id="ps-ltl-plan" style="display:none;">
+            <div class="ps-inspector-field ps-ltx-row">
+              <span class="ps-layout-field-label" id="ps-ltl-ax-unit-label">Unit</span>
+              <input id="ps-ltl-ax-unit" type="text" maxlength="24" spellcheck="false"
+                     autocomplete="off" aria-labelledby="ps-ltl-ax-unit-label">
+              <div class="ps-lunit-seg" role="group" aria-label="Numbers under the ticks">
+                <button type="button" data-ltl-format="prefix" aria-pressed="false">Day 7</button>
+                <button type="button" data-ltl-format="number" aria-pressed="false">7</button>
+                <button type="button" data-ltl-format="none" aria-pressed="false">None</button>
+              </div>
+            </div>
+            <div class="ps-inspector-field ps-ltx-row ps-ltl-axis">
+              <span class="ps-layout-field-label">Axis</span>
+              <input id="ps-ltl-ax-start" type="number" step="any" aria-label="Axis starts at">
+              <span class="ps-ltl-to">to</span>
+              <input id="ps-ltl-ax-end" type="number" step="any" aria-label="Axis ends at">
+              <span class="ps-ltl-to">every</span>
+              <input id="ps-ltl-ax-step" type="number" step="any" min="0"
+                     aria-label="A tick every">
+            </div>
+            <div class="ps-inspector-field">
+              <span class="ps-layout-field-label" id="ps-ltl-events-label">Events</span>
+              <div id="ps-ltl-events" class="ps-ltl-list" role="group"
+                   aria-labelledby="ps-ltl-events-label"></div>
+              <button type="button" class="ps-btn" id="ps-ltl-add-event">Add event</button>
+            </div>
+            <div class="ps-inspector-field">
+              <span class="ps-layout-field-label" id="ps-ltl-phases-label">Phases</span>
+              <div id="ps-ltl-phases" class="ps-ltl-list" role="group"
+                   aria-labelledby="ps-ltl-phases-label"></div>
+              <button type="button" class="ps-btn" id="ps-ltl-add-phase">Add phase</button>
+            </div>
+            <div class="ps-inspector-field">
+              <span class="ps-layout-field-label" id="ps-ltl-breaks-label">Breaks in time</span>
+              <div id="ps-ltl-breaks" class="ps-ltl-list" role="group"
+                   aria-labelledby="ps-ltl-breaks-label"></div>
+              <button type="button" class="ps-btn" id="ps-ltl-add-break">Add break</button>
+            </div>
+            <div class="ps-inspector-field">
+              <span class="ps-layout-field-label" id="ps-ltl-rows-label">Groups, a row each</span>
+              <div id="ps-ltl-rows" class="ps-ltl-list" role="group"
+                   aria-labelledby="ps-ltl-rows-label"></div>
+              <button type="button" class="ps-btn" id="ps-ltl-add-row">Add group</button>
+            </div>
+            <div class="ps-inspector-field">
+              <button type="button" class="ps-btn" id="ps-ltl-edit-table">Edit as a table&hellip;</button>
+            </div>
+            <div class="ps-loader-hint">
+              Drag a mark to change its time, or the end of a phase to change where
+              it stops. Double-click a name to edit it, or the line to add an event.
+            </div>
           </div>
         </div>
+      </div>
+      <!-- The Layers list (Oct 2026, from the Illustrations app): every
+           item front to back, with an eye, a lock, its name and forward
+           and backward steps. A hidden item draws and exports nowhere
+           but keeps its place; a locked item ignores the pointer and is
+           selected from here. -->
+      <div class="ps-inspector-section" id="ps-layout-layers-section">
+        <span class="ps-inspector-section-title">Layers</span>
+        <div id="ps-layout-layers" class="ps-llayers" role="group"
+             aria-label="Layout items, front to back"></div>
       </div>
     </div>
     <!-- Punch list 46. Document administration is used once per document and
@@ -6943,6 +7539,70 @@ if (window.navigator.standalone === true) {
       <button type="button" class="ps-btn" id="ps-layout-gallery-cancel">Cancel</button>
       <button type="button" class="ps-btn ps-primary"
               id="ps-layout-gallery-create">Create layout</button>
+    </div>
+  </div>
+</div>
+<!-- Diagram wizards (Oct 2026): a whole diagram from a few answers, added
+     to the open layout as ordinary boxes, arrows and text in one group. -->
+<div id="ps-wizard-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-wizard-title">
+  <div class="ps-dialog-card" style="width:min(940px,calc(100vw - 30px));">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-wizard-title">Diagram wizards</h2>
+        <p id="ps-wizard-lead">Build a whole diagram from a few answers. Everything it makes is
+          ordinary boxes, arrows and text, grouped, and stays editable.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-wizard-close">Close</button>
+    </div>
+    <div class="ps-dialog-body ps-wizard-grid">
+      <div id="ps-wizard-list" class="ps-wizard-list" role="listbox"
+           aria-label="Wizards"></div>
+      <div class="ps-wizard-side">
+        <strong id="ps-wizard-pick-title" class="ps-wizard-pick-title"></strong>
+        <div id="ps-wizard-form" class="ps-wizard-form"></div>
+        <p id="ps-wizard-note" class="ps-wizard-note"></p>
+        <div id="ps-wizard-preview" class="ps-wizard-preview"
+             aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="ps-dialog-actions">
+      <button type="button" class="ps-btn" id="ps-wizard-cancel">Cancel</button>
+      <button type="button" class="ps-btn ps-primary"
+              id="ps-wizard-add">Add to layout</button>
+    </div>
+  </div>
+</div>
+<div id="ps-lreplace-dialog" class="ps-dialog-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="ps-lreplace-title">
+  <div class="ps-dialog-card" style="max-width:480px;">
+    <div class="ps-dialog-head">
+      <div>
+        <h2 id="ps-lreplace-title">Find and replace in the layout</h2>
+        <p>Searches the text of boxes and text items, arrow labels, and
+           timeline tick and band labels on this layout. Replace all is one
+           undo step.</p>
+      </div>
+      <button type="button" class="ps-btn ps-dialog-close"
+              id="ps-lreplace-close">Close</button>
+    </div>
+    <div class="ps-dialog-body">
+      <label class="ps-inspector-field">Find
+        <input id="ps-lreplace-find" type="text" spellcheck="false" autocomplete="off">
+      </label>
+      <label class="ps-inspector-field">Replace with
+        <input id="ps-lreplace-with" type="text" spellcheck="false" autocomplete="off">
+      </label>
+      <div class="ps-lreplace-opts">
+        <label class="ps-limg-check"><input type="checkbox" id="ps-lreplace-case"> Match case</label>
+        <label class="ps-limg-check"><input type="checkbox" id="ps-lreplace-words"> Whole words</label>
+      </div>
+      <p class="ps-loader-hint" id="ps-lreplace-count" role="status" aria-live="polite"></p>
+    </div>
+    <div class="ps-dialog-actions">
+      <button type="button" class="ps-btn" id="ps-lreplace-cancel">Cancel</button>
+      <button type="button" class="ps-btn ps-primary" id="ps-lreplace-all" disabled>Replace all</button>
     </div>
   </div>
 </div>
@@ -7834,7 +8494,28 @@ if (window.navigator.standalone === true) {
             <input type="radio" name="ps-export-format" value="jpg">
             <span><strong>JPG</strong>Compact</span>
           </label>
+          <label class="ps-export-format">
+            <input type="radio" name="ps-export-format" value="tif">
+            <span><strong>TIFF</strong>Journals</span>
+          </label>
         </div>
+      </div>
+      <!-- Layouts only, PDF only, more than one layout (Oct 2026): the
+           whole figure set as one document, a page per layout at its own
+           page size. -->
+      <div class="ps-export-field" id="ps-export-alllayouts-field" style="display:none;">
+        <label class="ps-export-check">
+          <input type="checkbox" id="ps-export-alllayouts">
+          <span id="ps-export-alllayouts-text">Every layout in the project, one page each</span>
+        </label>
+      </div>
+      <!-- Journal checks (Oct 2026, from the Illustrations app): small
+           type, soft images, items past the edge, empty chart panels,
+           hidden items; Show selects what a finding is about. Layouts only. -->
+      <div class="ps-export-field" id="ps-export-checks-field" style="display:none;">
+        <span class="ps-export-label" id="ps-export-checks-head">Checks</span>
+        <div id="ps-export-checks" class="ps-export-checks" role="list"
+             aria-labelledby="ps-export-checks-head"></div>
       </div>
       <label class="ps-export-field" style="display:block;">
         <span class="ps-export-label">Filename</span>
@@ -7955,6 +8636,6 @@ if (window.navigator.standalone === true) {
 <script src="lib/svg2pdf.umd.min.4ada250f50.js"></script>
 <script src="lib/graphbuilder2.min.98cee416c0.js"></script>
 <script src="lib/ps-tours.9fc7ad2e97.js"></script>
-<script src="lib/ps-shell.b4e93fd53d.js"></script>
+<script src="lib/ps-shell.a53690c428.js"></script>
 </body>
 </html>

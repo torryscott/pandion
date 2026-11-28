@@ -5753,7 +5753,11 @@
     var body = snapOverride || projectSnapshot();
     return JSON.stringify({
       kind: "pandion-plots-project",
-      formatVersion: 3,
+      // 4 since the Layouts port of Oct 2026 (shapes, turns, gradients,
+      // image crops and adjustments, magnified views, drawn paths, the
+      // Layers list's flags): an older page refuses such a file instead of
+      // drawing it with those parts silently missing.
+      formatVersion: 4,
       savedAt: new Date().toISOString(),
       app: "pandion-plots-standalone",
       appVersion: APP_VERSION,
@@ -5955,7 +5959,7 @@
                 background: "shown", pinRecord: true };
     try {
       var p = JSON.parse(window.localStorage.getItem(PS_EXPORT_PREF_KEY) || "null");
-      if (p && /^(svg|pdf|png|jpg)$/.test(p.format)) out.format = p.format;
+      if (p && /^(svg|pdf|png|jpg|tif)$/.test(p.format)) out.format = p.format;
       if (p && [96, 150, 300, 600].indexOf(Number(p.dpi)) !== -1)
         out.dpi = Number(p.dpi);
       if (p && /^(shown|transparent|white)$/.test(p.background))
@@ -5983,6 +5987,7 @@
     if (ext === "svg") return "image/svg+xml";
     if (ext === "png") return "image/png";
     if (ext === "jpg") return "image/jpeg";
+    if (ext === "tif") return "image/tiff";
     if (ext === "pdf") return "application/pdf";
     if (ext === "csv") return "text/csv";
     if (ext === "xlsx")
@@ -5994,6 +5999,7 @@
     if (ext === "svg") return "SVG image";
     if (ext === "png") return "PNG image";
     if (ext === "jpg") return "JPEG image";
+    if (ext === "tif") return "TIFF image";
     if (ext === "pdf") return "PDF document";
     if (ext === "csv") return "CSV spreadsheet";
     if (ext === "xlsx") return "Excel workbook";
@@ -6002,7 +6008,7 @@
   }
   function cleanExportBase(name) {
     name = String(name || "").trim()
-      .replace(/\.(svg|pdf|png|jpe?g)$/i, "")
+      .replace(/\.(svg|pdf|png|jpe?g|tiff?)$/i, "")
       .replace(/[\/\\:*?"<>|\u0000-\u001f]+/g, "_")
       .replace(/[. ]+$/g, "")
       .substring(0, 100);
@@ -6013,19 +6019,21 @@
     return cleanExportBase(c && c.name ? c.name : "plot");
   }
   function exportAccessibleTitle() {
-    var c = activeChart();
+    var c = layDocForRead();
     var name = c && c.name ? String(c.name).trim() : "";
     if (!name) name = isLayoutTab(c) ? "Pandion Plots figure" : "Pandion Plots chart";
     return name;
   }
   function layoutAccessibleDescription() {
-    var c = activeChart();
+    var c = layDocForRead();
     if (!c || !isLayoutTab(c)) return "";
     var items = c.items || [];
     if (!items.length) return "Figure canvas with no placed items.";
     var charts = [], text = [], images = 0, boxes = 0, arrows = 0, timelines = 0;
+    var scaleBars = 0;
     for (var i = 0; i < items.length; i++) {
       var item = items[i] || {};
+      if (item.hidden) continue;
       if (item.kind === "box") {
         boxes++;
         var boxWords = String(item.text || "").replace(/\s+/g, " ").trim();
@@ -6041,7 +6049,10 @@
       } else if (item.kind === "text") {
         var words = String(item.text || "").replace(/\s+/g, " ").trim();
         if (words) text.push(words.substring(0, 120));
-      } else if (item.kind === "image") images++;
+      } else if (item.kind === "image") {
+        images++;
+        if (layScaleBarGeom(item)) scaleBars++;
+      }
     }
     var parts = ["Multi-panel figure with " + items.length +
       (items.length === 1 ? " item" : " items")];
@@ -6052,7 +6063,8 @@
       parts.push("Visible text includes: " + text.slice(0, 5).join("; ") +
         (text.length > 5 ? "; and more" : ""));
     if (images)
-      parts.push(images + (images === 1 ? " added image" : " added images"));
+      parts.push(images + (images === 1 ? " added image" : " added images") +
+        (scaleBars ? " (" + scaleBars + " with a scale bar)" : ""));
     if (boxes || arrows || timelines) {
       var dp = [];
       if (boxes) dp.push(boxes + (boxes === 1 ? " box" : " boxes"));
@@ -6352,8 +6364,20 @@
       }
       base = { w: mw || 720, h: mh || 480 };
     } else base = currentExportSize();
-    var raster = fmt === "png" || fmt === "jpg";
+    var raster = fmt === "png" || fmt === "jpg" || fmt === "tif";
     var scale = raster ? dpi / 96 : 1;
+    // Every layout as one PDF: offered on a layout when the project has
+    // more than one, for PDF only.
+    var allField = el("ps-export-alllayouts-field");
+    if (allField) {
+      var lays = layoutDocs();
+      var showAll = fmt === "pdf" && !pinPins && isLayoutTab(activeChart()) && lays.length > 1;
+      allField.style.display = showAll ? "" : "none";
+      var allText = el("ps-export-alllayouts-text");
+      if (allText) allText.textContent = "Every layout in the project, one page each (" +
+        lays.length + " layouts)";
+    }
+    layChecksSync();
     var pxW = Math.max(1, Math.round(base.w * scale));
     var pxH = Math.max(1, Math.round(base.h * scale));
     var forcedWhite = fmt === "jpg";
@@ -6951,6 +6975,11 @@
     var pageW = layPage().w;
     var wrapW = Math.max(40, Math.min(LAY_TEXT_MAX_W,
       pageW - (Number(item.x) || 0))) - LAY_TEXT_PAD_X * 2;
+    if (layHasMarks(item.text)) {
+      layRunsInto(doc, t, layMarkedLines(String(item.text), wrapW, fs,
+        !!item.bold, !!item.italic), x, fs, fs * LAY_TEXT_LINE);
+      return t;
+    }
     var lines = wrapCaptionLines(String(item.text || "Text"), wrapW, fs,
       (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
       " " + fs + "px sans-serif");
@@ -6972,29 +7001,48 @@
     var g = doc.createElementNS(ns, "g");
     var x = Number(item.x) || 0, y = Number(item.y) || 0;
     var w = Math.max(1, Number(item.w) || 150), h = Math.max(1, Number(item.h) || 44);
-    var bw = st.borderW;
-    var r = doc.createElementNS(ns, "rect");
-    // The canvas border is INSIDE the box (border-box); a stroke sits
-    // centred on the edge, so the rect is inset by half the stroke.
-    r.setAttribute("x", layNum2(x + bw / 2)); r.setAttribute("y", layNum2(y + bw / 2));
-    r.setAttribute("width", layNum2(Math.max(0.5, w - bw)));
-    r.setAttribute("height", layNum2(Math.max(0.5, h - bw)));
-    if (st.corner) r.setAttribute("rx", layNum2(Math.max(0, st.corner - bw / 2)));
-    r.setAttribute("fill", st.fill === "none" ? "none" : st.fill);
-    if (bw) {
-      r.setAttribute("stroke", st.borderColor);
-      r.setAttribute("stroke-width", String(bw));
+    var bw = st.borderW, shape = layBoxShape(item), grad = layBoxGradient(item);
+    var paint = st.fill === "none" ? "none" : st.fill;
+    if (grad && st.fill !== "none") {
+      g.appendChild(layGradientNode(doc, "lg-" + item.id, st.fill, grad));
+      paint = "url(#lg-" + item.id + ")";
     }
-    g.appendChild(r);
+    if (shape === "rect") {
+      var r = doc.createElementNS(ns, "rect");
+      // The canvas border is INSIDE the box (border-box); a stroke sits
+      // centred on the edge, so the rect is inset by half the stroke.
+      r.setAttribute("x", layNum2(x + bw / 2)); r.setAttribute("y", layNum2(y + bw / 2));
+      r.setAttribute("width", layNum2(Math.max(0.5, w - bw)));
+      r.setAttribute("height", layNum2(Math.max(0.5, h - bw)));
+      if (st.corner) r.setAttribute("rx", layNum2(Math.max(0, st.corner - bw / 2)));
+      r.setAttribute("fill", paint);
+      if (bw) {
+        r.setAttribute("stroke", st.borderColor);
+        r.setAttribute("stroke-width", String(bw));
+      }
+      g.appendChild(r);
+    } else {
+      layShapeInto(g, shape, st, x, y, w, h);
+      if (paint !== st.fill) {
+        var gPaths = g.querySelectorAll("path");
+        for (var gp = 0; gp < gPaths.length; gp++)
+          if (gPaths[gp].getAttribute("fill") === st.fill) gPaths[gp].setAttribute("fill", paint);
+      }
+    }
+    var text = layBoxTextValue(item);
+    if (!text) return g;
     var fs = st.fs, rot = layTextRotate(item);
     var font = (item.italic ? "italic " : "") + (item.bold ? "700" : "400") +
       " " + fs + "px sans-serif";
-    var inner = (layBoxTextRotated(item) ? h : w) - LAY_BOX_PAD_X * 2 - bw * 2;
-    var lines = wrapCaptionLines(String(item.text || "Box"),
-      Math.max(8, inner), fs, font);
+    var inset = shape === "rect" ? LAY_BOX_PAD_X : layShapeInset(shape, w);
+    var inner = (layBoxTextRotated(item) ? h : w) - inset * 2 - bw * 2;
+    var marked = layHasMarks(text), mlines = null, lines = null;
+    if (marked) mlines = layMarkedLines(text, Math.max(8, inner), fs, !!item.bold, !!item.italic);
+    else lines = wrapCaptionLines(text, Math.max(8, inner), fs, font);
+    var nLines = marked ? mlines.length : lines.length;
     var t = doc.createElementNS(ns, "text");
     var cx = x + w / 2, cy = y + h / 2, lineH = fs * LAY_TEXT_LINE;
-    var top = cy - lines.length * lineH / 2;
+    var top = cy - nLines * lineH / 2;
     t.setAttribute("x", layNum2(cx));
     t.setAttribute("y", layNum2(top + fs * 0.9));
     t.setAttribute("text-anchor", "middle");
@@ -7005,7 +7053,8 @@
     if (item.italic) t.setAttribute("font-style", "italic");
     if (rot) t.setAttribute("transform", "rotate(" + rot + " " +
       layNum2(cx) + " " + layNum2(cy) + ")");
-    for (var i = 0; i < lines.length; i++) {
+    if (marked) layRunsInto(doc, t, mlines, cx, fs, lineH);
+    else for (var i = 0; i < lines.length; i++) {
       var sp = doc.createElementNS(ns, "tspan");
       sp.setAttribute("x", layNum2(cx));
       if (i > 0) sp.setAttribute("dy", LAY_TEXT_LINE + "em");
@@ -7025,6 +7074,7 @@
     p.setAttribute("stroke", st.color);
     p.setAttribute("stroke-width", String(st.width));
     p.setAttribute("stroke-linejoin", "round");
+    if (st.dashed) p.setAttribute("stroke-dasharray", layArrowDash(st));
     g.appendChild(p);
     for (var i = 0; i < r.heads.length; i++) {
       var poly = doc.createElementNS(ns, "polygon");
@@ -7032,20 +7082,47 @@
       poly.setAttribute("fill", st.color);
       g.appendChild(poly);
     }
+    for (i = 0; i < r.bars.length; i++)
+      g.appendChild(layArrowBarNode(doc, r.bars[i], ox, oy, st));
+    if (r.label) g.appendChild(layArrowLabelNode(doc, r.label, ox, oy, st));
     return g;
   }
-  function layoutExportSource(mode) {
+  // only (optional): the ids of the items to draw, in a box of their own
+  // around them (copy a selection as an image); every item otherwise.
+  function layoutExportSource(mode, only) {
     var ns = "http://www.w3.org/2000/svg";
+    layLensSyncIn(layItems());
+    layTimelineSyncIn(layItems());
     var doc = document.implementation.createDocument(ns, "svg", null);
-    var root = doc.documentElement;
+    var root = doc.documentElement, layer = root;
     root.setAttribute("xmlns", ns);
     root.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-    var page = layPage();
-    root.setAttribute("width", String(page.w));
-    root.setAttribute("height", String(page.h));
-    root.setAttribute("viewBox", "0 0 " + page.w + " " + page.h);
+    var page = layPage(), pick = null, outW = page.w, outH = page.h;
+    if (only && only.length) {
+      pick = {};
+      for (var oi = 0; oi < only.length; oi++) pick[only[oi]] = 1;
+      var b = null, all = layItems();
+      for (oi = 0; oi < all.length; oi++) {
+        if (!pick[all[oi].id]) continue;
+        var r = layItemRect(all[oi], page);
+        if (!b) b = { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+        else { b.x = Math.min(b.x, r.x); b.y = Math.min(b.y, r.y);
+               b.right = Math.max(b.right, r.right); b.bottom = Math.max(b.bottom, r.bottom); }
+      }
+      if (!b) b = { x: 0, y: 0, right: page.w, bottom: page.h };
+      var pad = 8;
+      outW = Math.max(1, Math.round(b.right - b.x + pad * 2));
+      outH = Math.max(1, Math.round(b.bottom - b.y + pad * 2));
+      layer = doc.createElementNS(ns, "g");
+      layer.setAttribute("transform", "translate(" + layNum2(pad - b.x) + " " +
+        layNum2(pad - b.y) + ")");
+    }
+    root.setAttribute("width", String(outW));
+    root.setAttribute("height", String(outH));
+    root.setAttribute("viewBox", "0 0 " + outW + " " + outH);
     var bg = effectiveExportBackground(mode, true);
-    addSvgBackground(doc, bg, page.w, page.h);
+    addSvgBackground(doc, bg, outW, outH);
+    if (layer !== root) root.appendChild(layer);
     // Chart panels and kept pages are WHITE PANELS on the canvas (the CSS
     // on data-kind chart and data-kept), and the export has to say the same
     // thing, or two overlapping panels export with the lower one showing
@@ -7061,30 +7138,94 @@
       r.setAttribute("width", String(Math.max(24, Number(it.w) || 240)));
       r.setAttribute("height", String(Math.max(24, Number(it.h) || 180)));
       r.setAttribute("fill", "#ffffff");
-      root.appendChild(r);
+      put(r, it);
+    }
+    // An item's opacity rides its node, and the white panel under it.
+    function put(node, it) {
+      var o = layItemOpacity(it);
+      if (o < 1) node.setAttribute("opacity", layNum2(o));
+      var tf = layTurnTransform(it);
+      if (tf) {
+        var turned = doc.createElementNS(ns, "g");
+        turned.setAttribute("transform", tf);
+        turned.appendChild(node);
+        node = turned;
+      }
+      layer.appendChild(node);
+    }
+    // The picture alone mirrors; its frame and scale bar never do.
+    function flipPic(node, it) {
+      var fx = Number(it.x) || 0, fy = Number(it.y) || 0;
+      var fw = Math.max(24, Number(it.w) || 240), fh = Math.max(24, Number(it.h) || 180);
+      var ftf = layFlipTransform(it, fx + fw / 2, fy + fh / 2);
+      if (ftf) node.setAttribute("transform", ftf);
     }
     var items = layItems();
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
+      if (pick && !pick[item.id]) continue;
+      if (item.hidden) continue;
       if (item.kind === "chart" ||
           (item.kind === "image" && item.srcPin)) panelRect(item);
       if (item.kind === "box") {
-        root.appendChild(layoutBoxNode(doc, item));
+        put(layoutBoxNode(doc, item), item);
         continue;
       }
       if (item.kind === "arrow") {
-        root.appendChild(layoutArrowNode(doc, item));
+        put(layoutArrowNode(doc, item), item);
+        continue;
+      }
+      if (item.kind === "path") {
+        put(layoutPathNode(doc, item), item);
         continue;
       }
       if (item.kind === "timeline") {
-        root.appendChild(layoutTimelineNode(doc, item));
+        put(layoutTimelineNode(doc, item), item);
         continue;
       }
       if (item.kind === "text") {
-        root.appendChild(layoutTextNode(doc, item));
+        put(layoutTextNode(doc, item), item);
         continue;
       }
       if (item.kind === "image" && item.src) {
+        // A cropped picture draws at its full size inside a window: the
+        // item box, as a rectangle, a rounded one or an ellipse.
+        var win = (function () {
+          var crop = layImageCrop(item), mask = layImageCropShape(item);
+          if (!crop && mask === "rect") return null;
+          var bx = Number(item.x) || 0, by = Number(item.y) || 0;
+          var bw = Math.max(24, Number(item.w) || 240), bh = Math.max(24, Number(item.h) || 180);
+          var cid = "clip-" + String(item.id).replace(/[^A-Za-z0-9_-]/g, "-");
+          var cp = doc.createElementNS(ns, "clipPath");
+          cp.setAttribute("id", cid);
+          var shapeEl;
+          if (mask === "ellipse") {
+            shapeEl = doc.createElementNS(ns, "ellipse");
+            shapeEl.setAttribute("cx", layNum2(bx + bw / 2)); shapeEl.setAttribute("cy", layNum2(by + bh / 2));
+            shapeEl.setAttribute("rx", layNum2(bw / 2)); shapeEl.setAttribute("ry", layNum2(bh / 2));
+          } else {
+            shapeEl = doc.createElementNS(ns, "rect");
+            shapeEl.setAttribute("x", layNum2(bx)); shapeEl.setAttribute("y", layNum2(by));
+            shapeEl.setAttribute("width", layNum2(bw)); shapeEl.setAttribute("height", layNum2(bh));
+            if (mask === "rounded") shapeEl.setAttribute("rx", layNum2(0.12 * Math.min(bw, bh)));
+          }
+          cp.appendChild(shapeEl);
+          var art = layImageArt(item) || { x: 0, y: 0, w: bw, h: bh };
+          return { clip: cp, id: cid, ax: bx + art.x, ay: by + art.y, aw: art.w, ah: art.h, crop: !!crop };
+        })();
+        function windowed(picNode) {
+          if (!win) return picNode;
+          var wg = doc.createElementNS(ns, "g");
+          wg.appendChild(win.clip);
+          var inner = doc.createElementNS(ns, "g");
+          inner.setAttribute("clip-path", "url(#" + win.id + ")");
+          picNode.setAttribute("x", layNum2(win.ax)); picNode.setAttribute("y", layNum2(win.ay));
+          picNode.setAttribute("width", layNum2(win.aw)); picNode.setAttribute("height", layNum2(win.ah));
+          if (win.crop) picNode.setAttribute("preserveAspectRatio", "none");
+          inner.appendChild(picNode);
+          wg.appendChild(inner);
+          return wg;
+        }
         // An SVG-sourced item (a Pinboard pin) is inlined as REAL nodes,
         // not referenced as an <image>: svg2pdf converts nodes to vector
         // PDF but treats <image href="data:image/svg..."> as an opaque
@@ -7105,7 +7246,11 @@
             nested.setAttribute("height",
               String(Math.max(24, Number(item.h) || 180)));
             nested.setAttribute("preserveAspectRatio", "xMidYMid meet");
-            root.appendChild(nested);
+            var nestedOut = windowed(nested);
+            flipPic(nestedOut, item);
+            put(nestedOut, item);
+            var decorInl = layImageDecorNode(doc, item);
+            if (decorInl) put(decorInl, item);
             continue;
           } catch (eInl) { /* fall through to the <image> path */ }
         }
@@ -7115,10 +7260,17 @@
         pic.setAttribute("width", String(Math.max(24, Number(item.w) || 240)));
         pic.setAttribute("height", String(Math.max(24, Number(item.h) || 180)));
         pic.setAttribute("preserveAspectRatio", "xMidYMid meet");
-        pic.setAttribute("href", item.src);
+        // The baked pixels when an adjustment is set (the export waited for
+        // them); the picture as imported otherwise.
+        var bakedOut = layImageBaked(item), srcOut = bakedOut ? bakedOut.src : item.src;
+        pic.setAttribute("href", srcOut);
         pic.setAttributeNS("http://www.w3.org/1999/xlink",
-          "xlink:href", item.src);
-        root.appendChild(pic);
+          "xlink:href", srcOut);
+        var picOut = windowed(pic);
+        flipPic(picOut, item);
+        put(picOut, item);
+        var decorPic = layImageDecorNode(doc, item);
+        if (decorPic) put(decorPic, item);
         continue;
       }
       if (item.kind !== "chart") continue;
@@ -7137,7 +7289,7 @@
       nested.removeAttribute("aria-labelledby");
       nested.removeAttribute("style");
       stampSnapshotFonts(nested, snap);
-      root.appendChild(nested);
+      put(nested, item);
     }
     applySvgAccessibility(doc, exportAccessibleTitle(),
       exportAccessibleDescription());
@@ -7160,7 +7312,7 @@
       window.GraphBuilder2.exportFlattenPatterns(root);
     return {
       svg: serializeExportSvg(root),
-      w: page.w, h: page.h
+      w: outW, h: outH
     };
   }
   // Punch list B2. The on-screen canvas is honest about a panel it cannot
@@ -7171,7 +7323,7 @@
   // chart. Refuse and explain, per the house rule from the reshape work:
   // never drop something invisibly.
   function layUndrawablePanels() {
-    var lay = activeChart(), out = [];
+    var lay = layDocForRead(), out = [];
     if (!lay || !isLayoutTab(lay)) return out;
     var items = lay.items || [], seen = {};
     for (var i = 0; i < items.length; i++) {
@@ -7334,6 +7486,12 @@
         URL.revokeObjectURL(url);
         try { ctx.drawImage(img, 0, 0, w, h); }
         catch (e) { reject(new Error("The browser could not render the exported SVG.")); return; }
+        if (mime === "image/tiff") {
+          psTiffBlob(canvas, Number(dpi) || 96).then(function (blob) {
+            resolve({ blob: blob, width: w, height: h });
+          }, function () { reject(new Error("The browser could not encode the TIFF.")); });
+          return;
+        }
         canvas.toBlob(function (blob) {
           if (!blob) { reject(new Error("The browser could not encode the exported image.")); return; }
           psStampBlobDpi(blob, mime, Number(dpi) || 96).then(function (stamped) {
@@ -7358,6 +7516,207 @@
         family.indexOf("georgia") !== -1)
       return "times";
     return "helvetica";
+  }
+  // ---- Greek letters and symbols in PDF (Oct 2026, from Pandion
+  // Illustrations). The PDF's standard fonts encode only Western text
+  // (WinAnsi), so any other character garbled its text and upset the
+  // spacing of its whole line: an axis title "DeltaF/F (%)", "IL-1beta",
+  // "<= 5 uM", arrows, Ca2+. Greek, arrows and math now go to the standard
+  // Symbol font, which every PDF reader has; marks such as a check mark to
+  // ZapfDingbats; Unicode super- and subscripts are drawn as small raised
+  // or lowered runs; a few others are written out ("-|" for the inhibition
+  // sign); anything else becomes "?" rather than garbling its line. Every
+  // run names its own font, because svg2pdf keeps the previous run's font
+  // for a run that names none. Tables are built from character codes so
+  // the source stays plain ASCII.
+  var PDF_SYMBOL_CODES = {}, PDF_DINGBAT_CODES = {}, PDF_SUP = {}, PDF_SUB = {};
+  var PDF_PLAIN = {}, PDF_WINANSI_EXTRA = {};
+  var PDF_FONT_WIDTHS = { symbol: {}, zapfdingbats: {} };
+  (function () {
+    var i, lower = "abgdezhqiklmnxoprstufcyw", upper = "ABGDEZHQIKLMNXOPRSTUFCYW";
+    var lw = [631, 549, 549, 494, 439, 521, 411, 603, 329, 603, 549, 549, 576,
+              521, 549, 549, 521, 549, 603, 439, 576, 713, 686, 493, 686, 494];
+    var uw = [722, 667, 722, 612, 611, 763, 603, 722, 333, 631, 722, 686, 889,
+              722, 722, 768, 741, 556, 592, 611, 690, 439, 768, 645, 795, 611];
+    var az = "abcdefghijklmnopqrstuvwxyz", AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (i = 0; i < 26; i++) {
+      PDF_FONT_WIDTHS.symbol[az.charAt(i)] = lw[i];
+      PDF_FONT_WIDTHS.symbol[AZ.charAt(i)] = uw[i];
+    }
+    // alpha..omega (final sigma, 0x3c2, sits between rho and sigma)
+    for (i = 0; i < 24; i++) {
+      PDF_SYMBOL_CODES[String.fromCharCode(0x3b1 + i + (i >= 17 ? 1 : 0))] = lower.charAt(i);
+      PDF_SYMBOL_CODES[String.fromCharCode(0x391 + i + (i >= 17 ? 1 : 0))] = upper.charAt(i);
+    }
+    var sym = [[0x3c2, "V"], [0x3d5, "j"], [0x3d1, "J"], [0x3d6, "v"], [0x2126, "W"],
+      [0x2200, '"'], [0x2203, "$"], [0x220b, "'"], [0x2217, "*"], [0x2212, "-"],
+      [0x2245, "@"], [0x2234, "\\"], [0x22a5, "^"], [0x223c, "~"],
+      [0x2032, 0xa2], [0x2264, 0xa3], [0x2044, 0xa4], [0x221e, 0xa5], [0x2663, 0xa7],
+      [0x2666, 0xa8], [0x2665, 0xa9], [0x2660, 0xaa], [0x2194, 0xab], [0x2190, 0xac],
+      [0x2191, 0xad], [0x2192, 0xae], [0x2193, 0xaf], [0x2033, 0xb2], [0x2265, 0xb3],
+      [0x221d, 0xb5], [0x2202, 0xb6], [0x2260, 0xb9], [0x2261, 0xba], [0x2248, 0xbb],
+      [0x21b5, 0xbf], [0x2135, 0xc0], [0x2297, 0xc4], [0x2295, 0xc5], [0x2205, 0xc6],
+      [0x2229, 0xc7], [0x222a, 0xc8], [0x2283, 0xc9], [0x2287, 0xca], [0x2284, 0xcb],
+      [0x2282, 0xcc], [0x2286, 0xcd], [0x2208, 0xce], [0x2209, 0xcf], [0x2220, 0xd0],
+      [0x2207, 0xd1], [0x220f, 0xd5], [0x221a, 0xd6], [0x22c5, 0xd7], [0x2227, 0xd9],
+      [0x2228, 0xda], [0x21d4, 0xdb], [0x21d0, 0xdc], [0x21d1, 0xdd], [0x21d2, 0xde],
+      [0x21d3, 0xdf], [0x25ca, 0xe0], [0x2329, 0xe1], [0x2211, 0xe5], [0x232a, 0xf1],
+      [0x222b, 0xf2]];
+    for (i = 0; i < sym.length; i++)
+      PDF_SYMBOL_CODES[String.fromCharCode(sym[i][0])] =
+        typeof sym[i][1] === "number" ? String.fromCharCode(sym[i][1]) : sym[i][1];
+    // Advance widths (1/1000 em) from Adobe's metrics for the codes above
+    // that are not letters; jsPDF carries only a few of them.
+    var symW = [['"', 713], ["$", 549], ["'", 439], ["*", 500], ["-", 549], ["@", 549],
+      ["\\", 863], ["^", 658], ["~", 549], [0xa2, 247], [0xa3, 549], [0xa4, 167],
+      [0xa5, 713], [0xa7, 753], [0xa8, 753], [0xa9, 753], [0xaa, 753], [0xab, 1042],
+      [0xac, 987], [0xad, 603], [0xae, 987], [0xaf, 603], [0xb2, 411], [0xb3, 549],
+      [0xb5, 713], [0xb6, 494], [0xb9, 549], [0xba, 549], [0xbb, 549], [0xbf, 658],
+      [0xc0, 823], [0xc4, 768], [0xc5, 768], [0xc6, 823], [0xc7, 768], [0xc8, 768],
+      [0xc9, 713], [0xca, 713], [0xcb, 713], [0xcc, 713], [0xcd, 713], [0xce, 713],
+      [0xcf, 713], [0xd0, 768], [0xd1, 713], [0xd5, 823], [0xd6, 549], [0xd7, 250],
+      [0xd9, 603], [0xda, 603], [0xdb, 1042], [0xdc, 987], [0xdd, 603], [0xde, 987],
+      [0xdf, 603], [0xe0, 494], [0xe1, 329], [0xe5, 713], [0xf1, 329], [0xf2, 274]];
+    for (i = 0; i < symW.length; i++)
+      PDF_FONT_WIDTHS.symbol[typeof symW[i][0] === "number"
+        ? String.fromCharCode(symW[i][0]) : symW[i][0]] = symW[i][1];
+    var ding = [[0x2713, "3", 755], [0x2714, "4", 846], [0x2715, "5", 762],
+      [0x2716, "6", 761], [0x2717, "7", 571], [0x2718, "8", 677], [0x2605, "H", 816],
+      [0x25cf, "l", 791], [0x25a0, "n", 761], [0x25b2, "s", 892], [0x25bc, "t", 892],
+      [0x25c6, "u", 788]];
+    for (i = 0; i < ding.length; i++) {
+      PDF_DINGBAT_CODES[String.fromCharCode(ding[i][0])] = ding[i][1];
+      PDF_FONT_WIDTHS.zapfdingbats[ding[i][1]] = ding[i][2];
+    }
+    var en = String.fromCharCode(0x2013);
+    var sup = [[0x2070, "0"], [0xb9, "1"], [0xb2, "2"], [0xb3, "3"], [0x2074, "4"],
+      [0x2075, "5"], [0x2076, "6"], [0x2077, "7"], [0x2078, "8"], [0x2079, "9"],
+      [0x207a, "+"], [0x207b, en], [0x207c, "="], [0x207d, "("], [0x207e, ")"],
+      [0x207f, "n"], [0x2071, "i"]];
+    for (i = 0; i < sup.length; i++) PDF_SUP[String.fromCharCode(sup[i][0])] = sup[i][1];
+    var sub = [[0x2080, "0"], [0x2081, "1"], [0x2082, "2"], [0x2083, "3"], [0x2084, "4"],
+      [0x2085, "5"], [0x2086, "6"], [0x2087, "7"], [0x2088, "8"], [0x2089, "9"],
+      [0x208a, "+"], [0x208b, en], [0x208c, "="], [0x208d, "("], [0x208e, ")"]];
+    for (i = 0; i < sub.length; i++) PDF_SUB[String.fromCharCode(sub[i][0])] = sub[i][1];
+    var plain = [[0x21cc, "<=>"], [0x22a3, "-|"], [0x2642, "(m)"], [0x2640, "(f)"],
+      [0x2197, "/"], [0x2198, "\\"], [0x21a6, "|->"], [0x2195, "|"], [0x2213, "-+"],
+      [0x226a, "<<"], [0x226b, ">>"], [0x2243, "~="], [0x2235, "..."], [0x22ef, "..."],
+      [0x25cb, "o"], [0x25a1, "[]"], [0x25b3, "/\\"], [0x25c7, "<>"], [0x2218, "o"],
+      [0x25b6, ">"], [0x25c0, "<"]];
+    for (i = 0; i < plain.length; i++) PDF_PLAIN[String.fromCharCode(plain[i][0])] = plain[i][1];
+    var extra = [0x20ac, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030,
+      0x160, 0x2039, 0x152, 0x17d, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013,
+      0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x17e, 0x178];
+    for (i = 0; i < extra.length; i++) PDF_WINANSI_EXTRA[String.fromCharCode(extra[i])] = 1;
+  })();
+  function pdfWinAnsi(c) {
+    var n = c.charCodeAt(0);
+    return (n >= 0x20 && n <= 0x7e) || (n >= 0xa0 && n <= 0xff) ||
+      PDF_WINANSI_EXTRA.hasOwnProperty(c);
+  }
+  // A text node's characters in pieces, each drawable in one PDF font,
+  // raised or lowered. Surrogate pairs (one character outside the BMP)
+  // stay together and, having no font, become "?".
+  function pdfPieces(text) {
+    var out = [], s = String(text), i = 0;
+    while (i < s.length) {
+      var c = s.charAt(i), code = s.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < s.length) { c = s.substr(i, 2); i += 2; }
+      else i += 1;
+      var kind, put;
+      if (PDF_SUP.hasOwnProperty(c)) { kind = "sup"; put = PDF_SUP[c]; }
+      else if (PDF_SUB.hasOwnProperty(c)) { kind = "sub"; put = PDF_SUB[c]; }
+      else if (c.length === 1 && pdfWinAnsi(c)) { kind = "text"; put = c; }
+      else if (PDF_SYMBOL_CODES.hasOwnProperty(c)) { kind = "symbol"; put = PDF_SYMBOL_CODES[c]; }
+      else if (PDF_DINGBAT_CODES.hasOwnProperty(c)) { kind = "zapfdingbats"; put = PDF_DINGBAT_CODES[c]; }
+      else { kind = "text"; put = PDF_PLAIN.hasOwnProperty(c) ? PDF_PLAIN[c] : "?"; }
+      var last = out[out.length - 1];
+      if (last && last.kind === kind) last.text += put;
+      else out.push({ kind: kind, text: put });
+    }
+    // svg2pdf drops the leading space of a run that follows another, which
+    // closed up "-> Ca" to "->Ca"; a space that follows a symbol, mark or
+    // raised run ends that run instead (every PDF font has a space).
+    for (var k = 1; k < out.length; k++) {
+      if (out[k].kind !== "text" || out[k - 1].kind === "text") continue;
+      var m = /^\s+/.exec(out[k].text);
+      if (!m) continue;
+      out[k - 1].text += m[0];
+      out[k].text = out[k].text.slice(m[0].length);
+      if (!out[k].text) { out.splice(k, 1); k--; }
+    }
+    return out;
+  }
+  // How far a raised or lowered piece sits from the baseline, at 70% size.
+  var PDF_SHIFT = { sup: -0.36, sub: 0.18 };
+  function pdfOwnAttr(el, name) {
+    for (var node = el; node && node.nodeType === 1; node = node.parentNode) {
+      var v = node.getAttribute(name);
+      if (v) return v;
+    }
+    return null;
+  }
+  // Every text node of the document, split where its font must change.
+  // Runs after normalizePdfFonts, which maps families to the core fonts
+  // and would fold "symbol" into helvetica if it ran after this.
+  function pdfSplitSymbolRuns(root) {
+    var doc = root.ownerDocument, texts = root.querySelectorAll("text"), t, n;
+    for (t = 0; t < texts.length; t++) {
+      var walker = doc.createTreeWalker(texts[t], 4), nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (n = 0; n < nodes.length; n++) {
+        var node = nodes[n], pieces = pdfPieces(node.data);
+        if (pieces.length <= 1 && (!pieces.length || pieces[0].kind === "text")) {
+          if (pieces.length && pieces[0].text !== node.data) node.data = pieces[0].text;
+          continue;
+        }
+        var owner = node.parentNode;
+        var family = pdfCoreFont(pdfOwnAttr(owner, "font-family") || "sans-serif");
+        var wgt = pdfOwnAttr(owner, "font-weight");
+        var weight = parseInt(wgt, 10) >= 600 || wgt === "bold" ? "bold" : "normal";
+        var slant = pdfOwnAttr(owner, "font-style") === "italic" ? "italic" : "normal";
+        var size = parseFloat(pdfOwnAttr(owner, "font-size")) || 16;
+        var shift = 0, runs = [], p;
+        for (p = 0; p < pieces.length; p++) {
+          var piece = pieces[p];
+          var span = doc.createElementNS("http://www.w3.org/2000/svg", "tspan");
+          var target = (PDF_SHIFT[piece.kind] || 0) * size;
+          if (target !== shift) {
+            span.setAttribute("dy", layNum2(target - shift));
+            shift = target;
+          }
+          var special = piece.kind === "symbol" || piece.kind === "zapfdingbats";
+          span.setAttribute("font-family", special ? piece.kind : family);
+          span.setAttribute("font-weight", special ? "normal" : weight);
+          span.setAttribute("font-style", special ? "normal" : slant);
+          span.setAttribute("font-size", layNum2(PDF_SHIFT[piece.kind] ? size * 0.7 : size));
+          span.textContent = piece.text;
+          runs.push(span);
+        }
+        for (p = 0; p < runs.length; p++) owner.insertBefore(runs[p], node);
+        owner.removeChild(node);
+        // Back to the baseline for whatever follows on this line.
+        var next = runs[runs.length - 1].nextSibling;
+        if (shift && next && next.nodeType === 1 && !next.hasAttribute("y"))
+          next.setAttribute("dy", layNum2((Number(next.getAttribute("dy")) || 0) - shift));
+      }
+    }
+  }
+  // jsPDF knows only a few of Symbol's and ZapfDingbats' widths; svg2pdf
+  // lays text out with them, so the rest are filled in.
+  function pdfAddSymbolWidths(pdf) {
+    for (var name in PDF_FONT_WIDTHS) {
+      if (!PDF_FONT_WIDTHS.hasOwnProperty(name)) continue;
+      var font = null;
+      try { font = pdf.internal.getFont(name, "normal"); } catch (e) { font = null; }
+      var widths = font && font.metadata && font.metadata.Unicode &&
+        font.metadata.Unicode.widths;
+      if (!widths) continue;
+      var scale = (widths.fof == null ? 100 : widths.fof) / 1000;
+      var table = PDF_FONT_WIDTHS[name];
+      for (var c in table) if (table.hasOwnProperty(c))
+        widths[c.charCodeAt(0)] = table[c] * scale;
+    }
   }
   function normalizePdfFonts(root) {
     var text = root.querySelectorAll("text");
@@ -7486,6 +7845,7 @@
             ? words.join(" ") : caption.textContent);
         }
         normalizePdfFonts(svgDoc.documentElement);
+        pdfSplitSymbolRuns(svgDoc.documentElement);
       } catch (e) {
         reject(e);
         return;
@@ -7501,6 +7861,7 @@
           compress: true,
           putOnlyUsedFonts: true
         });
+        pdfAddSymbolWidths(pdf);
         pdf.setProperties({
           title: pdfTitle,
           subject: pdfDescription.substring(0, 2000),
@@ -7542,9 +7903,171 @@
       return rasterizeExport(source, "image/png", dpi).then(function (x) { return x.blob; });
     if (format === "jpg")
       return rasterizeExport(source, "image/jpeg", dpi).then(function (x) { return x.blob; });
+    if (format === "tif")
+      return rasterizeExport(source, "image/tiff", dpi).then(function (x) { return x.blob; });
     if (format === "pdf")
       return vectorPdfBlob(source);
     return Promise.reject(new Error("Unsupported export format."));
+  }
+  // ---- TIFF (Oct 2026, from Pandion Illustrations), the raster many
+  // journals ask for: baseline little-endian, 8 bits per sample, RGB (RGBA
+  // with unassociated alpha when any pixel is transparent), one strip per
+  // 64 KB of rows, Deflate where the browser has CompressionStream and
+  // uncompressed otherwise, the resolution written as dots per inch.
+  function psTiffBlob(canvas, dpi) {
+    var w = canvas.width, h = canvas.height;
+    var data = canvas.getContext("2d").getImageData(0, 0, w, h).data;
+    var alpha = false, i;
+    for (i = 3; i < data.length; i += 4) if (data[i] < 255) { alpha = true; break; }
+    var spp = alpha ? 4 : 3, pixels = new Uint8Array(w * h * spp), q = 0;
+    for (i = 0; i < data.length; i += 4) {
+      pixels[q++] = data[i]; pixels[q++] = data[i + 1]; pixels[q++] = data[i + 2];
+      if (alpha) pixels[q++] = data[i + 3];
+    }
+    var rowsPerStrip = Math.max(1, Math.floor(65536 / (w * spp))), strips = [];
+    for (var y = 0; y < h; y += rowsPerStrip) {
+      var rows = Math.min(rowsPerStrip, h - y);
+      strips.push(pixels.subarray(y * w * spp, (y + rows) * w * spp));
+    }
+    var compress = typeof window.CompressionStream === "function";
+    function pack(bytes) {
+      if (!compress) return Promise.resolve(bytes);
+      var cs = new window.CompressionStream("deflate");
+      var writer = cs.writable.getWriter();
+      writer.write(bytes); writer.close();
+      return new Response(cs.readable).arrayBuffer().then(function (buf) {
+        return new Uint8Array(buf);
+      });
+    }
+    return Promise.all(strips.map(pack)).then(function (packed) {
+      return psTiffAssemble(w, h, spp, alpha, Number(dpi) || 96, packed, compress,
+        rowsPerStrip);
+    });
+  }
+  function psTiffAssemble(w, h, spp, alpha, dpi, strips, compressed, rowsPerStrip) {
+    var software = "Pandion Plots", i, j;
+    // [tag, type (2 ascii, 3 short, 4 long, 5 rational), values]
+    var bits = []; for (i = 0; i < spp; i++) bits.push(8);
+    var sizes = []; for (i = 0; i < strips.length; i++) sizes.push(strips[i].length);
+    var entries = [
+      [256, 4, [w]], [257, 4, [h]], [258, 3, bits], [259, 3, [compressed ? 8 : 1]],
+      [262, 3, [2]], [273, 4, null], [277, 3, [spp]], [278, 4, [rowsPerStrip]],
+      [279, 4, sizes], [282, 5, [dpi, 1]], [283, 5, [dpi, 1]], [284, 3, [1]],
+      [296, 3, [2]], [305, 2, software]
+    ];
+    if (alpha) entries.push([338, 3, [2]]);
+    var typeSize = { 2: 1, 3: 2, 4: 4, 5: 8 };
+    function countOf(e) {
+      if (e[1] === 2) return e[2].length + 1;
+      if (e[0] === 273) return strips.length;
+      return e[1] === 5 ? e[2].length / 2 : e[2].length;
+    }
+    var pos = 8 + 2 + 12 * entries.length + 4, places = [];
+    for (i = 0; i < entries.length; i++) {
+      var bytes = countOf(entries[i]) * typeSize[entries[i][1]];
+      if (bytes > 4) { places[i] = pos; pos += bytes + (bytes % 2); }
+    }
+    var offsets = [];
+    for (i = 0; i < strips.length; i++) { offsets.push(pos); pos += strips[i].length + (strips[i].length % 2); }
+    entries[5][2] = offsets;
+    var buf = new ArrayBuffer(pos), view = new DataView(buf), out = new Uint8Array(buf);
+    out[0] = 73; out[1] = 73; view.setUint16(2, 42, true); view.setUint32(4, 8, true);
+    view.setUint16(8, entries.length, true);
+    function writeValues(e, at) {
+      var vals = e[2];
+      if (e[1] === 2) {
+        for (j = 0; j < vals.length; j++) out[at + j] = vals.charCodeAt(j) & 0xff;
+        out[at + vals.length] = 0;
+        return;
+      }
+      for (j = 0; j < vals.length; j++) {
+        if (e[1] === 3) view.setUint16(at + j * 2, vals[j], true);
+        else view.setUint32(at + j * 4, vals[j], true);
+      }
+    }
+    for (i = 0; i < entries.length; i++) {
+      var at = 10 + i * 12, e = entries[i];
+      view.setUint16(at, e[0], true);
+      view.setUint16(at + 2, e[1], true);
+      view.setUint32(at + 4, countOf(e), true);
+      if (places[i] != null) { view.setUint32(at + 8, places[i], true); writeValues(e, places[i]); }
+      else writeValues(e, at + 8);
+    }
+    view.setUint32(10 + entries.length * 12, 0, true);
+    for (i = 0; i < strips.length; i++) out.set(strips[i], offsets[i]);
+    return new Blob([buf], { type: "image/tiff" });
+  }
+  // Every layout in the project as one PDF, a page per layout at its own
+  // size, each page a tagged Figure with the layout's description.
+  function layoutDocs() {
+    var all = PROJECT.charts || [], out = [];
+    for (var i = 0; i < all.length; i++) if (isLayoutTab(all[i])) out.push(all[i]);
+    return out;
+  }
+  function exportAllLayoutsPdf(mode) {
+    var JsPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!JsPDF || !JsPDF.API || typeof JsPDF.API.svg !== "function")
+      return Promise.reject(new Error("The PDF exporter did not load. Reload and try again."));
+    var docs = layoutDocs();
+    if (!docs.length) return Promise.reject(new Error("There is no layout to export."));
+    var pdf = null, drawFigure = null, chain = Promise.resolve(), names = [];
+    for (var i = 0; i < docs.length; i++) names.push(docs[i].name || "Layout");
+    docs.forEach(function (doc) {
+      chain = chain.then(function () {
+        return new Promise(function (resolve, reject) {
+          ensureSnapshotsThen(function () {
+            var page = null;
+            try {
+              page = layWithDoc(doc, function () {
+                var bad = layUndrawablePanels();
+                if (bad.length) throw new Error("Export stopped: " + (doc.name || "a layout") +
+                  " has " + bad.length + (bad.length === 1 ? " panel" : " panels") +
+                  " with no chart to draw. " + bad.map(function (b) {
+                    return b.name + " " + b.why + ".";
+                  }).join(" "));
+                var source = layoutExportSource(mode);
+                var desc = doc === activeChart() ? exportAccessibleDescription()
+                  : (typeof doc.exportDescription === "string" && doc.exportDescription.trim()) ||
+                    generatedExportDescription();
+                return { source: source, desc: desc };
+              });
+            } catch (e) { reject(e); return; }
+            var svgDoc;
+            try {
+              svgDoc = parseExportSvg(page.source.svg);
+              normalizePdfFonts(svgDoc.documentElement);
+              pdfSplitSymbolRuns(svgDoc.documentElement);
+            } catch (e) { reject(e); return; }
+            var pageW = Math.max(1, page.source.w * 72 / 96);
+            var pageH = Math.max(1, page.source.h * 72 / 96);
+            var orient = pageW >= pageH ? "landscape" : "portrait";
+            try {
+              if (!pdf) {
+                pdf = new JsPDF({ orientation: orient, unit: "pt", format: [pageW, pageH],
+                                  compress: true, putOnlyUsedFonts: true });
+                pdf.setProperties({ title: (PROJECT.name || "Pandion Plots") + " - Layouts",
+                  subject: names.join("; ").substring(0, 2000), creator: appStamp() });
+                pdfAddSymbolWidths(pdf);
+                drawFigure = tagPdfFigures(pdf);
+              } else pdf.addPage([pageW, pageH], orient);
+            } catch (e) { reject(new Error("The vector PDF document could not be created.")); return; }
+            drawFigure(page.desc, function () {
+              return pdf.svg(svgDoc.documentElement, { x: 0, y: 0, width: pageW,
+                height: pageH, loadExternalStyleSheets: false });
+            }).then(resolve, function (e) {
+              try { console.warn("Pandion Plots vector PDF conversion failed", e); } catch (ignore) {}
+              reject(new Error((doc.name || "A layout") +
+                " contains SVG content the vector PDF exporter could not convert. " +
+                "SVG export will preserve it exactly."));
+            });
+          }, doc);
+        });
+      });
+    });
+    return chain.then(function () {
+      try { return pdf.output("blob"); }
+      catch (e) { throw new Error("The vector PDF could not be encoded."); }
+    });
   }
   // Copy the active chart or layout to the clipboard as a crisp PNG
   // (Tier 1 feature: the everyday paste-into-slides motion). Reuses the
@@ -8727,6 +9250,91 @@
       }).then(done, failed);
     }
   }
+  // Copy as SVG (Oct 2026, from Pandion Illustrations): the export's own
+  // vector markup on the clipboard, as image/svg+xml where the browser
+  // offers it and as text otherwise, so a figure pastes into an editor
+  // that takes vectors (Illustrator, Inkscape, Affinity) still editable.
+  function copyActiveAsSvg() {
+    var ws = appWorkspace();
+    if (ws === "data" || !workspaceDocument(ws)) return Promise.resolve("unavailable");
+    if (!navigator.clipboard) {
+      showToast("This browser does not offer clipboard writing - use Export instead.", true);
+      return Promise.resolve("unsupported");
+    }
+    var what = isLayoutTab(activeChart()) ? "Layout" : "Chart";
+    function done() {
+      showToast(what + " copied as SVG - paste it into a vector editor or a document.");
+      return "copied";
+    }
+    function failed(e) {
+      showToast("Could not copy the SVG (" + String(e && e.message || e) +
+        ") - use Export instead.", true);
+      return "failed";
+    }
+    var svgPromise = collectExportSource("shown").then(function (source) {
+      return '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' + source.svg;
+    });
+    var rich = false;
+    try {
+      rich = typeof window.ClipboardItem !== "undefined" && navigator.clipboard.write &&
+        (typeof window.ClipboardItem.supports !== "function" ||
+         window.ClipboardItem.supports("image/svg+xml"));
+    } catch (e) { rich = false; }
+    if (rich) {
+      try {
+        var item = new window.ClipboardItem({
+          "image/svg+xml": svgPromise.then(function (t) {
+            return new Blob([t], { type: "image/svg+xml" }); }),
+          "text/plain": svgPromise.then(function (t) {
+            return new Blob([t], { type: "text/plain" }); })
+        });
+        return navigator.clipboard.write([item]).then(done, failed);
+      } catch (e) {
+        return svgPromise.then(function (t) {
+          return navigator.clipboard.write([new window.ClipboardItem({
+            "image/svg+xml": new Blob([t], { type: "image/svg+xml" }),
+            "text/plain": new Blob([t], { type: "text/plain" }) })]);
+        }).then(done, failed);
+      }
+    }
+    return svgPromise.then(function (t) {
+      return navigator.clipboard.writeText(t);
+    }).then(done, failed);
+  }
+  // Copy a layout selection as an image: the chosen items in a box of
+  // their own, at the same 2x the whole-figure copy uses.
+  function layCopySelectionAsImage() {
+    var ids = laySelectedIds();
+    if (!isLayoutTab(activeChart()) || !ids.length) {
+      showToast("Select something on the layout to copy it as an image.", true);
+      return Promise.resolve("unavailable");
+    }
+    var blocked = copyImageBlockedReason();
+    if (blocked) { showToast(blocked, true); return Promise.resolve("unsupported"); }
+    var blobPromise = new Promise(function (resolve, reject) {
+      ensureSnapshotsThen(function () {
+        try { resolve(layoutExportSource("shown", ids)); } catch (e) { reject(e); }
+      });
+    }).then(function (source) { return exportBlobFor("png", source, COPY_IMAGE_DPI); });
+    function done() {
+      showToast((ids.length === 1 ? "The item" : ids.length + " items") +
+        " copied as an image - paste it into slides or a document.");
+      return "copied";
+    }
+    function failed(e) {
+      showToast("Could not copy the image (" + String(e && e.message || e) +
+        ") - use Export instead.", true);
+      return "failed";
+    }
+    try {
+      var item = new window.ClipboardItem({ "image/png": blobPromise });
+      return navigator.clipboard.write([item]).then(done, failed);
+    } catch (e) {
+      return blobPromise.then(function (blob) {
+        return navigator.clipboard.write([new window.ClipboardItem({ "image/png": blob })]);
+      }).then(done, failed);
+    }
+  }
   // Punch list item 6. The app could read CSV, TSV, xlsx, .omv and .pand and
   // write only .pand and images, so a student could clean a table, retype
   // columns, add computed variables and reshape long-to-wide, then not be able
@@ -8963,17 +9571,22 @@
     el("ps-export-name").value = base;
     saveExportPrefs();
     if (EXPORT_PIN_SCOPE) { runPinExport(format, dpi, base); return; }
+    var allField = el("ps-export-alllayouts-field");
+    var allLayouts = format === "pdf" && isLayoutTab(activeChart()) && allField &&
+      allField.style.display !== "none" && !!el("ps-export-alllayouts").checked;
     EXPORT_BUSY = true;
     el("ps-export-go").disabled = true;
     el("ps-export-go").textContent = "Preparing...";
     setExportStatus("Preparing " + filename + "...", false);
-    collectExportSource(bgMode)
-      .then(function (source) {
-        setExportStatus(format === "svg"
-          ? "Preparing file..."
-          : "Rendering " + filename + "...", false);
-        return exportBlobFor(format, source, dpi);
-      })
+    var making = allLayouts
+      ? exportAllLayoutsPdf(bgMode)
+      : collectExportSource(bgMode).then(function (source) {
+          setExportStatus(format === "svg"
+            ? "Preparing file..."
+            : "Rendering " + filename + "...", false);
+          return exportBlobFor(format, source, dpi);
+        });
+    making
       .then(function (blob) {
         setExportStatus("Choose where to save " + filename + "...", false);
         return saveExportBlob(blob, filename, format);
@@ -9098,10 +9711,10 @@
     if (!o || !o.project ||
         o.kind !== "pandion-plots-project")
       return null;
-    if (o.formatVersion > 3)
+    if (o.formatVersion > 4)
       return { error: "This project was saved by a newer version - " +
                       "update this page to open it." };
-    if ([1, 2, 3].indexOf(o.formatVersion) === -1)
+    if ([1, 2, 3, 4].indexOf(o.formatVersion) === -1)
       return { error: "The project file format is not recognized. Your open project has not been changed." };
     var invalid = projectValidationError(o.project);
     if (invalid) return { error: invalid + " Your open project has not been changed." };
@@ -10843,6 +11456,7 @@
           pdf.setProperties({
             title: (PROJECT.name || "Pandion Plots") + " - Notebook",
             creator: appStamp() });
+          pdfAddSymbolWidths(pdf);
           drawFigure = tagPdfFigures(pdf);
         } else {
           pdf.addPage([d.w, d.h], d.w >= d.h ? "landscape" : "portrait");
@@ -10875,6 +11489,7 @@
         return drawFigure(description, function () {
           if (sdoc) {
             normalizePdfFonts(sdoc.documentElement);
+            pdfSplitSymbolRuns(sdoc.documentElement);
             return pdf.svg(sdoc.documentElement,
               { x: 0, y: 0, width: d.w, height: d.h,
                 loadExternalStyleSheets: false });
@@ -11991,10 +12606,13 @@
   }
   // Render any placed-but-unsnapshotted charts through the offscreen
   // host, one per tick, then draw the layout.
-  function ensureSnapshotsThen(done) {
-    var layTab = activeChart();
+  function ensureSnapshotsThen(done, forDoc) {
+    var layTab = forDoc || activeChart();
     var need = [];
     var items = (layTab.items || []);
+    // Adjusted pictures bake first: the file holds pixels, not filters.
+    var afterSnapshots = done;
+    done = function () { layBakeImagesThen(items, afterSnapshots); };
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       if (it.kind !== "chart" || validSnap(it.chartId)) continue;
@@ -20974,7 +21592,8 @@
       if (!pend) return;
       downscaleImage(pend.src, pend.type, function (smallSrc, w, h) {
         layPlaceImage(smallSrc, w, h,
-          "smaller copy placed (long edge capped at 2000px)");
+          "smaller copy placed (long edge capped at 2000px)",
+          { w: pend.natW, h: pend.natH });
       }, function () {
         layPlaceImage(pend.src, pend.natW, pend.natH,
           "could not downscale - original kept");
@@ -21136,7 +21755,15 @@
       showContextMenu(r.left, r.bottom + 4, [
         { label: "Box", key: "part-box", action: function () { layAddBox(); } },
         { label: "Arrow", key: "part-arrow", action: function () { layAddArrow(); } },
+        { label: "Shape", key: "part-shape", action: function () { layAddShape("ellipse"); } },
+        { label: "Pen (click points)", key: "part-pen", action: function () { layStartDraw("pen"); } },
+        { label: "Pencil (draw freehand)", key: "part-pencil", action: function () { layStartDraw("pencil"); } },
         { label: "Timeline", key: "part-timeline", action: function () { layAddTimeline(); } },
+        "separator",
+        { label: "Diagram wizards\u2026", key: "part-wizards",
+          action: function () { showLayoutWizards(); } },
+        { label: "Diagram from text\u2026", key: "part-diagram",
+          action: function () { showLayoutWizards("diagram"); } },
         "separator",
         { label: "Templates\u2026", key: "part-templates",
           action: function () { showLayoutGallery(); } }
@@ -23908,29 +24535,48 @@
     return c;
   }
   function layPage() {
-    var c = activeChart();
+    var c = layDocForRead();
     if (!isLayoutTab(c)) return { preset: "canvas", w: 1008, h: 672, margin: 32 };
     layNormalizeLayout(c);
     return c.page;
   }
   function layView() {
-    var c = activeChart();
+    var c = layDocForRead();
     if (!isLayoutTab(c)) return { zoom: "fit", grid: 8, showGrid: true,
                                   snap: true, guides: true, margins: true };
     layNormalizeLayout(c);
     return c.view;
   }
   function layItems() {
-    var c = activeChart();
+    var c = layDocForRead();
     if (!isLayoutTab(c)) return [];
     layNormalizeLayout(c);
     return c.items;
   }
+  // Another layout stands in for the open one while its page is exported
+  // (every layout as one PDF): the layout readers below answer for it. Set
+  // only inside layWithDoc, synchronously.
+  var LAY_DOC_OVERRIDE = null;
+  function layDocForRead() { return LAY_DOC_OVERRIDE || activeChart(); }
+  function layWithDoc(doc, fn) {
+    var prev = LAY_DOC_OVERRIDE;
+    LAY_DOC_OVERRIDE = doc;
+    try { return fn(); } finally { LAY_DOC_OVERRIDE = prev; }
+  }
+  // A scratch list stands in for the layout's items while a diagram wizard
+  // measures and previews what it will add: arrows attach by id, and these
+  // ids are not on the page yet. Set only inside layWithItems.
+  var LAY_ITEM_SCOPE = null;
   function layItemById(id) {
-    var items = layItems();
+    var items = LAY_ITEM_SCOPE || layItems();
     for (var i = 0; i < items.length; i++)
       if (items[i].id === id) return items[i];
     return null;
+  }
+  function layWithItems(items, fn) {
+    var prev = LAY_ITEM_SCOPE;
+    LAY_ITEM_SCOPE = items;
+    try { return fn(); } finally { LAY_ITEM_SCOPE = prev; }
   }
   function laySelectedIds() {
     var out = [];
@@ -24091,7 +24737,8 @@
   }
   function laySetSelection(ids) {
     LAYOUT_SEL = layExpandGroups(
-      Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []));
+      Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []))
+      .filter(function (id) { var it = layItemById(id); return !(it && it.hidden); });
     var valid = laySelectedIds();
     if (valid.length) LAYOUT_ACTIVE_ID = valid[valid.length - 1];
     else if (LAYOUT_ACTIVE_ID && !layItemById(LAYOUT_ACTIVE_ID))
@@ -24119,8 +24766,22 @@
       kind = "Live chart panel";
       var chart = chartById(item.chartId);
       name = chart ? ", " + (chart.name || "Untitled chart") : ", missing chart";
+    } else if (item.kind === "image" && layLensIsInset(item)) {
+      kind = "Magnified view";
     } else if (item.kind === "image") {
       kind = item.srcChart ? "Notebook snapshot" : "Image item";
+      var imgBar = layScaleBarGeom(item);
+      if (layImageFrame(item).width) name += ", framed";
+      if (imgBar) name += ", scale bar " + imgBar.text;
+    } else if (item.kind === "path") {
+      kind = item.closed ? "Drawn shape" : "Drawn line";
+      var pn = Array.isArray(item.points) ? item.points.length : 0;
+      name = ", " + pn + (pn === 1 ? " node" : " nodes") +
+        (layPathStyle(item).brush !== "none" ? ", " + layPathStyle(item).brush + " brush" : "");
+    } else if (item.kind === "arrow" && item.lensLine) {
+      kind = "Magnifier line";
+    } else if (item.kind === "box" && layLensOf(item)) {
+      kind = "Magnifier frame";
     } else if (item.kind === "arrow") {
       kind = "Arrow";
       name = layArrowEndsText(item);
@@ -24129,8 +24790,11 @@
       var tlNames = layTimelineLabelsText(item);
       name = tlNames ? ', "' + tlNames + '"' : ", no named ticks";
     } else {
-      kind = item.kind === "box" ? "Box" : "Text item";
-      var copy = String(item.text || "Text").replace(/\s+/g, " ").trim();
+      kind = item.kind === "box"
+        ? (layBoxShape(item) === "rect" ? "Box"
+           : LAY_SHAPE_LABEL[layBoxShape(item)] + " shape")
+        : "Text item";
+      var copy = layPlainText(item.text || "Text").replace(/\s+/g, " ").trim();
       if (copy.length > 60) copy = copy.slice(0, 57) + "\u2026";
       name = ', "' + copy + '"';
     }
@@ -24138,6 +24802,14 @@
       ? ", width " + Math.round(r.w) + " pixels, height " +
         Math.round(r.h) + " pixels"
       : "";
+    if (item.name) name += ', named "' + String(item.name) + '"';
+    if (layItemTurn(item)) name += ", turned " + layItemTurn(item) + " degrees";
+    if (item.kind === "image" && layImageCrop(item)) name += ", cropped";
+    if (item.kind === "image" && layImageAdjust(item)) name += ", adjusted";
+    if (item.kind === "image" && (item.flipX || item.flipY))
+      name += ", flipped" + (item.flipX && item.flipY ? " both ways" : item.flipX ? " horizontally" : " vertically");
+    if (item.hidden) kind += " (hidden)";
+    if (item.locked) kind += " (locked)";
     return kind + name + ", item " + (index + 1) + " of " + items.length +
       ", layer " + (index + 1) + ", x " + Math.round(r.x) +
       " pixels, y " + Math.round(r.y) + " pixels" + size;
@@ -24164,7 +24836,7 @@
     else viewport.removeAttribute("aria-activedescendant");
   }
   function layNavigateItem(delta, edge, extend) {
-    var items = layItems();
+    var items = layItems().filter(function (it) { return !it.hidden; });
     if (!items.length) return;
     var active = layActiveId(), at = 0;
     for (var i = 0; i < items.length; i++)
@@ -24770,6 +25442,1077 @@
   function layHexOr(v, dflt) {
     return /^#[0-9a-fA-F]{3,8}$/.test(String(v || "")) ? v : dflt;
   }
+  // ---- shapes (Oct 2026, from the Illustrations app): a box may wear one
+  // of nineteen outlines. The shape is a FIELD on the box item (rect is the
+  // plain box), so fill, border, text, arrows, the wizards, copies and the
+  // file all work unchanged; only the outline and the text's inset differ.
+  var LAY_SHAPES = [["rect", "Rectangle"], ["ellipse", "Ellipse"],
+    ["pill", "Rounded box"], ["diamond", "Diamond"], ["triangle", "Triangle"],
+    ["hexagon", "Hexagon"], ["octagon", "Octagon"], ["star", "Star"],
+    ["parallelogram", "Parallelogram"], ["trapezoid", "Trapezoid"],
+    ["chevron", "Chevron"], ["block-arrow", "Block arrow"], ["cross", "Plus"],
+    ["callout", "Callout"], ["cylinder", "Cylinder"], ["cloud", "Cloud"],
+    ["cell", "Cell"], ["brace", "Brace"], ["bracket", "Bracket"]];
+  var LAY_SHAPE_LABEL = {};
+  for (var lsI = 0; lsI < LAY_SHAPES.length; lsI++)
+    LAY_SHAPE_LABEL[LAY_SHAPES[lsI][0]] = LAY_SHAPES[lsI][1];
+  // Drawn as a line with no fill, never filled.
+  var LAY_LINE_SHAPES = { brace: 1, bracket: 1 };
+  // The size a shape is born at from the menu; every other shape 150 x 90.
+  var LAY_SHAPE_SIZES = { pill: [150, 58], star: [120, 114], triangle: [136, 114],
+    brace: [24, 120], bracket: [20, 120], cross: [100, 100], cylinder: [106, 136],
+    "block-arrow": [166, 90], callout: [150, 92] };
+  function layBoxShape(item) {
+    return item && item.kind === "box" && LAY_SHAPE_LABEL[item.shape] &&
+      item.shape !== "rect" ? item.shape : "rect";
+  }
+  // How far the text keeps from the sides, so it stays inside the outline
+  // (a diamond's corners, a star's points); horizontal only, as the box's
+  // own padding is.
+  function layShapeInset(kind, w) {
+    switch (kind) {
+      case "ellipse": return 0.15 * w + 4;
+      case "diamond": return 0.24 * w;
+      case "triangle": return 0.22 * w;
+      case "hexagon": return 0.14 * w;
+      case "octagon": return 0.1 * w;
+      case "cloud": return 0.2 * w;
+      case "cell": return 0.16 * w;
+      case "star": return 0.3 * w;
+      case "chevron": return 0.24 * w;
+      case "block-arrow": return 0.08 * w;
+      case "parallelogram": return 0.2 * w;
+      case "trapezoid": return 0.18 * w;
+      case "cylinder": return 8;
+      default: return LAY_BOX_PAD_X;
+    }
+  }
+  // Catmull-Rom through the points as cubic curves (tension 0.5), closed.
+  function layShapeSmooth(pts) {
+    var n = pts.length, d = "M" + layNum2(pts[0].x) + " " + layNum2(pts[0].y);
+    for (var i = 0; i < n; i++) {
+      var p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n],
+          p3 = pts[(i + 2) % n];
+      d += " C" + layNum2(p1.x + (p2.x - p0.x) / 6) + " " + layNum2(p1.y + (p2.y - p0.y) / 6) +
+        " " + layNum2(p2.x - (p3.x - p1.x) / 6) + " " + layNum2(p2.y - (p3.y - p1.y) / 6) +
+        " " + layNum2(p2.x) + " " + layNum2(p2.y);
+    }
+    return d + " Z";
+  }
+  // The outline(s) of a shape in the box x y w h: [[d, filled], ...].
+  function layShapePaths(kind, x, y, w, h) {
+    var cx = x + w / 2, cy = y + h / 2, r = Math.min(w, h) / 2, i, pts = [], d;
+    function P(px, py) { return layNum2(px) + " " + layNum2(py); }
+    function poly(list) {
+      var out = "M" + P(list[0][0], list[0][1]);
+      for (var k = 1; k < list.length; k++) out += " L" + P(list[k][0], list[k][1]);
+      return out + " Z";
+    }
+    switch (kind) {
+      case "ellipse":
+        return [["M" + P(x, cy) + " A" + P(w / 2, h / 2) + " 0 1 0 " + P(x + w, cy) +
+          " A" + P(w / 2, h / 2) + " 0 1 0 " + P(x, cy) + " Z", true]];
+      case "pill":
+        return [["M" + P(x + r, y) + " H" + layNum2(x + w - r) +
+          " A" + P(r, r) + " 0 0 1 " + P(x + w, y + r) + " V" + layNum2(y + h - r) +
+          " A" + P(r, r) + " 0 0 1 " + P(x + w - r, y + h) + " H" + layNum2(x + r) +
+          " A" + P(r, r) + " 0 0 1 " + P(x, y + h - r) + " V" + layNum2(y + r) +
+          " A" + P(r, r) + " 0 0 1 " + P(x + r, y) + " Z", true]];
+      case "diamond":
+        return [[poly([[cx, y], [x + w, cy], [cx, y + h], [x, cy]]), true]];
+      case "triangle":
+        return [[poly([[cx, y], [x + w, y + h], [x, y + h]]), true]];
+      case "hexagon":
+        return [[poly([[x + 0.25 * w, y], [x + 0.75 * w, y], [x + w, cy],
+          [x + 0.75 * w, y + h], [x + 0.25 * w, y + h], [x, cy]]), true]];
+      case "octagon":
+        var c = 0.29 * Math.min(w, h);
+        return [[poly([[x + c, y], [x + w - c, y], [x + w, y + c], [x + w, y + h - c],
+          [x + w - c, y + h], [x + c, y + h], [x, y + h - c], [x, y + c]]), true]];
+      case "star":
+        for (i = 0; i < 10; i++) {
+          var a = -Math.PI / 2 + i * Math.PI / 5, f = i % 2 ? 0.42 : 1;
+          pts.push([cx + Math.cos(a) * w / 2 * f, cy + 0.04 * h + Math.sin(a) * h / 2 * f]);
+        }
+        return [[poly(pts), true]];
+      case "parallelogram":
+        return [[poly([[x + 0.2 * w, y], [x + w, y], [x + 0.8 * w, y + h], [x, y + h]]), true]];
+      case "trapezoid":
+        return [[poly([[x + 0.18 * w, y], [x + 0.82 * w, y], [x + w, y + h], [x, y + h]]), true]];
+      case "chevron":
+        return [[poly([[x, y], [x + 0.75 * w, y], [x + w, cy], [x + 0.75 * w, y + h],
+          [x, y + h], [x + 0.25 * w, cy]]), true]];
+      case "block-arrow":
+        return [[poly([[x, y + 0.27 * h], [x + 0.62 * w, y + 0.27 * h], [x + 0.62 * w, y],
+          [x + w, cy], [x + 0.62 * w, y + h], [x + 0.62 * w, y + 0.73 * h],
+          [x, y + 0.73 * h]]), true]];
+      case "cross":
+        var t = 0.17 * Math.min(w, h);
+        return [[poly([[cx - t, y], [cx + t, y], [cx + t, cy - t], [x + w, cy - t],
+          [x + w, cy + t], [cx + t, cy + t], [cx + t, y + h], [cx - t, y + h],
+          [cx - t, cy + t], [x, cy + t], [x, cy - t], [cx - t, cy - t]]), true]];
+      case "callout":
+        var bh = 0.78 * h, k = Math.min(8, bh / 3, w / 4);
+        return [["M" + P(x + k, y) + " H" + layNum2(x + w - k) +
+          " Q" + P(x + w, y) + " " + P(x + w, y + k) + " V" + layNum2(y + bh - k) +
+          " Q" + P(x + w, y + bh) + " " + P(x + w - k, y + bh) + " H" + layNum2(x + 0.36 * w) +
+          " L" + P(x + 0.16 * w, y + h) + " L" + P(x + 0.22 * w, y + bh) + " H" + layNum2(x + k) +
+          " Q" + P(x, y + bh) + " " + P(x, y + bh - k) + " V" + layNum2(y + k) +
+          " Q" + P(x, y) + " " + P(x + k, y) + " Z", true]];
+      case "cylinder":
+        var ry = Math.min(0.14 * h, 0.25 * w), rx = w / 2;
+        return [["M" + P(x, y + ry) + " A" + P(rx, ry) + " 0 0 1 " + P(x + w, y + ry) +
+          " V" + layNum2(y + h - ry) + " A" + P(rx, ry) + " 0 0 1 " + P(x, y + h - ry) + " Z", true],
+          ["M" + P(x, y + ry) + " A" + P(rx, ry) + " 0 0 0 " + P(x + w, y + ry), false]];
+      case "cloud":
+        for (i = 0; i < 9; i++) {
+          var ca = i * Math.PI * 2 / 9;
+          pts.push({ x: cx + 0.38 * w * Math.cos(ca), y: cy + 0.34 * h * Math.sin(ca) });
+        }
+        d = "M" + P(pts[0].x, pts[0].y);
+        for (i = 0; i < 9; i++) {
+          var q = pts[(i + 1) % 9], pcur = pts[i];
+          var chord = Math.sqrt((q.x - pcur.x) * (q.x - pcur.x) + (q.y - pcur.y) * (q.y - pcur.y));
+          d += " A" + P(0.62 * chord, 0.62 * chord) + " 0 0 1 " + P(q.x, q.y);
+        }
+        return [[d + " Z", true]];
+      case "cell":
+        for (i = 0; i < 18; i++) {
+          var ea = i * Math.PI * 2 / 18;
+          var kf = 1 + 0.035 * Math.sin(2 * ea + 0.6) + 0.022 * Math.sin(3 * ea + 1.7);
+          pts.push({ x: cx + Math.cos(ea) * w * kf / 2.07, y: cy + Math.sin(ea) * h * kf / 2.07 });
+        }
+        return [[layShapeSmooth(pts), true]];
+      case "brace":
+        var m = x + 0.5 * w;
+        return [["M" + P(x + w, y) + " Q" + P(m, y) + " " + P(m, y + 0.1 * h) +
+          " L" + P(m, y + 0.4 * h) + " Q" + P(m, cy) + " " + P(x, cy) +
+          " Q" + P(m, cy) + " " + P(m, y + 0.6 * h) + " L" + P(m, y + 0.9 * h) +
+          " Q" + P(m, y + h) + " " + P(x + w, y + h), false]];
+      case "bracket":
+        return [["M" + P(x + w, y) + " H" + layNum2(x) + " V" + layNum2(y + h) +
+          " H" + layNum2(x + w), false]];
+      default:
+        return [[poly([[x, y], [x + w, y], [x + w, y + h], [x, y + h]]), true]];
+    }
+  }
+  // The outline nodes into parent (an svg on the canvas, a g in the
+  // export). The stroke is centred on the path, so the paths are drawn
+  // half a stroke inside the box, as the plain box's rect is. A line
+  // shape always strokes: with its border off it would vanish.
+  function layShapeInto(parent, kind, st, x, y, w, h) {
+    var ns = "http://www.w3.org/2000/svg", doc = parent.ownerDocument;
+    var line = LAY_LINE_SHAPES[kind];
+    var bw = line ? Math.max(1, st.borderW) : st.borderW;
+    var pieces = layShapePaths(kind, x + bw / 2, y + bw / 2,
+      Math.max(1, w - bw), Math.max(1, h - bw));
+    for (var i = 0; i < pieces.length; i++) {
+      var path = doc.createElementNS(ns, "path");
+      path.setAttribute("class", "ps-lshape-path");
+      path.setAttribute("d", pieces[i][0]);
+      path.setAttribute("fill", pieces[i][1] && !line && st.fill !== "none" ? st.fill : "none");
+      if (bw) {
+        path.setAttribute("stroke", st.borderColor);
+        path.setAttribute("stroke-width", String(bw));
+        path.setAttribute("stroke-linejoin", "round");
+        if (line) path.setAttribute("stroke-linecap", "round");
+      }
+      parent.appendChild(path);
+    }
+  }
+  function layShapeSvg(item, st, w, h) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "ps-lshape");
+    svg.setAttribute("viewBox", "0 0 " + layNum2(w) + " " + layNum2(h));
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    layShapeInto(svg, layBoxShape(item), st, 0, 0, w, h);
+    return svg;
+  }
+  // The rail's shape icons: each outline drawn small, in the current color.
+  function layShapeIconSvg(kind) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 28 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var pieces = layShapePaths(kind, 3, 3, 22, 18), line = LAY_LINE_SHAPES[kind];
+    for (var i = 0; i < pieces.length; i++) {
+      var path = document.createElementNS(ns, "path");
+      path.setAttribute("d", pieces[i][0]);
+      path.setAttribute("fill", pieces[i][1] && !line ? "currentColor" : "none");
+      if (pieces[i][1] && !line) path.setAttribute("fill-opacity", "0.18");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "1.2");
+      path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+    }
+    return svg;
+  }
+  // ---- the Layers list, hiding, locking and opacity (Oct 2026, from the
+  // Illustrations app). The rail lists every item front to back with its
+  // name, an eye and a lock. A HIDDEN item draws nowhere and exports
+  // nowhere but keeps its place in the stack and its arrows; a LOCKED item
+  // ignores the pointer, the marquee and the nudge keys, and only this
+  // list selects it. A name typed here is what the arrow lists and the
+  // accessible names use. Opacity is one number on any item, written on
+  // its node on screen and on its export node.
+  function layItemOpacity(item) {
+    var o = item && item.opacity != null ? Number(item.opacity) : 1;
+    return isFinite(o) ? layClamp(o, 0, 1) : 1;
+  }
+  function layLayerName(item) {
+    if (item.name) return String(item.name);
+    return layBoxLabel(item.id) || item.kind;
+  }
+  function laySelectedItemsList() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it) out.push(it);
+    }
+    return out;
+  }
+  var LAY_EYE_ON = '<svg viewBox="0 0 16 12" aria-hidden="true" focusable="false">' +
+    '<path d="M1 6c2-3 4-4.5 7-4.5S13 3 15 6c-2 3-4 4.5-7 4.5S3 9 1 6z" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<circle cx="8" cy="6" r="2" fill="currentColor"/></svg>';
+  var LAY_EYE_OFF = '<svg viewBox="0 0 16 12" aria-hidden="true" focusable="false">' +
+    '<path d="M1 6c2-3 4-4.5 7-4.5S13 3 15 6c-2 3-4 4.5-7 4.5S3 9 1 6z" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<path d="M2.5 11L13.5 1" stroke="currentColor" stroke-width="1.4"/></svg>';
+  var LAY_LOCK_ON = '<svg viewBox="0 0 12 14" aria-hidden="true" focusable="false">' +
+    '<rect x="1.5" y="6" width="9" height="7" rx="1.2" fill="currentColor"/>' +
+    '<path d="M3.5 6V4a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+  var LAY_LOCK_OFF = '<svg viewBox="0 0 12 14" aria-hidden="true" focusable="false">' +
+    '<rect x="1.5" y="6" width="9" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<path d="M3.5 6V4a2.5 2.5 0 0 1 5 0" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>';
+  function layToggleHidden(id) {
+    var it = layItemById(id);
+    if (!it) return;
+    var hide = !it.hidden;
+    laySnapshot(hide ? "hide" : "show", null);
+    if (hide) it.hidden = true; else delete it.hidden;
+    // A hidden item cannot stay selected: nothing on the canvas shows it.
+    if (hide) laySetSelection(laySelectedIds().filter(function (x) { return x !== id; }));
+    persist(); renderLayout();
+    layAnnounce(layLayerName(it) + (hide ? " hidden" : " shown"));
+  }
+  function layToggleLocked(id) {
+    var it = layItemById(id);
+    if (!it) return;
+    var lock = !it.locked;
+    laySnapshot(lock ? "lock" : "unlock", null);
+    if (lock) it.locked = true; else delete it.locked;
+    persist(); renderLayout();
+    layAnnounce(layLayerName(it) + (lock ? " locked" : " unlocked"));
+  }
+  function layRenameItem(id, name) {
+    var it = layItemById(id);
+    if (!it) return;
+    var v = String(name || "").replace(/\s+/g, " ").trim();
+    if ((it.name || "") === v) return;
+    laySnapshot("rename", null);
+    if (v) it.name = v; else delete it.name;
+    persist(); renderLayout();
+  }
+  function layLayersSync() {
+    var list = el("ps-layout-layers");
+    if (!list) return;
+    var items = layItems(), sel = laySelectedIds();
+    list.innerHTML = "";
+    if (!items.length) {
+      list.appendChild(mkEl("div", "ps-llayer-empty", "No items yet."));
+      return;
+    }
+    for (var i = items.length - 1; i >= 0; i--) (function (it, idx) {
+      var selected = sel.indexOf(it.id) !== -1, name = layLayerName(it);
+      var row = mkEl("div", "ps-llayer" + (selected ? " ps-llayer-sel" : "") +
+        (it.hidden ? " ps-llayer-hidden" : "") + (it.locked ? " ps-llayer-locked" : ""));
+      row.setAttribute("data-layer-id", it.id);
+      var eye = mkEl("button", "ps-llayer-btn ps-llayer-eye");
+      eye.type = "button";
+      eye.innerHTML = it.hidden ? LAY_EYE_OFF : LAY_EYE_ON;
+      eye.setAttribute("aria-pressed", it.hidden ? "false" : "true");
+      eye.setAttribute("aria-label", (it.hidden ? "Show " : "Hide ") + name);
+      setTip(eye, it.hidden ? "Hidden. Click to show it." : "Shown. Click to hide it.");
+      eye.addEventListener("click", function () { layToggleHidden(it.id); });
+      var lock = mkEl("button", "ps-llayer-btn ps-llayer-lock");
+      lock.type = "button";
+      lock.innerHTML = it.locked ? LAY_LOCK_ON : LAY_LOCK_OFF;
+      lock.setAttribute("aria-pressed", it.locked ? "true" : "false");
+      lock.setAttribute("aria-label", (it.locked ? "Unlock " : "Lock ") + name);
+      setTip(lock, it.locked ? "Locked: the pointer passes through it. Click to unlock."
+                             : "Click to lock it against the pointer.");
+      lock.addEventListener("click", function () { layToggleLocked(it.id); });
+      var nameBtn = mkEl("button", "ps-llayer-name", name);
+      nameBtn.type = "button";
+      nameBtn.setAttribute("aria-pressed", selected ? "true" : "false");
+      nameBtn.setAttribute("aria-label", name + ", " + it.kind +
+        (it.hidden ? ", hidden" : "") + (it.locked ? ", locked" : "") +
+        (selected ? ", selected" : ""));
+      setTip(nameBtn, "Click to select. Shift-click to add to the selection. Double-click to rename.");
+      nameBtn.addEventListener("click", function (e) {
+        var ids = laySelectedIds();
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          var at = ids.indexOf(it.id);
+          if (at === -1) ids.push(it.id); else ids.splice(at, 1);
+          laySetSelection(ids);
+        } else if (ids.length === 1 && ids[0] === it.id) {
+          // Already the selection: nothing to redraw. A redraw here would
+          // replace this button under a double-click's second click, and
+          // the rename field would open on a row no longer on the page.
+          return;
+        } else laySetSelection([it.id]);
+        renderLayout();
+      });
+      nameBtn.addEventListener("dblclick", function () {
+        var inp = document.createElement("input");
+        inp.type = "text"; inp.className = "ps-llayer-rename";
+        inp.value = it.name || ""; inp.placeholder = name;
+        inp.setAttribute("aria-label", "Name for " + name);
+        var done = false;
+        function commit() {
+          if (done) return; done = true;
+          layRenameItem(it.id, inp.value);
+          layLayersSync();
+        }
+        inp.addEventListener("keydown", function (ke) {
+          if (ke.key === "Enter") { ke.preventDefault(); commit(); }
+          else if (ke.key === "Escape") { ke.preventDefault(); done = true; layLayersSync(); }
+        });
+        inp.addEventListener("blur", commit);
+        row.replaceChild(inp, nameBtn);
+        inp.focus(); inp.select();
+      });
+      var up = mkEl("button", "ps-llayer-btn ps-llayer-step", "\u25b2");
+      up.type = "button";
+      up.setAttribute("aria-label", "Move " + name + " forward");
+      up.disabled = idx === items.length - 1;
+      setTip(up, "Forward, over the item above it");
+      up.addEventListener("click", function () {
+        laySetSelection([it.id]); layMoveLayer(1);
+      });
+      var down = mkEl("button", "ps-llayer-btn ps-llayer-step", "\u25bc");
+      down.type = "button";
+      down.setAttribute("aria-label", "Move " + name + " backward");
+      down.disabled = idx === 0;
+      setTip(down, "Backward, under the item below it");
+      down.addEventListener("click", function () {
+        laySetSelection([it.id]); layMoveLayer(-1);
+      });
+      row.appendChild(eye); row.appendChild(lock); row.appendChild(nameBtn);
+      row.appendChild(up); row.appendChild(down);
+      list.appendChild(row);
+    })(items[i], i);
+  }
+  // ---- journal checks, a legend from the figure, re-lettering and find
+  // and replace (Oct 2026, from the Illustrations app).
+  //
+  // The checks run in the export dialog, the moment they matter: type
+  // smaller than 6 pt (8 px on this page), a raster that would print below
+  // 300 dpi at its size, an item past the page edge, a chart panel with
+  // nothing to show, and a note about hidden items, which export nowhere.
+  // Each finding carries the ids it is about, so Show can select them.
+  var LAY_CHECK_MIN_PX = 8;
+  var LAY_CHECK_PHOTO_DPI = 300;
+  function layChecks() {
+    var items = layItems(), page = layPage(), out = [], i, it;
+    var shown = [], hidden = 0;
+    for (i = 0; i < items.length; i++)
+      if (items[i].hidden) hidden++; else shown.push(items[i]);
+    if (!shown.length) {
+      out.push({ level: "info", text: "The layout is empty.", ids: [] });
+      return out;
+    }
+    var small = [], smallest = Infinity, soft = [], softest = Infinity;
+    var edge = [], missing = [];
+    for (i = 0; i < shown.length; i++) {
+      it = shown[i];
+      var fs = null;
+      if (it.kind === "text") fs = Math.max(1, Number(it.fontSize) || 14);
+      else if (it.kind === "box" && layBoxTextValue(it)) fs = layBoxStyle(it).fs;
+      else if (it.kind === "timeline") {
+        try { fs = layTimelineGeom(it).st.fs; } catch (e) { fs = null; }
+      }
+      if (fs != null && fs < LAY_CHECK_MIN_PX) {
+        small.push(it.id); smallest = Math.min(smallest, fs);
+      }
+      if (it.kind === "image" && layImageIsRaster(it)) {
+        var px = layImagePx(it), box = layImageBox(it);
+        if (px.w > 0 && box.w > 0) {
+          var dpi = px.w / (box.w / 96);
+          if (dpi < LAY_CHECK_PHOTO_DPI) { soft.push(it.id); softest = Math.min(softest, dpi); }
+        }
+      }
+      var r = layItemRect(it, page);
+      if (r.x < -0.5 || r.y < -0.5 || r.right > page.w + 0.5 || r.bottom > page.h + 0.5)
+        edge.push(it.id);
+      if (it.kind === "chart" && !validSnap(it.chartId)) missing.push(it.id);
+    }
+    if (small.length)
+      out.push({ level: "warn", ids: small,
+        text: "Type smaller than 6 pt on " + small.length +
+          (small.length === 1 ? " item" : " items") + " (smallest " +
+          (Math.round(smallest * 10) / 10) + " px); journals ask for 6 pt or more." });
+    if (soft.length)
+      out.push({ level: "warn", ids: soft,
+        text: (soft.length === 1 ? "An image prints" : soft.length + " images print") +
+          " below 300 dpi at this size (lowest " + Math.round(softest) +
+          " dpi); make it smaller on the page or use a larger file." });
+    if (edge.length)
+      out.push({ level: "warn", ids: edge,
+        text: edge.length + (edge.length === 1 ? " item runs" : " items run") +
+          " past the page edge and will be cut off." });
+    if (missing.length)
+      out.push({ level: "warn", ids: missing,
+        text: missing.length + (missing.length === 1 ? " chart panel has" : " chart panels have") +
+          " no chart to show and will export empty." });
+    if (hidden)
+      out.push({ level: "info", ids: [],
+        text: hidden + (hidden === 1 ? " hidden item is" : " hidden items are") +
+          " left out of the export (the Layers list shows them)." });
+    if (!out.length)
+      out.push({ level: "info", ids: [], text: "Nothing to fix.", clean: true });
+    return out;
+  }
+  function layChecksSync() {
+    var field = el("ps-export-checks-field"), list = el("ps-export-checks");
+    var head = el("ps-export-checks-head");
+    if (!field || !list || !head) return;
+    var on = isLayoutTab(activeChart());
+    field.style.display = on ? "" : "none";
+    if (!on) return;
+    var finds = layChecks(), warns = 0, i;
+    for (i = 0; i < finds.length; i++) if (finds[i].level === "warn") warns++;
+    head.textContent = warns
+      ? "Checks: " + warns + (warns === 1 ? " thing" : " things") + " to look at"
+      : "Checks: nothing to fix";
+    list.innerHTML = "";
+    for (i = 0; i < finds.length; i++) (function (f) {
+      var row = mkEl("div", "ps-export-check-row ps-export-check-" + f.level);
+      row.setAttribute("role", "listitem");
+      row.appendChild(mkEl("span", "", f.text));
+      if (f.ids && f.ids.length) {
+        var btn = mkEl("button", "ps-btn ps-export-check-show", "Show");
+        btn.type = "button";
+        btn.setAttribute("aria-label", "Show: " + f.text);
+        btn.addEventListener("click", function () {
+          closeExporter();
+          laySetSelection(f.ids);
+          renderLayout();
+          layScrollItemIntoView(f.ids[0]);
+          layFocusViewport();
+          layAnnounce(f.ids.length + (f.ids.length === 1 ? " item" : " items") + " selected: " + f.text);
+        });
+        row.appendChild(btn);
+      }
+      list.appendChild(row);
+    })(finds[i]);
+  }
+  // A legend from what is on the page: one row per arrow style in use
+  // (heads, color, dashed), one per fill that more than one labeled box
+  // shares, inserted as ordinary parts in one group.
+  var LAY_LEGEND_FS = 10, LAY_LEGEND_ROW = 19, LAY_LEGEND_MAX = 10;
+  function layLegendRows() {
+    var items = layItems(), rows = [], seen = {}, i, it;
+    var verbs = { end: "Activates", inhibit: "Inhibits", none: "Connects", both: "Connects" };
+    for (i = 0; i < items.length; i++) {
+      it = items[i];
+      if (it.kind !== "arrow" || it.hidden) continue;
+      var st = layArrowStyle(it), key = st.heads + "|" + st.color + "|" + (st.dashed ? 1 : 0);
+      if (seen[key]) continue;
+      seen[key] = 1;
+      rows.push({ kind: "arrow", heads: st.heads, color: st.color, dashed: st.dashed,
+                  width: st.width, label: verbs[st.heads] + (st.dashed ? ", indirectly" : "") });
+    }
+    var fills = {}, order = [], many = false;
+    for (i = 0; i < items.length; i++) {
+      it = items[i];
+      if (it.kind !== "box" || it.hidden || !layBoxTextValue(it)) continue;
+      var bst = layBoxStyle(it);
+      if (bst.fill === "none") continue;
+      var fkey = bst.fill + "|" + bst.borderColor + "|" + layBoxBorder(it);
+      if (!fills[fkey]) { fills[fkey] = { it: it, names: [] }; order.push(fkey); }
+      fills[fkey].names.push(layPlainText(layBoxTextValue(it)).replace(/\s+/g, " ").trim());
+      if (fills[fkey].names.length > 1) many = true;
+    }
+    if (order.length > 1 && many)
+      for (i = 0; i < order.length; i++) {
+        var g = fills[order[i]];
+        rows.push({ kind: "fill", fill: g.it.fill, border: g.it.border,
+                    borderColor: g.it.borderColor, shape: layBoxShape(g.it),
+                    label: g.names.slice(0, 2).join(", ") + (g.names.length > 2 ? ", \u2026" : "") });
+      }
+    return rows.slice(0, LAY_LEGEND_MAX);
+  }
+  function layLegendFromFigure() {
+    if (!isLayoutTab(activeChart())) return false;
+    var rows = layLegendRows();
+    if (!rows.length) {
+      showToast("Nothing to put in a legend: the arrows share one style and " +
+        "no fill is shared by two labeled boxes.");
+      return false;
+    }
+    var sheet = [], i;
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i], y = i * LAY_LEGEND_ROW, id = "w" + (i * 2 + 1);
+      if (r.kind === "arrow")
+        sheet.push({ id: id, kind: "arrow", route: "straight", heads: r.heads,
+                     width: r.width, color: r.color, dashed: r.dashed,
+                     from: null, to: null, x: 0, y: y, ax: 0, ay: 9, bx: 34, by: 9 });
+      else
+        sheet.push({ id: id, kind: "box", shape: r.shape === "rect" ? undefined : r.shape,
+                     text: "", fill: r.fill, border: r.border, borderColor: r.borderColor,
+                     corner: 3, x: 3, y: y + 2, w: 28, h: 14 });
+      sheet.push({ id: "w" + (i * 2 + 2), kind: "text", text: r.label,
+                   fontSize: LAY_LEGEND_FS, x: 42, y: y + 1 });
+    }
+    for (i = 0; i < sheet.length; i++)
+      if (sheet[i].kind === "arrow") layWithItems(sheet, function () { layArrowSync(sheet[i]); });
+    var made = layInsertItems(sheet, "a legend");
+    return made.length > 0;
+  }
+  // Panel letters in reading order: the bold single-letter labels, rowed
+  // by their tops (within 22 px), left to right within a row, lettered A,
+  // B, C... in the first label's own style (case, parentheses).
+  function layReletterPanels() {
+    if (!isLayoutTab(activeChart())) return false;
+    var items = layItems(), cands = [], i;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (it.kind !== "text" || it.hidden) continue;
+      var raw = String(it.text || "").trim();
+      if (!it.bold && !/^\*\*.*\*\*$/.test(raw)) continue;
+      if (/^\(?[A-Za-z]\)?$/.test(layPlainText(raw))) cands.push(it);
+    }
+    if (cands.length < 2) {
+      showToast("Re-lettering needs at least two bold single-letter labels (Add part > Panel label).");
+      return false;
+    }
+    cands.sort(function (a, b) { return (a.y - b.y) || (a.x - b.x); });
+    var rows = [], row = null;
+    for (i = 0; i < cands.length; i++) {
+      if (!row || Math.abs(cands[i].y - row[0].y) >= 22) { row = [cands[i]]; rows.push(row); }
+      else row.push(cands[i]);
+    }
+    var ordered = [];
+    for (i = 0; i < rows.length; i++) {
+      rows[i].sort(function (a, b) { return a.x - b.x; });
+      ordered = ordered.concat(rows[i]);
+    }
+    var first = layPlainText(String(ordered[0].text).trim());
+    var lower = /[a-z]/.test(first), paren = first.charAt(0) === "(";
+    laySnapshot("re-letter panels");
+    for (i = 0; i < ordered.length; i++) {
+      var letter = String.fromCharCode((lower ? 97 : 65) + (i % 26));
+      var starred = /^\*\*.*\*\*$/.test(String(ordered[i].text).trim());
+      var next = paren ? "(" + letter + ")" : letter;
+      ordered[i].text = starred ? "**" + next + "**" : next;
+    }
+    persist(); renderLayout();
+    var last = String(ordered[ordered.length - 1].text);
+    showToast("Re-lettered " + ordered.length + " panels, " + ordered[0].text + " to " + last + ".");
+    layAnnounce("Re-lettered " + ordered.length + " panels in reading order.");
+    return true;
+  }
+  // Find and replace across the words on this layout: box and text items,
+  // arrow labels, timeline tick labels and sub-labels, phase band labels.
+  function layReplaceFields() {
+    var items = layItems(), out = [], i, k;
+    for (i = 0; i < items.length; i++) (function (it) {
+      if (it.kind === "text" || it.kind === "box")
+        out.push({ item: it, get: function () { return String(it.text || ""); },
+                   set: function (v) { it.text = v; } });
+      else if (it.kind === "arrow")
+        out.push({ item: it, get: function () { return String(it.label || ""); },
+                   set: function (v) { it.label = v; } });
+      else if (layTimelineIsPlanned(it)) {
+        var evs = Array.isArray(it.plan.events) ? it.plan.events : [];
+        var phs = Array.isArray(it.plan.phases) ? it.plan.phases : [];
+        var named = evs.concat(phs);
+        for (k = 0; k < named.length; k++) (function (part) {
+          if (!part) return;
+          out.push({ item: it, get: function () { return String(part.name || ""); },
+                     set: function (v) { part.name = v; } });
+        })(named[k]);
+        var rws = layTimelinePlan(it).rows;
+        for (k = 0; k < rws.length; k++) (function (rowName) {
+          var cur = rowName;
+          out.push({ item: it, get: function () { return cur; },
+                     set: function (v) { if (layTlRenameRow(it.plan, cur, v)) cur = layTlClean(v); } });
+        })(rws[k]);
+      }
+      else if (it.kind === "timeline") {
+        var ticks = Array.isArray(it.ticks) ? it.ticks : [], bands = Array.isArray(it.bands) ? it.bands : [];
+        for (k = 0; k < ticks.length; k++) (function (t) {
+          out.push({ item: it, get: function () { return String(t.label || ""); }, set: function (v) { t.label = v; } });
+          out.push({ item: it, get: function () { return String(t.sub || ""); }, set: function (v) { t.sub = v; } });
+        })(ticks[k]);
+        for (k = 0; k < bands.length; k++) (function (b) {
+          out.push({ item: it, get: function () { return String(b.label || ""); }, set: function (v) { b.label = v; } });
+        })(bands[k]);
+      }
+    })(items[i]);
+    return out;
+  }
+  function layReplaceRegex() {
+    var q = el("ps-lreplace-find") ? el("ps-lreplace-find").value : "";
+    if (!q) return null;
+    var esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var words = el("ps-lreplace-words") && el("ps-lreplace-words").checked;
+    var caseOn = el("ps-lreplace-case") && el("ps-lreplace-case").checked;
+    try {
+      if (words) esc = "(?<![\\p{L}\\p{N}])" + esc + "(?![\\p{L}\\p{N}])";
+      return new RegExp(esc, "gu" + (caseOn ? "" : "i"));
+    } catch (e) {
+      try { return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g" + (caseOn ? "" : "i")); }
+      catch (e2) { return null; }
+    }
+  }
+  function layReplaceCount() {
+    var re = layReplaceRegex(), fields = layReplaceFields(), n = 0, items = {}, k = 0;
+    if (!re) return { matches: 0, items: 0 };
+    for (var i = 0; i < fields.length; i++) {
+      var m = fields[i].get().match(re);
+      if (m && m.length) { n += m.length; if (!items[fields[i].item.id]) { items[fields[i].item.id] = 1; k++; } }
+    }
+    return { matches: n, items: k };
+  }
+  function layReplaceSyncCount() {
+    var line = el("ps-lreplace-count"), btn = el("ps-lreplace-all");
+    if (!line) return;
+    var find = el("ps-lreplace-find") ? el("ps-lreplace-find").value : "";
+    var c = layReplaceCount();
+    line.textContent = !find ? "Type what to find."
+      : c.matches ? c.matches + (c.matches === 1 ? " match in " : " matches in ") +
+        c.items + (c.items === 1 ? " item" : " items")
+      : "No matches on this layout.";
+    // Disabling the focused button would drop focus to the page, outside
+    // the dialog's own Escape and Tab handling; Find takes it first.
+    if (btn && !c.matches && document.activeElement === btn && el("ps-lreplace-find"))
+      el("ps-lreplace-find").focus();
+    if (btn) btn.disabled = !c.matches;
+  }
+  function layReplaceAll() {
+    var re = layReplaceRegex();
+    if (!re) return 0;
+    var withText = el("ps-lreplace-with") ? el("ps-lreplace-with").value : "";
+    var fields = layReplaceFields(), n = 0, i;
+    for (i = 0; i < fields.length; i++) {
+      var m = fields[i].get().match(re);
+      if (m && m.length) n += m.length;
+    }
+    if (!n) return 0;
+    laySnapshot("replace text");
+    for (i = 0; i < fields.length; i++) {
+      var v = fields[i].get();
+      if (v.match(re)) fields[i].set(v.replace(re, withText));
+    }
+    persist(); renderLayout();
+    layReplaceSyncCount();
+    showToast("Replaced " + n + (n === 1 ? " match." : " matches."));
+    layAnnounce("Replaced " + n + (n === 1 ? " match." : " matches."));
+    return n;
+  }
+  function showLayoutReplace() {
+    if (!isLayoutTab(activeChart()) || !el("ps-lreplace-dialog")) return;
+    openShellDialog("ps-lreplace-dialog");
+    layReplaceSyncCount();
+    // The shell focuses a dialog's first control (the Close button in the
+    // head); the work starts in Find, so focus moves there after it.
+    window.setTimeout(function () {
+      var find = el("ps-lreplace-find");
+      if (find) { find.focus(); find.select(); }
+    }, 20);
+  }
+  function wireLayoutReplace() {
+    if (!el("ps-lreplace-dialog")) return;
+    function close() { closeShellDialog("ps-lreplace-dialog"); }
+    el("ps-lreplace-close").addEventListener("click", close);
+    el("ps-lreplace-cancel").addEventListener("click", close);
+    el("ps-lreplace-all").addEventListener("click", function () { layReplaceAll(); });
+    el("ps-lreplace-find").addEventListener("input", layReplaceSyncCount);
+    el("ps-lreplace-case").addEventListener("change", layReplaceSyncCount);
+    el("ps-lreplace-words").addEventListener("change", layReplaceSyncCount);
+    el("ps-lreplace-find").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); layReplaceAll(); }
+    });
+  }
+  // A box with NO text field reads "Box" (the template placeholder); a
+  // box whose text was emptied on purpose stays empty, as a legend's
+  // swatch or a plain colored block must.
+  // ---- marks and symbols in layout text (Oct 2026, from the Illustrations
+  // app). **bold**, *italic*, ^raised and _lowered runs (a brace groups
+  // several characters) in a text item, a box or an arrow label, drawn on
+  // the canvas as styled runs and in the file as tspans; a backslash name
+  // typed in the editor becomes its symbol on commit. Text with no mark
+  // character at all takes the old path, untouched.
+  var LAY_SYMBOLS = {};
+  (function () {
+    var greek = ("alpha beta gamma delta epsilon zeta eta theta iota kappa " +
+      "lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega").split(" ");
+    for (var i = 0; i < greek.length; i++) {
+      var code = i + (i >= 17 ? 1 : 0);   // the final sigma sits before sigma
+      LAY_SYMBOLS[greek[i]] = String.fromCharCode(0x3b1 + code);
+      LAY_SYMBOLS[greek[i].charAt(0).toUpperCase() + greek[i].slice(1)] =
+        String.fromCharCode(0x391 + code);
+    }
+    var list = [["pm", 0xb1], ["mp", 0x2213], ["times", 0xd7], ["div", 0xf7],
+      ["cdot", 0xb7], ["deg", 0xb0], ["degree", 0xb0], ["micro", 0xb5], ["AA", 0xc5],
+      ["permil", 0x2030], ["prime", 0x2032], ["dprime", 0x2033], ["to", 0x2192],
+      ["rightarrow", 0x2192], ["leftarrow", 0x2190], ["gets", 0x2190],
+      ["leftrightarrow", 0x2194], ["Rightarrow", 0x21d2], ["Leftarrow", 0x21d0],
+      ["Leftrightarrow", 0x21d4], ["rightleftharpoons", 0x21cc], ["uparrow", 0x2191],
+      ["downarrow", 0x2193], ["updownarrow", 0x2195], ["nearrow", 0x2197],
+      ["searrow", 0x2198], ["mapsto", 0x21a6], ["approx", 0x2248], ["sim", 0x223c],
+      ["simeq", 0x2243], ["cong", 0x2245], ["equiv", 0x2261], ["neq", 0x2260],
+      ["ne", 0x2260], ["leq", 0x2264], ["le", 0x2264], ["geq", 0x2265], ["ge", 0x2265],
+      ["ll", 0x226a], ["gg", 0x226b], ["propto", 0x221d], ["infty", 0x221e],
+      ["partial", 0x2202], ["nabla", 0x2207], ["sqrt", 0x221a], ["sum", 0x2211],
+      ["prod", 0x220f], ["int", 0x222b], ["in", 0x2208], ["notin", 0x2209],
+      ["subset", 0x2282], ["cup", 0x222a], ["cap", 0x2229], ["emptyset", 0x2205],
+      ["forall", 0x2200], ["exists", 0x2203], ["neg", 0xac], ["therefore", 0x2234],
+      ["because", 0x2235], ["male", 0x2642], ["female", 0x2640], ["dagger", 0x2020],
+      ["ddagger", 0x2021], ["bullet", 0x2022], ["dots", 0x2026], ["ldots", 0x2026],
+      ["cdots", 0x22ef], ["checkmark", 0x2713], ["check", 0x2713], ["cross", 0x2717],
+      ["star", 0x2605], ["circ", 0x2218], ["bigcirc", 0x25cb], ["square", 0x25a1],
+      ["blacksquare", 0x25a0], ["triangle", 0x25b3], ["diamond", 0x25c7],
+      ["inhibit", 0x22a3]];
+    for (i = 0; i < list.length; i++) LAY_SYMBOLS[list[i][0]] = String.fromCharCode(list[i][1]);
+    LAY_SYMBOLS.degC = String.fromCharCode(0xb0) + "C";
+  })();
+  // The Symbols row, in this order; each button's tooltip is its name.
+  var LAY_SYMBOL_ROW = ("alpha beta gamma delta epsilon theta kappa lambda mu pi sigma tau " +
+    "phi chi psi omega Delta Sigma Phi Psi Omega pm times cdot deg micro AA permil to " +
+    "leftarrow leftrightarrow rightleftharpoons uparrow downarrow inhibit approx ne le ge " +
+    "infty male female dagger bullet dots prime check cross").split(" ");
+  // A known backslash name becomes its symbol (the space after it stays:
+  // a caption is prose, not TeX); an unknown name stays as typed; a doubled
+  // backslash is left alone.
+  function laySymbolize(text) {
+    var str = String(text == null ? "" : text), out = "", i = 0, n = str.length;
+    while (i < n) {
+      var ch = str.charAt(i);
+      if (ch === "\\" && i + 1 < n) {
+        if (str.charAt(i + 1) === "\\") { out += "\\\\"; i += 2; continue; }
+        var j = i + 1;
+        while (j < n && /[A-Za-z]/.test(str.charAt(j))) j++;
+        var name = str.slice(i + 1, j);
+        if (name && LAY_SYMBOLS.hasOwnProperty(name)) {
+          out += LAY_SYMBOLS[name];
+          i = j;
+          continue;
+        }
+      }
+      out += ch;
+      i++;
+    }
+    return out;
+  }
+  function layHasMarks(text) { return /[*^_]/.test(String(text == null ? "" : text)); }
+  // One line into runs {text, bold, italic, shift}: bold and italic spans
+  // first (no space just inside the stars, so "p < 0.05 *" stays literal),
+  // then a raised (^) or lowered (_) character or {group} inside each.
+  function layTextRuns(line) {
+    var out = [], re = /\*\*(\S(?:[^*]*?\S)?)\*\*|\*(\S(?:[^*]*?\S)?)\*/g, m, last = 0;
+    function shifts(text, bold, italic) {
+      var sre = /([_^])(\{([^}]*)\}|(\S))/g, sm, at = 0;
+      while ((sm = sre.exec(text))) {
+        if (sm.index > at)
+          out.push({ text: text.slice(at, sm.index), bold: bold, italic: italic, shift: 0 });
+        out.push({ text: sm[3] != null ? sm[3] : sm[4], bold: bold, italic: italic,
+                   shift: sm[1] === "^" ? -1 : 1 });
+        at = sm.index + sm[0].length;
+      }
+      if (at < text.length) out.push({ text: text.slice(at), bold: bold, italic: italic, shift: 0 });
+    }
+    while ((m = re.exec(line))) {
+      if (m.index > last) shifts(line.slice(last, m.index), false, false);
+      if (m[1] != null) shifts(m[1], true, false); else shifts(m[2], false, true);
+      last = m.index + m[0].length;
+    }
+    if (last < line.length) shifts(line.slice(last), false, false);
+    if (!out.length) out.push({ text: " ", bold: false, italic: false, shift: 0 });
+    return out;
+  }
+  // The words without their marks, for names, measuring and search.
+  function layPlainText(text) {
+    var str = String(text == null ? "" : text);
+    if (!layHasMarks(str)) return str;
+    var lines = str.split(/\r?\n/), out = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i]) { out.push(""); continue; }
+      var runs = layTextRuns(lines[i]), t = "";
+      for (var k = 0; k < runs.length; k++) t += runs[k].text;
+      out.push(t);
+    }
+    return out.join("\n");
+  }
+  // Marked text into lines of runs that fit maxW (null = no wrapping). The
+  // words are measured in their own weight, slant and size and the lines
+  // filled greedily, so a bold phrase that breaks across lines stays bold
+  // on both; runs of one style merge back together.
+  function layMarkedLines(text, maxW, fs, baseBold, baseItalic) {
+    var ctx = layTextCtx(), paras = String(text == null ? "" : text).split(/\r?\n/);
+    var lines = [], p, k, q;
+    function width(r, str) {
+      if (!ctx) return str.length * fs * 0.55;
+      ctx.font = ((r.italic || baseItalic) ? "italic " : "") +
+        ((r.bold || baseBold) ? "700" : "400") + " " +
+        (r.shift ? fs * 0.7 : fs) + "px sans-serif";
+      return ctx.measureText(str).width;
+    }
+    for (p = 0; p < paras.length; p++) {
+      var runs = layTextRuns(paras[p]);
+      if (maxW == null) { lines.push(runs); continue; }
+      var tokens = [];
+      for (k = 0; k < runs.length; k++) {
+        var pieces = runs[k].text.split(/( +)/);
+        for (q = 0; q < pieces.length; q++)
+          if (pieces[q]) tokens.push({ r: runs[k], s: pieces[q], space: pieces[q].charAt(0) === " " });
+      }
+      var line = [], lineW = 0, pending = null;
+      function add(tok) {
+        var last = line[line.length - 1];
+        if (last && last.bold === tok.r.bold && last.italic === tok.r.italic &&
+            last.shift === tok.r.shift) last.text += tok.s;
+        else line.push({ text: tok.s, bold: tok.r.bold, italic: tok.r.italic, shift: tok.r.shift });
+        lineW += width(tok.r, tok.s);
+      }
+      for (k = 0; k < tokens.length; k++) {
+        var tok = tokens[k];
+        if (tok.space) { if (line.length) pending = tok; continue; }
+        var need = width(tok.r, tok.s) + (pending ? width(pending.r, pending.s) : 0);
+        if (line.length && lineW + need > maxW) {
+          lines.push(line); line = []; lineW = 0; pending = null;
+        }
+        if (pending) { add(pending); pending = null; }
+        add(tok);
+      }
+      lines.push(line.length ? line : [{ text: " ", bold: false, italic: false, shift: 0 }]);
+    }
+    return lines;
+  }
+  // Lines of runs as tspans in t: the first run of a line carries x (and
+  // the step down to the next line), later runs flow on; a raised or
+  // lowered run shifts by dy and the next run shifts back, at 70% size.
+  function layRunsInto(doc, t, lines, x, fs, lineH) {
+    var ns = "http://www.w3.org/2000/svg", shift = 0;
+    for (var i = 0; i < lines.length; i++) {
+      for (var k = 0; k < lines[i].length; k++) {
+        var r = lines[i][k], sp = doc.createElementNS(ns, "tspan");
+        var target = r.shift < 0 ? -0.36 * fs : r.shift > 0 ? 0.18 * fs : 0;
+        var dy = target - shift;
+        if (k === 0) { sp.setAttribute("x", layNum2(x)); if (i > 0) dy += lineH; }
+        if (dy) sp.setAttribute("dy", layNum2(dy));
+        shift = target;
+        if (r.bold) sp.setAttribute("font-weight", "700");
+        if (r.italic) sp.setAttribute("font-style", "italic");
+        if (r.shift) sp.setAttribute("font-size", layNum2(fs * 0.7));
+        sp.textContent = exportSafeText(r.text) || " ";
+        t.appendChild(sp);
+      }
+    }
+  }
+  // The canvas: b, i, sup and sub around the runs, lines as newlines
+  // inside a pre-wrap block.
+  function layMarkedDom(parent, text) {
+    var paras = String(text == null ? "" : text).split(/\r?\n/);
+    for (var p = 0; p < paras.length; p++) {
+      if (p > 0) parent.appendChild(document.createTextNode("\n"));
+      var runs = layTextRuns(paras[p]);
+      for (var k = 0; k < runs.length; k++) {
+        var r = runs[k], host = parent, tags = [];
+        if (r.bold) tags.push("b");
+        if (r.italic) tags.push("i");
+        if (r.shift) tags.push(r.shift < 0 ? "sup" : "sub");
+        for (var g = 0; g < tags.length; g++) {
+          var e = document.createElement(tags[g]);
+          host.appendChild(e); host = e;
+        }
+        host.appendChild(document.createTextNode(exportSafeText(r.text)));
+      }
+    }
+  }
+  // A symbol into the open editor at its caret, else onto the end of the
+  // selected text items and boxes.
+  function layInsertSymbol(sym) {
+    var cv = el("ps-lcanvas");
+    var ta = cv && cv.querySelector("textarea.ps-ltext-edit");
+    if (ta) {
+      var a = ta.selectionStart, b = ta.selectionEnd, v = ta.value;
+      if (typeof a !== "number") { a = v.length; b = a; }
+      ta.value = v.slice(0, a) + sym + v.slice(b);
+      ta.selectionStart = ta.selectionEnd = a + sym.length;
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      ta.focus();
+      return;
+    }
+    var targets = layTextTargets();
+    if (!targets.length) { showToast("Select a text item or a box, or open its editor, to insert a symbol."); return; }
+    layPartApply(targets, "symbol", null, function (it) {
+      it.text = (it.text == null ? "" : String(it.text)) + sym;
+    });
+  }
+  // ---- turn, flip and gradients (Oct 2026, from the Illustrations app).
+  // A box, shape, image or timeline may TURN about its centre (degrees on
+  // the item; the canvas node turns and the file wraps the node in a
+  // rotate; the item's box, handles and arrows stay upright). An image may
+  // FLIP: only the picture mirrors, its frame and scale bar stay readable.
+  // A box or shape may fade from its fill to a second color.
+  function layItemTurn(item) {
+    var r = Number(item && item.turn);
+    if (!isFinite(r)) return 0;
+    return Math.max(-180, Math.min(180, Math.round(r)));
+  }
+  function layTurnableKind(item) {
+    return item && (item.kind === "box" || item.kind === "image" ||
+                    item.kind === "timeline" || item.kind === "path");
+  }
+  function layTurnTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (layTurnableKind(it)) out.push(it);
+    }
+    return out;
+  }
+  function layTurnTransform(item) {
+    var t = layItemTurn(item);
+    if (!t) return "";
+    var r = layItemRect(item);
+    return "rotate(" + t + " " + layNum2(r.x + r.w / 2) + " " + layNum2(r.y + r.h / 2) + ")";
+  }
+  function layFlipTransform(item, cx, cy) {
+    if (!item.flipX && !item.flipY) return "";
+    return "translate(" + layNum2(cx) + " " + layNum2(cy) + ") scale(" +
+      (item.flipX ? -1 : 1) + " " + (item.flipY ? -1 : 1) + ") translate(" +
+      layNum2(-cx) + " " + layNum2(-cy) + ")";
+  }
+  var LAY_GRAD_ANGLES = [90, 0, 45, 135];
+  function layBoxGradient(item) {
+    var g = item && item.gradient;
+    if (!g || !layHexOr(g.to, "")) return null;
+    var a = Number(g.angle);
+    return { to: g.to, angle: LAY_GRAD_ANGLES.indexOf(a) !== -1 ? a : 90 };
+  }
+  // A darker (amt < 0) or lighter shade of a hex color.
+  function layShade(hex, amt) {
+    var h = layHexOr(hex, "#888888").slice(1);
+    if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    var out = "#";
+    for (var i = 0; i < 3; i++) {
+      var v = parseInt(h.substr(i * 2, 2), 16);
+      v = amt >= 0 ? v + (255 - v) * amt : v * (1 + amt);
+      v = Math.max(0, Math.min(255, Math.round(v)));
+      out += (v < 16 ? "0" : "") + v.toString(16);
+    }
+    return out;
+  }
+  // The gradient as a linearGradient in doc: direction as a unit vector
+  // across the box (0 = left to right, 90 = top to bottom, 45 and 135 the
+  // diagonals), two stops, box-relative.
+  function layGradientNode(doc, id, fill, g) {
+    var ns = "http://www.w3.org/2000/svg", a = g.angle * Math.PI / 180;
+    var lg = doc.createElementNS(ns, "linearGradient");
+    lg.setAttribute("id", id);
+    lg.setAttribute("x1", layNum2(0.5 - Math.cos(a) / 2));
+    lg.setAttribute("y1", layNum2(0.5 - Math.sin(a) / 2));
+    lg.setAttribute("x2", layNum2(0.5 + Math.cos(a) / 2));
+    lg.setAttribute("y2", layNum2(0.5 + Math.sin(a) / 2));
+    var s0 = doc.createElementNS(ns, "stop");
+    s0.setAttribute("offset", "0"); s0.setAttribute("stop-color", fill);
+    var s1 = doc.createElementNS(ns, "stop");
+    s1.setAttribute("offset", "1"); s1.setAttribute("stop-color", g.to);
+    lg.appendChild(s0); lg.appendChild(s1);
+    var defs = doc.createElementNS(ns, "defs");
+    defs.appendChild(lg);
+    return defs;
+  }
+  function layPathSyncControls(items) {
+    var item = items[0], st = layPathStyle(item), i;
+    function agree(read) {
+      for (var k = 1; k < items.length; k++)
+        if (read(items[k]) !== read(items[0])) return false;
+      return true;
+    }
+    function seg(attr, value, mixed) {
+      var btns = document.querySelectorAll("[" + attr + "]");
+      for (var b = 0; b < btns.length; b++)
+        btns[b].setAttribute("aria-pressed", !mixed && btns[b].getAttribute(attr) === value ? "true" : "false");
+    }
+    seg("data-lpath-smooth", st.smooth ? "smooth" : "straight", !agree(function (t) { return !!t.smooth; }));
+    seg("data-lpath-closed", st.closed ? "closed" : "open", !agree(function (t) { return !!t.closed; }));
+    seg("data-lpath-dash", st.dashed ? "dashed" : "solid", !agree(function (t) { return !!t.dashed; }));
+    seg("data-lpath-heads", st.heads, !agree(function (t) { return layPathStyle(t).heads; }));
+    seg("data-lpath-brush", st.brush, !agree(function (t) { return layPathStyle(t).brush; }));
+    layPaintCustomChip("ps-lpath-stroke", st.stroke === "none" ? "#ffffff" : st.stroke, false);
+    layPaintCustomChip("ps-lpath-fill", st.fill === "none" ? "#ffffff" : st.fill, false);
+    layPaintCustomChip("ps-lpath-brushcolor", st.brushColor, false);
+    layPaintCustomChip("ps-lpath-brushcolor2", st.brushColor2, false);
+    var rg = el("ps-lpath-width"), nm = el("ps-lpath-width-num");
+    var wMixed = !agree(function (t) { return layPathStyle(t).width; });
+    if (rg && document.activeElement !== rg) rg.value = String(st.width);
+    if (nm && document.activeElement !== nm) {
+      if (wMixed) { nm.value = ""; nm.placeholder = "Mixed"; } else { nm.value = String(st.width); nm.placeholder = ""; }
+    }
+    var bs = el("ps-lpath-brushsize"), bn = el("ps-lpath-brushsize-num"), pct = Math.round(st.brushSize * 100);
+    if (bs && document.activeElement !== bs) bs.value = String(pct);
+    if (bn && document.activeElement !== bn) bn.value = String(pct);
+    var headsRow = el("ps-lpath-heads-row"), fillRow = el("ps-lpath-fill-row");
+    var lineRows = el("ps-lpath-line-rows"), brushRows = el("ps-lpath-brush-rows");
+    var second = el("ps-lpath-brushcolor2");
+    if (headsRow) headsRow.style.display = !st.closed && st.brush === "none" ? "" : "none";
+    if (fillRow) fillRow.style.display = st.closed ? "" : "none";
+    if (lineRows) lineRows.style.display = st.brush === "none" ? "" : "none";
+    if (brushRows) brushRows.style.display = st.brush === "none" ? "none" : "";
+    if (second) second.style.display = LAY_BRUSH_SECOND[st.brush] ? "" : "none";
+  }
+  function layWirePathControls(wirePair) {
+    var i;
+    function seg(attr, label, fn) {
+      var btns = document.querySelectorAll("[" + attr + "]");
+      for (var b = 0; b < btns.length; b++) (function (btn) {
+        btn.addEventListener("click", function () {
+          var v = btn.getAttribute(attr);
+          layPartApply(layPathTargets(), label, null, function (it) { fn(it, v); });
+        });
+      })(btns[b]);
+    }
+    seg("data-lpath-smooth", "drawing curve", function (it, v) { it.smooth = v === "smooth"; });
+    seg("data-lpath-closed", "drawing closed", function (it, v) {
+      it.closed = v === "closed";
+      if (it.closed && (!it.fill || it.fill === "none")) it.fill = LAY_PATH_FILL;
+    });
+    seg("data-lpath-dash", "drawing line", function (it, v) { it.dashed = v === "dashed"; });
+    seg("data-lpath-heads", "drawing heads", function (it, v) { it.heads = v; });
+    seg("data-lpath-brush", "brush", function (it, v) {
+      if (v === "none") delete it.brush; else it.brush = v;
+      delete it.brushColor; delete it.brushColor2;
+    });
+    layWireCustomChip("ps-lpath-stroke", layPathTargets, "stroke", "drawing line color", LAY_PATH_STROKE);
+    layWireCustomChip("ps-lpath-fill", layPathTargets, "fill", "drawing fill", LAY_PATH_FILL);
+    layWireCustomChip("ps-lpath-brushcolor", layPathTargets, "brushColor", "brush color", "#efc47d");
+    layWireCustomChip("ps-lpath-brushcolor2", layPathTargets, "brushColor2", "brush second color", "#902634");
+    wirePair("ps-lpath-width", "ps-lpath-width-num", layPathTargets, "drawing width", "lpath-width",
+      function (it, v) { it.width = layClamp(Math.round(v * 4) / 4, 0.25, 8); });
+    wirePair("ps-lpath-brushsize", "ps-lpath-brushsize-num", layPathTargets, "brush size", "lpath-brushsize",
+      function (it, v) { it.brushSize = layClamp(Math.round(v / 5) * 5, 40, 300) / 100; });
+    var noFill = el("ps-lpath-nofill");
+    if (noFill) noFill.addEventListener("click", function () {
+      layPartApply(layPathTargets(), "drawing fill", null, function (it) { it.fill = "none"; });
+    });
+    var noStroke = el("ps-lpath-nostroke");
+    if (noStroke) noStroke.addEventListener("click", function () {
+      layPartApply(layPathTargets(), "drawing line color", null, function (it) { it.stroke = "none"; });
+    });
+  }
+  function layBoxTextValue(item) {
+    if (item.text == null) return layBoxShape(item) === "rect" ? "Box" : "";
+    return String(item.text);
+  }
   function layBoxFill(item) {
     var f = String(item.fill || "");
     if (f === "none" || f === "transparent") return "none";
@@ -24795,17 +26538,47 @@
     return Math.abs(layTextRotate(item)) >= 45;
   }
   function layBoxNode(item) {
-    var st = layBoxStyle(item);
-    var box = mkEl("div", "ps-lbox");
-    box.style.background = st.fill === "none" ? "transparent" : st.fill;
-    box.style.border = st.borderW
-      ? st.borderW + "px solid " + st.borderColor : "0";
-    box.style.borderRadius = st.corner + "px";
+    var st = layBoxStyle(item), shape = layBoxShape(item);
+    var box = mkEl("div", "ps-lbox"), grad = layBoxGradient(item);
+    var turn = layItemTurn(item);
+    if (turn) {
+      box.style.transform = "rotate(" + turn + "deg)";
+      box.style.transformOrigin = "center center";
+    }
+    if (shape === "rect") {
+      box.style.background = st.fill === "none" ? "transparent"
+        : grad ? "linear-gradient(" + (grad.angle + 90) + "deg, " + st.fill + ", " + grad.to + ")"
+        : st.fill;
+      box.style.border = st.borderW
+        ? st.borderW + "px solid " + st.borderColor : "0";
+      box.style.borderRadius = st.corner + "px";
+    } else {
+      // The outline is an svg under the text; the div stays the hit area
+      // and the text's frame, padded to the shape's inset.
+      var bw = Number(item.w) || 150, bh = Number(item.h) || 44;
+      box.style.background = "transparent";
+      box.style.border = "0";
+      box.style.borderRadius = "0";
+      box.style.padding = LAY_BOX_PAD_Y + "px " +
+        layNum2(layShapeInset(shape, bw)) + "px";
+      var shapeSvg = layShapeSvg(item, st, bw, bh);
+      if (grad && st.fill !== "none") {
+        shapeSvg.insertBefore(layGradientNode(document, "lg-c-" + item.id, st.fill, grad),
+          shapeSvg.firstChild);
+        var fillPaths = shapeSvg.querySelectorAll("path");
+        for (var fp = 0; fp < fillPaths.length; fp++)
+          if (fillPaths[fp].getAttribute("fill") === st.fill)
+            fillPaths[fp].setAttribute("fill", "url(#lg-c-" + item.id + ")");
+      }
+      box.appendChild(shapeSvg);
+    }
     box.style.fontSize = st.fs + "px";
     box.style.fontWeight = item.bold ? "700" : "400";
     box.style.fontStyle = item.italic ? "italic" : "normal";
     box.style.color = layTextColor(item);
-    var span = mkEl("span", "", exportSafeText(item.text || "Box"));
+    var boxText = layBoxTextValue(item);
+    var span = mkEl("span", "", layHasMarks(boxText) ? "" : exportSafeText(boxText));
+    if (layHasMarks(boxText)) layMarkedDom(span, boxText);
     var rot = layTextRotate(item);
     if (rot) {
       // Rotation stays on the inner text, as for text items. A side
@@ -24851,19 +26624,50 @@
     persist(!live);
     renderLayout();
   }
+  // Diagram arrows (Oct 2026, the pieces of the Illustrations app worth
+  // keeping, ported into Layouts): an "inhibit" head is the flat bar a
+  // pathway draws for A -| B; a dashed line; a label on the longest
+  // segment; and an attached end may be PINNED to a side (from.side /
+  // to.side, l r t b), which the diagram wizards use to send an arrow that
+  // closes a loop around the outside of the diagram. Unpinned ends keep
+  // facing the other end, as before.
+  var LAY_ARROW_SIDES = { l: 1, r: 1, t: 1, b: 1 };
+  var LAY_ARROW_LABEL_FS = 11;
+  var LAY_ARROW_LOOP = 28;
   function layArrowStyle(item) {
     return { width: layClamp(item.width == null ? 1.5 : item.width, 0.5, 6),
              color: layHexOr(item.color, "#22364d"),
-             route: item.route === "straight" ? "straight" : "elbow",
-             heads: item.heads === "none" || item.heads === "both"
-               ? item.heads : "end" };
+             route: item.route === "straight" ? "straight"
+                  : item.route === "curved" ? "curved" : "elbow",
+             bend: layClamp(item.bend == null ? 0.25 : Number(item.bend) || 0, -1, 1),
+             heads: item.heads === "none" || item.heads === "both" ||
+                    item.heads === "inhibit" ? item.heads : "end",
+             dashed: !!item.dashed,
+             label: String(item.label || "").replace(/\s+/g, " ").trim() };
   }
   function layArrowHeadLen(w) { return 7 + w * 2.5; }
+  function layArrowPin(ref) {
+    return ref && ref.side && LAY_ARROW_SIDES[ref.side] ? ref.side : null;
+  }
+  // An attachment reference, keeping a valid pinned side and nothing else.
+  function layArrowRef(id, side) {
+    return side && LAY_ARROW_SIDES[side] ? { id: id, side: side } : { id: id };
+  }
+  function layArrowLabelW(text, fs) {
+    var ctx = layTextCtx(), plain = layPlainText(text);
+    if (!ctx) return plain.length * fs * 0.55;
+    ctx.font = fs + "px sans-serif";
+    return ctx.measureText(plain).width;
+  }
   // Which side of a box an end leaves from: the side facing the other
   // end, judged in the box's own proportions so a wide box prefers its
-  // long sides. Computed, never stored.
-  function layArrowSideOf(rect, ox, oy) {
+  // long sides. Computed, never stored, unless the end is pinned.
+  function layArrowSideOf(rect, ox, oy, pin) {
     var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    if (pin === "r") return { x: rect.x + rect.w, y: cy, side: "r" };
+    if (pin === "l") return { x: rect.x, y: cy, side: "l" };
+    if (pin === "b") return { x: cx, y: rect.y + rect.h, side: "b" };
+    if (pin === "t") return { x: cx, y: rect.y, side: "t" };
     var dx = ox - cx, dy = oy - cy;
     var hx = Math.max(1, rect.w / 2), hy = Math.max(1, rect.h / 2);
     if (Math.abs(dx) / hx >= Math.abs(dy) / hy)
@@ -24872,19 +26676,124 @@
     return dy >= 0 ? { x: cx, y: rect.y + rect.h, side: "b" }
                    : { x: cx, y: rect.y, side: "t" };
   }
+  // Any item but an arrow can hold an end (Oct 2026; boxes only before):
+  // a chart panel, an image, a text item, a timeline or a shape. A text
+  // item's box is its measured rect.
   function layArrowAnchorBox(ref) {
     if (!ref || !ref.id) return null;
     var it = layItemById(ref.id);
-    if (!it || it.kind !== "box") return null;
-    return { x: Number(it.x) || 0, y: Number(it.y) || 0,
-             w: Number(it.w) || 150, h: Number(it.h) || 44 };
+    if (!it || it.kind === "arrow") return null;
+    var r = layItemRect(it);
+    return { x: r.x, y: r.y, w: Math.max(1, r.w), h: Math.max(1, r.h) };
+  }
+  // Several arrows on one side of a box spread along it, in the order of
+  // where their other ends are, so they never pile onto the side's centre
+  // or cross each other on the way in (a circuit diagram's four inputs).
+  // The side itself is decided from box centres alone, so this never
+  // depends on another arrow's port.
+  function layArrowEndSide(o, key, rect) {
+    var ref = o[key], pin = layArrowPin(ref);
+    if (pin) return { side: pin, along: layArrowOtherAlong(o, key, pin) };
+    var other = layArrowOther(o, key);
+    var s = layArrowSideOf(rect, other.x, other.y, null).side;
+    return { side: s, along: s === "t" || s === "b" ? other.x : other.y };
+  }
+  // The point the OTHER end of an arrow aims from: its box's centre, or
+  // the free end itself.
+  function layArrowOther(o, key) {
+    var okey = key === "from" ? "to" : "from";
+    var r = layArrowAnchorBox(o[okey]);
+    if (r) return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+    var x0 = Number(o.x) || 0, y0 = Number(o.y) || 0;
+    return key === "from"
+      ? { x: x0 + (Number(o.bx) || 0), y: y0 + (Number(o.by) || 0) }
+      : { x: x0 + (Number(o.ax) || 0), y: y0 + (Number(o.ay) || 0) };
+  }
+  function layArrowOtherAlong(o, key, side) {
+    var other = layArrowOther(o, key);
+    return side === "t" || side === "b" ? other.x : other.y;
+  }
+  function layArrowPort(item, ref, rect, pt, target) {
+    var items = LAY_ITEM_SCOPE || layItems(), mates = [], i;
+    for (i = 0; i < items.length; i++) {
+      var o = items[i];
+      if (o.kind !== "arrow") continue;
+      var keys = [];
+      if (o.from && o.from.id === ref.id) keys.push("from");
+      if (o.to && o.to.id === ref.id) keys.push("to");
+      for (var k = 0; k < keys.length; k++) {
+        var e = o === item && keys[k] === (ref === item.from ? "from" : "to")
+          ? { side: pt.side, along: pt.side === "t" || pt.side === "b"
+              ? (target.w != null ? target.x + target.w / 2 : target.x)
+              : (target.h != null ? target.y + target.h / 2 : target.y) }
+          : layArrowEndSide(o, keys[k], rect);
+        if (e.side === pt.side)
+          mates.push({ o: o, key: keys[k], along: e.along });
+      }
+    }
+    if (mates.length < 2) return pt;
+    mates.sort(function (p, q) {
+      return p.along - q.along || (p.o.id < q.o.id ? -1 : p.o.id > q.o.id ? 1 : 0);
+    });
+    var idx = -1, mine = ref === item.from ? "from" : "to";
+    for (i = 0; i < mates.length; i++)
+      if (mates[i].o === item && mates[i].key === mine) { idx = i; break; }
+    if (idx < 0) return pt;
+    var horiz = pt.side === "t" || pt.side === "b";
+    var span = horiz ? rect.w : rect.h;
+    var step = Math.min(24, span * 0.7 / (mates.length - 1));
+    var off = (idx - (mates.length - 1) / 2) * step;
+    return horiz ? { x: pt.x + off, y: pt.y, side: pt.side }
+                 : { x: pt.x, y: pt.y + off, side: pt.side };
   }
   // The polyline between two ends. An attached end must LEAVE its box
   // through the side it sits on, so a horizontal side gets a horizontal
   // first or last segment; a free end takes whatever the other end needs.
-  function layArrowPoints(A, B, route) {
+  // The outward normal of a side, for a curve leaving square to it.
+  function layArrowDir(side) {
+    return side === "r" ? { x: 1, y: 0 } : side === "l" ? { x: -1, y: 0 }
+         : side === "b" ? { x: 0, y: 1 } : side === "t" ? { x: 0, y: -1 } : null;
+  }
+  var LAY_ARROW_CURVE_N = 36;
+  function layArrowPoints(A, B, route, bend) {
     if (route === "straight")
       return [{ x: A.x, y: A.y }, { x: B.x, y: B.y }];
+    // A curve: one cubic whose attached ends leave square to their sides
+    // and whose free ends bow by the bend; sampled into a polyline so the
+    // heads, the trim, the label and the hit path need nothing new.
+    if (route === "curved") {
+      var dx = B.x - A.x, dy = B.y - A.y, L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var k = Math.max(12, 0.42 * L), bd = (bend == null ? 0.25 : bend) * L;
+      var nx = -dy / L, ny = dx / L;
+      var da = layArrowDir(A.side), db = layArrowDir(B.side);
+      var c1 = da ? { x: A.x + da.x * k, y: A.y + da.y * k }
+                  : { x: A.x + dx / 3 + nx * bd, y: A.y + dy / 3 + ny * bd };
+      var c2 = db ? { x: B.x + db.x * k, y: B.y + db.y * k }
+                  : { x: A.x + 2 * dx / 3 + nx * bd, y: A.y + 2 * dy / 3 + ny * bd };
+      var curve = [];
+      for (var ci = 0; ci <= LAY_ARROW_CURVE_N; ci++) {
+        var t = ci / LAY_ARROW_CURVE_N, u = 1 - t;
+        curve.push({ x: u * u * u * A.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * B.x,
+                     y: u * u * u * A.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * B.y });
+      }
+      curve.curved = true;
+      return curve;
+    }
+    // Both ends on the SAME side of their boxes (pinned there by a wizard
+    // for an arrow that closes a loop): out past the outer edge, along,
+    // and back in, so the loop runs around the outside instead of a Z
+    // through the boxes. Orthogonal like every other elbow; no curves.
+    if (A.side && A.side === B.side) {
+      var out = LAY_ARROW_LOOP, lx, ly;
+      if (A.side === "r" || A.side === "l") {
+        lx = A.side === "r" ? Math.max(A.x, B.x) + out : Math.min(A.x, B.x) - out;
+        return [{ x: A.x, y: A.y }, { x: lx, y: A.y }, { x: lx, y: B.y },
+                { x: B.x, y: B.y }];
+      }
+      ly = A.side === "b" ? Math.max(A.y, B.y) + out : Math.min(A.y, B.y) - out;
+      return [{ x: A.x, y: A.y }, { x: A.x, y: ly }, { x: B.x, y: ly },
+              { x: B.x, y: B.y }];
+    }
     var aH = A.side === "l" || A.side === "r";
     var aV = A.side === "t" || A.side === "b";
     var bH = B.side === "l" || B.side === "r";
@@ -24910,17 +26819,24 @@
     var A = { x: x0 + (Number(item.ax) || 0), y: y0 + (Number(item.ay) || 0) };
     var B = { x: x0 + (Number(item.bx) || 0), y: y0 + (Number(item.by) || 0) };
     var ra = layArrowAnchorBox(item.from), rb = layArrowAnchorBox(item.to);
+    var pinA = layArrowPin(item.from), pinB = layArrowPin(item.to);
     if (ra && rb) {
-      A = layArrowSideOf(ra, rb.x + rb.w / 2, rb.y + rb.h / 2);
-      B = layArrowSideOf(rb, ra.x + ra.w / 2, ra.y + ra.h / 2);
-    } else if (ra) A = layArrowSideOf(ra, B.x, B.y);
-    else if (rb) B = layArrowSideOf(rb, A.x, A.y);
+      A = layArrowSideOf(ra, rb.x + rb.w / 2, rb.y + rb.h / 2, pinA);
+      B = layArrowSideOf(rb, ra.x + ra.w / 2, ra.y + ra.h / 2, pinB);
+    } else if (ra) A = layArrowSideOf(ra, B.x, B.y, pinA);
+    else if (rb) B = layArrowSideOf(rb, A.x, A.y, pinB);
+    if (ra) A = layArrowPort(item, item.from, ra, A, rb ? rb : B);
+    if (rb) B = layArrowPort(item, item.to, rb, B, ra ? ra : A);
     // A box that is gone (deleted, or this arrow was pasted into another
     // figure) leaves the end where it last was, as a free end.
     if (!ra && item.from) item.from = null;
     if (!rb && item.to) item.to = null;
-    var pts = layArrowPoints(A, B, st.route);
+    var pts = layArrowPoints(A, B, st.route, st.bend);
     var pad = layArrowHeadLen(st.width) + st.width + 6;
+    // A label sits beside the line, so the item's box has to reach it.
+    if (st.label)
+      pad = Math.max(pad, LAY_ARROW_LABEL_FS + 10,
+        layArrowLabelW(st.label, LAY_ARROW_LABEL_FS) / 2 + 8);
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (var i = 0; i < pts.length; i++) {
       if (pts[i].x < minX) minX = pts[i].x;
@@ -24948,6 +26864,19 @@
     }
     if (clean.length === 1) clean.push({ x: clean[0].x + 0.01, y: clean[0].y });
     var len = layArrowHeadLen(st.width), half = len * 0.42, heads = [];
+    var bars = [], curved = !!ends.pts.curved;
+    // A curve's samples sit closer than a head is long, so the trimmed
+    // line would run back past its own last sample: the samples inside a
+    // head's length are dropped first, at each end that wears one.
+    function dist(p1, p2) {
+      return Math.sqrt((p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y));
+    }
+    if (curved && st.heads !== "none") {
+      while (clean.length > 2 && dist(clean[clean.length - 2], clean[clean.length - 1]) < len + 1)
+        clean.splice(clean.length - 2, 1);
+      if (st.heads === "both")
+        while (clean.length > 2 && dist(clean[0], clean[1]) < len + 1) clean.splice(1, 1);
+    }
     function head(tip, prev) {
       var dx = tip.x - prev.x, dy = tip.y - prev.y;
       var L = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -24958,12 +26887,60 @@
                   { x: bx + uy * half, y: by - ux * half }]);
       return { x: bx + ux * 0.5, y: by + uy * 0.5 };
     }
-    if (st.heads === "end" || st.heads === "both")
+    // The inhibition bar: flat across the tip, as wide as a head's base.
+    function bar(tip, prev) {
+      var dx = tip.x - prev.x, dy = tip.y - prev.y;
+      var L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / L, uy = dy / L, bw = Math.max(1.5, st.width * 1.6);
+      bars.push({ x1: tip.x - uy * half, y1: tip.y + ux * half,
+                  x2: tip.x + uy * half, y2: tip.y - ux * half, w: bw });
+      return { x: tip.x - ux * bw / 2, y: tip.y - uy * bw / 2 };
+    }
+    if (st.heads === "inhibit")
+      clean[clean.length - 1] = bar(clean[clean.length - 1],
+                                    clean[clean.length - 2]);
+    else if (st.heads === "end" || st.heads === "both")
       clean[clean.length - 1] = head(clean[clean.length - 1],
                                      clean[clean.length - 2]);
     if (st.heads === "both") clean[0] = head(clean[0], clean[1]);
-    return { line: clean, heads: heads, style: st, ends: ends };
+    // The label rides the longest segment: above a horizontal one, beside
+    // a vertical one on the side away from the ends (a loop's outer run).
+    var label = null;
+    if (st.label && curved) {
+      // On a curve the label sits at the middle sample, pushed out on the
+      // side the curve bows to (away from the chord), above when straight.
+      var mi = Math.floor(clean.length / 2), mp = clean[mi];
+      var cmx = (clean[0].x + clean[clean.length - 1].x) / 2;
+      var cmy = (clean[0].y + clean[clean.length - 1].y) / 2;
+      var ox = mp.x - cmx, oy = mp.y - cmy, oL = Math.sqrt(ox * ox + oy * oy);
+      if (oL < 2) { ox = 0; oy = -1; } else { ox /= oL; oy /= oL; }
+      var cfs = LAY_ARROW_LABEL_FS, coff = cfs * 0.6 + st.width / 2 + 3;
+      label = { x: mp.x + ox * coff, y: mp.y + oy * coff + cfs * 0.35,
+                anchor: ox > 0.5 ? "start" : ox < -0.5 ? "end" : "middle",
+                fs: cfs, text: st.label };
+    } else if (st.label) {
+      var bi = 1, best = -1;
+      for (i = 1; i < clean.length; i++) {
+        var sl = Math.abs(clean[i].x - clean[i - 1].x) +
+          Math.abs(clean[i].y - clean[i - 1].y);
+        if (sl > best) { best = sl; bi = i; }
+      }
+      var p1 = clean[bi - 1], p2 = clean[bi], fs = LAY_ARROW_LABEL_FS;
+      var mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      if (Math.abs(p2.x - p1.x) >= Math.abs(p2.y - p1.y))
+        label = { x: mx, y: my - st.width / 2 - 4, anchor: "middle",
+                  fs: fs, text: st.label };
+      else {
+        var right = mx > (clean[0].x + clean[clean.length - 1].x) / 2;
+        label = { x: mx + (right ? 1 : -1) * (st.width / 2 + 5),
+                  y: my + fs * 0.35, anchor: right ? "start" : "end",
+                  fs: fs, text: st.label };
+      }
+    }
+    return { line: clean, heads: heads, bars: bars, label: label,
+             style: st, ends: ends };
   }
+  function layArrowDash(st) { return st.width * 4 + " " + st.width * 3; }
   function layNum2(v) { return String(Math.round(v * 100) / 100); }
   function layArrowD(pts, ox, oy) {
     var d = "";
@@ -25009,6 +26986,7 @@
     line.setAttribute("stroke", st.color);
     line.setAttribute("stroke-width", String(st.width));
     line.setAttribute("stroke-linejoin", "round");
+    if (st.dashed) line.setAttribute("stroke-dasharray", layArrowDash(st));
     svg.appendChild(line);
     for (i = 0; i < r.heads.length; i++) {
       var poly = document.createElementNS(ns, "polygon");
@@ -25016,26 +26994,72 @@
       poly.setAttribute("fill", st.color);
       svg.appendChild(poly);
     }
+    for (i = 0; i < r.bars.length; i++)
+      svg.appendChild(layArrowBarNode(document, r.bars[i], 0, 0, st));
+    if (r.label) svg.appendChild(layArrowLabelNode(document, r.label, 0, 0, st));
     return svg;
   }
+  function layArrowBarNode(doc, b, ox, oy, st) {
+    var ln = doc.createElementNS("http://www.w3.org/2000/svg", "line");
+    ln.setAttribute("x1", layNum2(b.x1 + ox)); ln.setAttribute("y1", layNum2(b.y1 + oy));
+    ln.setAttribute("x2", layNum2(b.x2 + ox)); ln.setAttribute("y2", layNum2(b.y2 + oy));
+    ln.setAttribute("stroke", st.color);
+    ln.setAttribute("stroke-width", String(b.w));
+    ln.setAttribute("stroke-linecap", "butt");
+    return ln;
+  }
+  function layArrowLabelNode(doc, lb, ox, oy, st) {
+    var t = doc.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("x", layNum2(lb.x + ox));
+    t.setAttribute("y", layNum2(lb.y + oy));
+    t.setAttribute("text-anchor", lb.anchor);
+    t.setAttribute("fill", st.color);
+    t.setAttribute("font-size", String(lb.fs));
+    t.setAttribute("font-family", "sans-serif");
+    if (layHasMarks(lb.text))
+      layRunsInto(doc, t, layMarkedLines(lb.text, null, lb.fs, false, false), lb.x + ox, lb.fs, 0);
+    else t.textContent = exportSafeText(lb.text);
+    return t;
+  }
+  // What an arrow's end is attached to, for the rail's selects and the
+  // accessible names: a box or text item by its words, a chart by its
+  // name, an image, a timeline, a shape by its kind.
   function layBoxLabel(id) {
     var it = layItemById(id);
     if (!it) return null;
-    var t = String(it.text || "Box").replace(/\s+/g, " ").trim();
+    var t = it.name ? String(it.name) : "";
+    if (!t && (it.kind === "box" || it.kind === "text")) t = layPlainText(it.text || "");
+    else if (it.kind === "chart") {
+      var ch = chartById(it.chartId);
+      t = ch ? (ch.name || "Untitled chart") : "Chart panel";
+    } else if (it.kind === "image") t = layLensIsInset(it) ? "Magnified view" : it.srcChart ? "Notebook snapshot" : "Image";
+    else if (it.kind === "timeline") t = "Timeline";
+    else if (it.kind === "path") t = it.closed ? "Drawn shape" : "Drawn line";
+    else if (it.kind === "box" && layLensOf(it)) t = "Magnifier frame";
+    else if (it.kind === "arrow") {
+      var al = layArrowStyle(it).label;
+      t = al ? "Arrow " + al : "Arrow";
+    }
+    if (!t) t = it.kind === "box"
+      ? (layBoxShape(it) === "rect" ? "Box" : LAY_SHAPE_LABEL[layBoxShape(it)])
+      : "Text";
+    t = t.replace(/\s+/g, " ").trim();
     if (t.length > 40) t = t.slice(0, 37) + "…";
     return t;
   }
   function layArrowEndsText(item) {
     var f = item.from ? layBoxLabel(item.from.id) : null;
     var t = item.to ? layBoxLabel(item.to.id) : null;
-    if (f && t) return ' from "' + f + '" to "' + t + '"';
-    if (f) return ' from "' + f + '" to a free end';
-    if (t) return ' from a free end to "' + t + '"';
-    return ", free at both ends";
+    var lb = layArrowStyle(item).label;
+    var tail = lb ? ', labeled "' + lb + '"' : "";
+    if (f && t) return ' from "' + f + '" to "' + t + '"' + tail;
+    if (f) return ' from "' + f + '" to a free end' + tail;
+    if (t) return ' from a free end to "' + t + '"' + tail;
+    return ", free at both ends" + tail;
   }
   function layArrowTip(item) {
     return "Arrow" + layArrowEndsText(item) +
-      ". Drag an end onto a box to attach it.";
+      ". Drag an end onto any item to attach it.";
   }
   function layArrowReverse(item) {
     var f = item.from, ax = item.ax, ay = item.ay;
@@ -25055,8 +27079,8 @@
       h.style.left = layNum2(spec[i][1].x - item.x) + "px";
       h.style.top = layNum2(spec[i][1].y - item.y) + "px";
       setTip(h, spec[i][2]
-        ? "Attached to a box. Drag it away to free this end, or onto another box."
-        : "Drag onto a box to attach this end.");
+        ? "Attached. Drag it away to free this end, or onto another item."
+        : "Drag onto any item to attach this end.");
       node.appendChild(h);
     }
   }
@@ -25100,15 +27124,21 @@
     for (var i = 0; i < ids.length; i++) {
       var it = layItemById(ids[i]);
       if (!it || it.kind !== "arrow") continue;
-      if (it.from) it.from = idMap[it.from.id] ? { id: idMap[it.from.id] } : null;
-      if (it.to) it.to = idMap[it.to.id] ? { id: idMap[it.to.id] } : null;
+      if (it.from) it.from = idMap[it.from.id]
+        ? layArrowRef(idMap[it.from.id], it.from.side) : null;
+      if (it.to) it.to = idMap[it.to.id]
+        ? layArrowRef(idMap[it.to.id], it.to.side) : null;
     }
+    // Magnified views remap the same way, wherever copies are made
+    // (duplicate, paste, a wizard's insert).
+    layLensRemap(ids, idMap);
   }
+  // The topmost item under a point that an arrow's end could attach to.
   function layBoxAt(px, py, except) {
     var items = layItems();
     for (var i = items.length - 1; i >= 0; i--) {
       var it = items[i];
-      if (it.kind !== "box" || it === except) continue;
+      if (it.kind === "arrow" || it === except || it.hidden) continue;
       var r = layItemRect(it);
       if (px >= r.x && px <= r.right && py >= r.y && py <= r.bottom) return it;
     }
@@ -25124,7 +27154,10 @@
     var px = layClamp((e.clientX - box.left) / z, 0, p.w);
     var py = layClamp((e.clientY - box.top) / z, 0, p.h);
     var it = d.arrow, key = d.arrowEnd === "a" ? "from" : "to";
-    var target = layBoxAt(px, py, null);
+    // Never the item the other end already holds: an arrow from a box
+    // back onto itself has no side to leave from.
+    var otherRef = key === "from" ? it.to : it.from;
+    var target = layBoxAt(px, py, otherRef ? layItemById(otherRef.id) : null);
     if (target) it[key] = { id: target.id };
     else {
       it[key] = null;
@@ -25158,14 +27191,31 @@
     layAnnounce("Added a box. Double-click it to edit the text.");
     return id;
   }
-  // With a box selected the new arrow starts attached to it, free end to
+  // A shape is a box born with an outline and no text; the rail's shape
+  // row changes it afterward.
+  function layAddShape(kind) {
+    kind = LAY_SHAPE_LABEL[kind] ? kind : "ellipse";
+    var p = layPage(), items = layItems();
+    var size = LAY_SHAPE_SIZES[kind] || (kind === "rect" ? [150, 44] : [150, 90]);
+    var spot = layPlaceRect(items, p, size[0], size[1]);
+    var grew = spot.needH > p.h;
+    var id = layAddItem({ id: layNewItemId(), kind: "box", shape: kind, text: "",
+      fontSize: 13, x: spot.x, y: spot.y, w: size[0], h: size[1],
+      fill: "#ffffff", border: "thin", corner: 4 }, false, spot.needH);
+    layGrewNote(grew, spot.capped);
+    layAnnounce("Added " + (kind === "ellipse" ? "an ellipse" :
+      "a " + LAY_SHAPE_LABEL[kind].toLowerCase()) +
+      ". Pick another shape in the rail; double-click it to add text.");
+    return id;
+  }
+  // With an item selected the new arrow starts attached to it, free end to
   // the right; otherwise a free arrow lands in clear space.
   function layAddArrow() {
     var p = layPage(), items = layItems();
     var sel = laySelectedIds(), fromBox = null;
     for (var i = 0; i < sel.length; i++) {
       var s = layItemById(sel[i]);
-      if (s && s.kind === "box") fromBox = s;
+      if (s && s.kind !== "arrow") fromBox = s;
     }
     var item = { id: layNewItemId(), kind: "arrow", route: "elbow",
                  heads: "end", width: 1.5, color: "#22364d",
@@ -25185,7 +27235,7 @@
     var id = layAddItem(item, false, p.h);
     layAnnounce(fromBox
       ? "Added an arrow from the selected box. Drag its free end onto another box to attach it."
-      : "Added an arrow. Drag either end onto a box to attach it.");
+      : "Added an arrow. Drag either end onto any item to attach it.");
     return id;
   }
   function layBoxSyncControls(items) {
@@ -25213,6 +27263,30 @@
       segs[i].setAttribute("aria-pressed",
         !borderMixed && segs[i].getAttribute("data-lbox-border") === border
           ? "true" : "false");
+    var grad = layBoxGradient(item);
+    var gradMixed = !agree(function (t) { return layBoxGradient(t) ? "on" : "none"; });
+    var gradSegs = document.querySelectorAll("[data-lbox-grad]");
+    for (i = 0; i < gradSegs.length; i++)
+      gradSegs[i].setAttribute("aria-pressed",
+        !gradMixed && gradSegs[i].getAttribute("data-lbox-grad") === (grad ? "on" : "none") ? "true" : "false");
+    var gradOpts = el("ps-lbox-gradopts");
+    if (gradOpts) gradOpts.style.display = grad && !gradMixed ? "" : "none";
+    if (grad) {
+      var angSegs = document.querySelectorAll("[data-lbox-gradangle]");
+      for (i = 0; i < angSegs.length; i++)
+        angSegs[i].setAttribute("aria-pressed",
+          Number(angSegs[i].getAttribute("data-lbox-gradangle")) === grad.angle ? "true" : "false");
+      layPaintCustomChip("ps-lbox-gradcolor", grad.to, false);
+    }
+    var shape = layBoxShape(item), shapeMixed = !agree(layBoxShape);
+    var shapeBtns = document.querySelectorAll("[data-lbox-shape]");
+    for (i = 0; i < shapeBtns.length; i++)
+      shapeBtns[i].setAttribute("aria-pressed",
+        !shapeMixed && shapeBtns[i].getAttribute("data-lbox-shape") === shape
+          ? "true" : "false");
+    // Corners belong to the plain box; the other outlines have their own.
+    var cornerRow = el("ps-lbox-corner-row");
+    if (cornerRow) cornerRow.style.display = shape === "rect" ? "" : "none";
     var corner = layBoxStyle(item).corner;
     var cornerMixed = !agree(function (t) { return layBoxStyle(t).corner; });
     var rg = el("ps-lbox-corner"), nm = el("ps-lbox-corner-num");
@@ -25231,6 +27305,22 @@
     }
     var routeMixed = !agree(function (t) { return layArrowStyle(t).route; });
     var headsMixed = !agree(function (t) { return layArrowStyle(t).heads; });
+    // The bend matters only on a curve with a free end: attached ends
+    // leave square to their sides and ignore it.
+    var bendRow = el("ps-larrow-bend-row");
+    if (bendRow) {
+      var anyFree = false;
+      for (var bi0 = 0; bi0 < items.length; bi0++)
+        if (!items[bi0].from || !items[bi0].to) anyFree = true;
+      bendRow.style.display = !routeMixed && st.route === "curved" && anyFree ? "" : "none";
+      var bendMixed = !agree(function (t) { return layArrowStyle(t).bend; });
+      var brg = el("ps-larrow-bend"), bnm = el("ps-larrow-bend-num");
+      if (brg && document.activeElement !== brg) brg.value = String(st.bend);
+      if (bnm && document.activeElement !== bnm) {
+        if (bendMixed) { bnm.value = ""; bnm.placeholder = "Mixed"; }
+        else { bnm.value = String(st.bend); bnm.placeholder = ""; }
+      }
+    }
     var segs = document.querySelectorAll("[data-larrow-route]"), i;
     for (i = 0; i < segs.length; i++)
       segs[i].setAttribute("aria-pressed",
@@ -25241,6 +27331,28 @@
       segs[i].setAttribute("aria-pressed",
         !headsMixed && segs[i].getAttribute("data-larrow-heads") === st.heads
           ? "true" : "false");
+    var dashMixed = !agree(function (t) { return layArrowStyle(t).dashed; });
+    segs = document.querySelectorAll("[data-larrow-dash]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed", !dashMixed &&
+        (segs[i].getAttribute("data-larrow-dash") === "dashed") === st.dashed
+          ? "true" : "false");
+    var labelMixed = !agree(function (t) { return layArrowStyle(t).label; });
+    var lbl = el("ps-larrow-label");
+    if (lbl && document.activeElement !== lbl) {
+      lbl.value = labelMixed ? "" : st.label;
+      lbl.placeholder = labelMixed ? "Mixed" : "None";
+    }
+    // A pinned side applies to ONE attached end of ONE arrow.
+    var sideSels = document.querySelectorAll("select[data-larrow-side]");
+    for (i = 0; i < sideSels.length; i++) {
+      var endKey = sideSels[i].getAttribute("data-larrow-side");
+      var ref = items.length === 1 ? item[endKey] : null;
+      sideSels[i].value = layArrowPin(ref) || "";
+      sideSels[i].disabled = !ref;
+      setTip(sideSels[i], !ref ? (items.length === 1
+        ? "Attach this end to a box first." : "Applies to one arrow at a time.") : "");
+    }
     var widthMixed = !agree(function (t) { return layArrowStyle(t).width; });
     var rg = el("ps-larrow-width"), nm = el("ps-larrow-width-num");
     if (rg && document.activeElement !== rg) rg.value = String(st.width);
@@ -25260,7 +27372,7 @@
     // The attachment selects list every box by its text. Meaningful for
     // ONE arrow; a set of arrows keeps them disabled with the reason.
     var sels = [["ps-larrow-from", "from"], ["ps-larrow-to", "to"]];
-    var boxes = layItems().filter(function (b) { return b.kind === "box"; });
+    var boxes = layItems().filter(function (b) { return b.kind !== "arrow"; });
     for (i = 0; i < sels.length; i++) {
       var sel = el(sels[i][0]);
       if (!sel) continue;
@@ -25308,9 +27420,149 @@
       });
       fills.appendChild(b);
     })(LAY_BOX_FILLS[i]);
+    var shapesRow = el("ps-lbox-shapes");
+    if (shapesRow) for (i = 0; i < LAY_SHAPES.length; i++) (function (kind, label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-lbox-shape", kind);
+      b.setAttribute("aria-label", label);
+      b.setAttribute("aria-pressed", "false");
+      b.appendChild(layShapeIconSvg(kind));
+      setTip(b, label);
+      b.addEventListener("click", function () {
+        layPartApply(layBoxTargets(), "box shape", null, function (it) {
+          if (kind === "rect") delete it.shape; else it.shape = kind;
+        });
+      });
+      shapesRow.appendChild(b);
+    })(LAY_SHAPES[i][0], LAY_SHAPES[i][1]);
     layWireCustomChip("ps-lbox-fillcustom", layBoxTargets, "fill", "box fill", "#ffffff");
     layWireCustomChip("ps-lbox-bordercolor", layBoxTargets, "borderColor", "box border color", "#22364d");
     layWireCustomChip("ps-larrow-custom", layArrowTargets, "color", "arrow color", "#22364d");
+    layWireCustomChip("ps-limg-framecolor", layImageTargets, "frameColor",
+      "image frame color", "#22364d");
+    layWireCustomChip("ps-limg-barcolor", layImageTargets, "sbColor",
+      "scale bar color", "#ffffff");
+    function wireImageSeg(attr, label, field, map) {
+      var btns = document.querySelectorAll("[" + attr + "]");
+      for (var b = 0; b < btns.length; b++) (function (btn) {
+        btn.addEventListener("click", function () {
+          var v = btn.getAttribute(attr);
+          layPartApply(layImageTargets(), label, null, function (it) {
+            var mv = map ? map(v) : v;
+            // A mapped undefined means "the default": the field goes away
+            // rather than lingering as an undefined key.
+            if (mv === undefined) delete it[field]; else it[field] = mv;
+          });
+        });
+      })(btns[b]);
+    }
+    wireImageSeg("data-limg-frame", "image frame", "frame");
+    wireImageSeg("data-limg-bar", "scale bar", "sbShow",
+      function (v) { return v === "on"; });
+    wireImageSeg("data-limg-corner", "scale bar corner", "sbCorner");
+    // A number typed into the calibration previews as it is typed (one
+    // undo step per field) and persists on change; a blank or zero never
+    // reaches the item, the control reads the model back instead.
+    function wireImageNum(id, label, field, read) {
+      var n = el(id);
+      if (!n) return;
+      n.addEventListener("input", function () {
+        var v = Number(n.value);
+        if (!(v > 0)) return;
+        layPartApply(layImageTargets(), label, "limg-" + field,
+          function (it) { it[field] = v; }, true);
+      });
+      n.addEventListener("change", function () {
+        var v = Number(n.value), t = layImageTargets();
+        if (!(v > 0) && t.length) n.value = String(read(t[0]));
+        persist();
+      });
+    }
+    wireImageSeg("data-limg-cropshape", "image mask", "cropShape", function (v) { return v === "rect" ? undefined : v; });
+    var cropIns = document.querySelectorAll("[data-limg-crop]");
+    for (i = 0; i < cropIns.length; i++) (function (inp) {
+      var side = inp.getAttribute("data-limg-crop");
+      inp.addEventListener("change", function () {
+        var v = Number(inp.value);
+        if (!isFinite(v)) { layImageSyncControls(layImageTargets()); return; }
+        layPartApply(layImageTargets(), "image crop", null, function (it) {
+          layImageSetCrop(it, side, layClamp(v, 0, 95) / 100);
+        });
+      });
+    })(cropIns[i]);
+    // One adjustment field changes; a result of all defaults drops the
+    // adjustment altogether, so an untouched picture carries nothing.
+    function setAdjust(it, field, v) {
+      var a = it.adjust && typeof it.adjust === "object" ? it.adjust : {};
+      if (v === 0 || v === false || v == null || v === "") delete a[field]; else a[field] = v;
+      var any = false;
+      for (var k in a) if (a.hasOwnProperty(k) && k !== "clearAmount") any = true;
+      if (any) it.adjust = a; else delete it.adjust;
+    }
+    function wireAdjustPair(id, label, field) {
+      wirePair(id, id + "-num", layImageTargets, label, "limg-" + field, function (it, v) {
+        setAdjust(it, field, layClamp(Math.round(v), field === "clearAmount" ? 1 : -100, field === "clearAmount" ? 60 : 100));
+      });
+    }
+    wireAdjustPair("ps-limg-bright", "brightness", "brightness");
+    wireAdjustPair("ps-limg-contrast", "contrast", "contrast");
+    wireAdjustPair("ps-limg-sat", "saturation", "saturation");
+    wireAdjustPair("ps-limg-clearamt", "background tolerance", "clearAmount");
+    var lookBtns = document.querySelectorAll("[data-limg-look]");
+    for (i = 0; i < lookBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var field = btn.getAttribute("data-limg-look"), on = btn.getAttribute("aria-pressed") !== "true";
+        layPartApply(layImageTargets(), field, null, function (it) { setAdjust(it, field, on); });
+      });
+    })(lookBtns[i]);
+    var tintBtns = document.querySelectorAll("[data-limg-tint]");
+    for (i = 0; i < tintBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("data-limg-tint") === "on";
+        layPartApply(layImageTargets(), "tint", null, function (it) {
+          var a = layImageAdjust(it);
+          setAdjust(it, "tint", on ? (a && a.tint) || "#e8c15a" : null);
+        });
+      });
+    })(tintBtns[i]);
+    var tintChipBtn = el("ps-limg-tintcolor");
+    if (tintChipBtn) tintChipBtn.addEventListener("click", function () {
+      var targets = layImageTargets();
+      if (!targets.length) return;
+      var a0 = layImageAdjust(targets[0]);
+      var ids = targets.map(function (t) { return t.id; }).join(",");
+      layOpenColorPop(tintChipBtn, (a0 && a0.tint) || "#e8c15a", function (hex, live) {
+        layPartApply(layImageTargets(), "tint color", "cpop:tint:" + ids,
+          function (it) { setAdjust(it, "tint", hex); }, live);
+      });
+    });
+    var clearBtns = document.querySelectorAll("[data-limg-clear]");
+    for (i = 0; i < clearBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-limg-clear");
+        layPartApply(layImageTargets(), "background", null, function (it) {
+          setAdjust(it, "clear", v === "none" ? null : v);
+        });
+      });
+    })(clearBtns[i]);
+    wireImageNum("ps-limg-perpx", "size per pixel", "sbPerPixel",
+      function (it) { return layScaleBarStyle(it).perPixel; });
+    wireImageNum("ps-limg-len", "scale bar length", "sbLength",
+      function (it) { return layScaleBarStyle(it).length; });
+    layWirePathControls(wirePair);
+    var unitSel = el("ps-limg-unit");
+    if (unitSel) unitSel.addEventListener("change", function () {
+      var v = LAY_SB_UNITS[unitSel.value] ? unitSel.value : "um";
+      layPartApply(layImageTargets(), "scale bar unit", null,
+        function (it) { it.sbUnit = v; });
+    });
+    var barLabel = el("ps-limg-barlabel");
+    if (barLabel) barLabel.addEventListener("change", function () {
+      var on = !!barLabel.checked;
+      layPartApply(layImageTargets(), "scale bar label", null,
+        function (it) { it.sbLabel = on; });
+    });
     var borders = document.querySelectorAll("[data-lbox-border]");
     for (i = 0; i < borders.length; i++) (function (btn) {
       btn.addEventListener("click", function () {
@@ -25338,6 +27590,62 @@
       "box corner", "lbox-corner", function (it, v) {
         it.corner = layClamp(Math.round(v), 0, 24);
       });
+    wirePair("ps-ctx-lturn", "ps-ctx-lturn-num", layTurnTargets,
+      "turn", "lturn", function (it, v) {
+        var t = layClamp(Math.round(v), -180, 180);
+        if (t) it.turn = t; else delete it.turn;
+      });
+    var flipBtns = document.querySelectorAll("[data-lflip]");
+    for (i = 0; i < flipBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var axis = btn.getAttribute("data-lflip") === "x" ? "flipX" : "flipY";
+        var targets = layTurnTargets().filter(function (it) { return it.kind === "image"; });
+        var on = btn.getAttribute("aria-pressed") !== "true";
+        layPartApply(targets, "flip", null, function (it) {
+          if (on) it[axis] = true; else delete it[axis];
+        });
+      });
+    })(flipBtns[i]);
+    var gradBtns = document.querySelectorAll("[data-lbox-grad]");
+    for (i = 0; i < gradBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var on = btn.getAttribute("data-lbox-grad") === "on";
+        layPartApply(layBoxTargets(), "box gradient", null, function (it) {
+          if (!on) { delete it.gradient; return; }
+          if (!layBoxGradient(it))
+            it.gradient = { to: layShade(layBoxFill(it) === "none" ? "#ffffff" : layBoxFill(it), -0.25), angle: 90 };
+        });
+      });
+    })(gradBtns[i]);
+    var angBtns = document.querySelectorAll("[data-lbox-gradangle]");
+    for (i = 0; i < angBtns.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var a = Number(btn.getAttribute("data-lbox-gradangle"));
+        layPartApply(layBoxTargets(), "gradient direction", null, function (it) {
+          var g = layBoxGradient(it);
+          if (g) it.gradient = { to: g.to, angle: a };
+        });
+      });
+    })(angBtns[i]);
+    var gradChip = el("ps-lbox-gradcolor");
+    if (gradChip) gradChip.addEventListener("click", function () {
+      var targets = layBoxTargets().filter(layBoxGradient);
+      if (!targets.length) return;
+      var ids = targets.map(function (t) { return t.id; }).join(",");
+      layOpenColorPop(gradChip, layBoxGradient(targets[0]).to, function (hex, live) {
+        layPartApply(layBoxTargets().filter(layBoxGradient), "gradient color", "cpop:gradient:" + ids,
+          function (it) { it.gradient = { to: hex, angle: layBoxGradient(it).angle }; }, live);
+      });
+    });
+    wirePair("ps-ctx-lop", "ps-ctx-lop-num", laySelectedItemsList,
+      "opacity", "lopacity", function (it, v) {
+        var o = layClamp(Math.round(v) / 100, 0, 1);
+        if (o >= 1) delete it.opacity; else it.opacity = o;
+      });
+    wirePair("ps-larrow-bend", "ps-larrow-bend-num", layArrowTargets,
+      "arrow bend", "larrow-bend", function (it, v) {
+        it.bend = layClamp(Math.round(v * 20) / 20, -1, 1);
+      });
     var routes = document.querySelectorAll("[data-larrow-route]");
     for (i = 0; i < routes.length; i++) (function (btn) {
       btn.addEventListener("click", function () {
@@ -25358,6 +27666,60 @@
       "arrow width", "larrow-width", function (it, v) {
         it.width = layClamp(Math.round(v * 2) / 2, 0.5, 6);
       });
+    var dashes = document.querySelectorAll("[data-larrow-dash]");
+    for (i = 0; i < dashes.length; i++) (function (btn) {
+      btn.addEventListener("click", function () {
+        var v = btn.getAttribute("data-larrow-dash") === "dashed";
+        layPartApply(layArrowTargets(), "arrow line", null,
+          function (it) { it.dashed = v; });
+      });
+    })(dashes[i]);
+    var lblIn = el("ps-larrow-label");
+    if (lblIn) {
+      // Typing is one undo step per burst, like a slider; the box commits
+      // on change so a label is never half-saved.
+      lblIn.addEventListener("input", function () {
+        var v = lblIn.value;
+        layPartApply(layArrowTargets(), "arrow label", "larrow-label",
+          function (it) { it.label = v; }, true);
+      });
+      lblIn.addEventListener("change", function () {
+        var sym = laySymbolize(lblIn.value);
+        if (sym !== lblIn.value) {
+          lblIn.value = sym;
+          layPartApply(layArrowTargets(), "arrow label", "larrow-label",
+            function (it) { it.label = sym; }, true);
+        }
+        persist();
+      });
+    }
+    // The Symbols row: the common Greek letters and signs, inserted at
+    // the open editor's caret or appended to the selected text.
+    var symRow = el("ps-ltx-symbols");
+    if (symRow) for (i = 0; i < LAY_SYMBOL_ROW.length; i++) (function (name) {
+      var sym = LAY_SYMBOLS[name];
+      if (!sym) return;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = sym;
+      b.setAttribute("data-symbol", name);
+      b.setAttribute("aria-label", sym + ", " + name);
+      setTip(b, "\\" + name);
+      // A press must not take the caret away from the open editor.
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      b.addEventListener("click", function () { layInsertSymbol(sym); });
+      symRow.appendChild(b);
+    })(LAY_SYMBOL_ROW[i]);
+    var sideSels = document.querySelectorAll("select[data-larrow-side]");
+    for (i = 0; i < sideSels.length; i++) (function (sel) {
+      var endKey = sel.getAttribute("data-larrow-side");
+      sel.addEventListener("change", function () {
+        var v = sel.value;
+        layPartApply(layArrowTargets(), "arrow side", null, function (it) {
+          if (it[endKey]) it[endKey] = layArrowRef(it[endKey].id, v || null);
+        });
+      });
+    })(sideSels[i]);
     var colors = el("ps-larrow-colors");
     var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
       "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
@@ -25391,53 +27753,11 @@
   // arrows between them and the three side labels, with every count left
   // as a field to fill in. Every part is an ordinary item afterward.
   function layBuildPrisma(c) {
-    var n = 0, ids = {};
-    function box(key, x, y, w, h, text, extra) {
-      var it = { id: "i" + (++n), kind: "box", text: text, fontSize: 11,
-                 x: x, y: y, w: w, h: h, fill: "#ffffff", border: "thin",
-                 corner: 2 };
-      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) it[k] = extra[k];
-      c.items.push(it);
-      ids[key] = it.id;
-      return it;
-    }
-    function arrow(fromKey, toKey) {
-      var it = { id: "i" + (++n), kind: "arrow",
-                 from: { id: ids[fromKey] }, to: { id: ids[toKey] },
-                 route: "elbow", heads: "end", width: 1.25, color: "#22364d",
-                 x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 };
-      c.items.push(it);
-    }
-    var L = 104, R = 464, W = 300, S = 44, SW = 36;
-    var side = { fill: "#dbe7f7", border: "none", bold: true, rotate: -90,
-                 corner: 2 };
-    c.items.push({ id: "i" + (++n), kind: "text",
-                   text: "PRISMA 2020 flow diagram", fontSize: 14,
-                   bold: true, x: 40, y: 22 });
-    box("side1", S, 64, SW, 104, "Identification", side);
-    box("side2", S, 220, SW, 268, "Screening", side);
-    box("side3", S, 560, SW, 76, "Included", side);
-    box("ident", L, 64, W, 76,
-        "Records identified from:\nDatabases (n = )\nRegisters (n = )");
-    // Right-hand boxes are centred on their left partner so the arrow
-    // between them runs straight, as the published diagram draws it.
-    box("removed", R, 50, W, 104,
-        "Records removed before screening:\nDuplicate records removed (n = )\n" +
-        "Records marked as ineligible by automation tools (n = )\n" +
-        "Records removed for other reasons (n = )");
-    box("screened", L, 220, W, 48, "Records screened\n(n = )");
-    box("excluded", R, 220, W, 48, "Records excluded\n(n = )");
-    box("sought", L, 316, W, 48, "Reports sought for retrieval\n(n = )");
-    box("notret", R, 316, W, 48, "Reports not retrieved\n(n = )");
-    box("assessed", L, 412, W, 48, "Reports assessed for eligibility\n(n = )");
-    box("rexcl", R, 398, W, 76,
-        "Reports excluded:\nReason 1 (n = )\nReason 2 (n = )\nReason 3 (n = )");
-    box("included", L, 560, W, 76,
-        "Studies included in review\n(n = )\nReports of included studies\n(n = )");
-    arrow("ident", "removed"); arrow("ident", "screened");
-    arrow("screened", "excluded"); arrow("screened", "sought");
-    arrow("sought", "notret"); arrow("sought", "assessed");
-    arrow("assessed", "rexcl"); arrow("assessed", "included");
+    // The New layout card and the PRISMA wizard draw ONE diagram: the
+    // card is the wizard with every count left blank, placed at the
+    // page margin.
+    var m = c.page.margin;
+    layWizIntoDoc(c, layWizPrisma(layWizDefaults("prisma", true)), m, m);
   }
 
   // ---- Timeline (figure parts, slice two): one line with named ticks at
@@ -25512,9 +27832,57 @@
                      label: bands[k].label, fill: bands[k].fill });
     return g;
   }
+  // Which row each main label takes (0 = beside its tick, 1.. = raised,
+  // in x order, the first clear row), and which sub-labels show: when any
+  // two sub-labels would touch, every k-th shows for the smallest k that
+  // keeps them apart. Measured like the export measures text.
+  function layTimelineFit(g) {
+    var ctx = layTextCtx(), fs = g.st.fs, i, j;
+    function width(s, size) {
+      if (!ctx) return String(s).length * size * 0.55;
+      ctx.font = size + "px sans-serif";
+      return ctx.measureText(String(s)).width;
+    }
+    var order = [];
+    for (i = 0; i < g.ticks.length; i++) order.push(i);
+    order.sort(function (a, b) { return g.ticks[a].x - g.ticks[b].x || a - b; });
+    var row = [], rowRight = [], gap = 6;
+    for (j = 0; j < order.length; j++) {
+      i = order[j];
+      var t = g.ticks[i];
+      if (!t.label) continue;
+      var w = width(t.label, fs), left = t.x - w / 2, r = 0;
+      while (r < 4 && rowRight[r] != null && left < rowRight[r] + gap) r++;
+      if (r === 4) r = 3;
+      row[i] = r;
+      rowRight[r] = Math.max(rowRight[r] == null ? -Infinity : rowRight[r], t.x + w / 2);
+    }
+    var subs = [];
+    for (j = 0; j < order.length; j++)
+      if (g.ticks[order[j]].sub)
+        subs.push({ i: order[j], x: g.ticks[order[j]].x,
+                    w: width(g.ticks[order[j]].sub, Math.max(7, fs - 1)) });
+    var showSub = [], k = 1;
+    for (k = 1; k < subs.length; k++) {
+      var clear = true;
+      for (i = 0; i + k < subs.length && clear; i += k)
+        if (subs[i + k].x - subs[i].x < (subs[i].w + subs[i + k].w) / 2 + gap) clear = false;
+      if (clear) break;
+    }
+    for (i = 0; i < subs.length; i++) showSub[subs[i].i] = i % k === 0;
+    return { row: row, showSub: showSub, rows: rowRight.length };
+  }
   function layTimelineLabelsText(item) {
-    var ticks = layTimelineTicks(item), names = [];
-    for (var i = 0; i < ticks.length; i++) if (ticks[i].label) names.push(ticks[i].label);
+    var plan = layTimelinePlan(item), names = [], i;
+    if (plan) {
+      for (i = 0; i < plan.events.length; i++)
+        if (plan.events[i].name) names.push(plan.events[i].name);
+      for (i = 0; i < plan.phases.length; i++)
+        if (plan.phases[i].name) names.push(plan.phases[i].name);
+      return names.join(", ");
+    }
+    var ticks = layTimelineTicks(item);
+    for (i = 0; i < ticks.length; i++) if (ticks[i].label) names.push(ticks[i].label);
     return names.join(", ");
   }
   // One drawing routine for the canvas and the file: the canvas adds hit
@@ -25555,7 +27923,8 @@
       root.appendChild(mk("rect", bandAttrs));
       if (b.label)
         root.appendChild(txt((b.x0 + b.x1) / 2, g.bandLabelY, b.label,
-          Math.max(7, st.fs - 1), st.color, "600"));
+          Math.max(7, st.fs - 1), st.color, "600",
+          opts.canvas ? { "data-role": "lay-band-label", "data-idx": i } : null));
     }
     var lineEnd = g.x1 - g.headLen;
     // On the canvas the drawn strokes are pointer-inert: the hit strip
@@ -25576,16 +27945,32 @@
         layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY - hw + oy) + " " +
         layNum2(g.x1 - hl + ox) + "," + layNum2(g.lineY + hw + oy), fill: st.color })));
     }
+    // Labels that fit (Oct 2026, from the Illustrations timeline): a main
+    // label that would overlap its neighbour climbs to the next row, with
+    // a stem down to its tick; sub-labels that crowd thin to every k-th.
+    var fit = layTimelineFit(g), above = st.labels === "above";
+    var rowStep = Math.round(st.fs * 1.3);
     for (i = 0; i < g.ticks.length; i++) {
       var t = g.ticks[i];
       var half = st.tickLen / 2;
       root.appendChild(mk("line", withInert({ x1: layNum2(t.x + ox), y1: layNum2(g.lineY - half + oy),
         x2: layNum2(t.x + ox), y2: layNum2(g.lineY + half + oy), stroke: st.color,
         "stroke-width": layTickWidth(st, t) })));
-      if (t.label) root.appendChild(txt(t.x, g.labelY, t.label, st.fs, st.color, "400",
-        opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
-      if (t.sub) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
-        "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+      if (t.label) {
+        var row = fit.row[i] || 0;
+        var ly = above ? g.labelY - row * rowStep : g.labelY + row * rowStep;
+        if (row > 0)
+          root.appendChild(mk("line", withInert({ x1: layNum2(t.x + ox),
+            y1: layNum2((above ? g.lineY - half - 1 : g.lineY + half + 1) + oy),
+            x2: layNum2(t.x + ox),
+            y2: layNum2((above ? ly + 3 : ly - st.fs) + oy),
+            stroke: st.color, "stroke-width": 0.75, "stroke-opacity": 0.55 })));
+        root.appendChild(txt(t.x, ly, t.label, st.fs, st.color, "400",
+          opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i } : null));
+      }
+      if (t.sub && fit.showSub[i]) root.appendChild(txt(t.x, g.subY, t.sub, Math.max(7, st.fs - 1),
+        "#5f6f80", "400", opts.canvas ? { "data-role": "lay-tick-label", "data-idx": i,
+                                          "data-part": "sub" } : null));
     }
     if (opts.canvas) {
       for (i = 0; i < g.ticks.length; i++)
@@ -25604,11 +27989,1448 @@
     svg.setAttribute("width", String(w)); svg.setAttribute("height", String(h));
     svg.setAttribute("viewBox", "0 0 " + w + " " + h);
     svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
-    svg.appendChild(layTimelineDraw(document, item, { canvas: true }));
+    // A raised label may sit above the item's box; the file draws it
+    // unclipped, so the canvas does too.
+    svg.style.overflow = "visible";
+    svg.appendChild(layTimelineIsPlanned(item)
+      ? layTimelinePlanDraw(document, item, { canvas: true })
+      : layTimelineDraw(document, item, { canvas: true }));
     return svg;
   }
   function layoutTimelineNode(doc, item) {
-    return layTimelineDraw(doc, item, { ox: Number(item.x) || 0, oy: Number(item.y) || 0 });
+    var at = { ox: Number(item.x) || 0, oy: Number(item.y) || 0 };
+    return layTimelineIsPlanned(item) ? layTimelinePlanDraw(doc, item, at)
+                                      : layTimelineDraw(doc, item, at);
+  }
+  // ---- Timelines that keep their table (Nov 2026). A timeline made by the
+  // wizard carries a PLAN: the axis (start, end, step, unit), each event
+  // with the times it happens at, each phase with its start and end, the
+  // breaks in time, and the groups that get a row each. Where things sit is
+  // worked out from the plan whenever the timeline draws, so the number
+  // under a tick is always that tick's own time, an event moves by typing a
+  // day, and the table can be reopened. Nothing outside the timeline reads
+  // the times (the figures-not-records line holds): they only keep the
+  // drawing true to itself. A timeline without a plan is the hand-built
+  // kind (ticks at positions, bands between ticks) and draws as it always
+  // did.
+  var LAY_TL_MARKERS = ["tick", "arrow", "triangle", "dot", "diamond"];
+  var LAY_TL_MARKER_NAMES = { tick: "Tick", arrow: "Arrow", triangle: "Triangle",
+                              dot: "Dot", diamond: "Diamond" };
+  var LAY_TL_INK_NAMES = { ink: "#22364d", muted: "#5f6f80", faint: "#94a3b1",
+                           blue: "#417499", red: "#902634", green: "#266741" };
+  var LAY_TL_PHASE_FILLS = ["#d9e6f7", "#fbe9c0", "#d6ecc6", "#f9d9d9",
+                            "#e3def5", "#dfe6ec"];
+  var LAY_TL_PHASE_NAMES = { blue: "#d9e6f7", amber: "#fbe9c0", yellow: "#fbe9c0",
+                             green: "#d6ecc6", red: "#f9d9d9", violet: "#e3def5",
+                             purple: "#e3def5", gray: "#dfe6ec", grey: "#dfe6ec" };
+  var LAY_TL_BREAK_PX = 18;
+  var LAY_TL_LABEL_ROWS = 6;
+  var LAY_TL_RANGE_RE = new RegExp("^(-?\\d+(?:\\.\\d+)?)\\s*(?:-|" +
+    String.fromCharCode(8211) + "|to)\\s*(-?\\d+(?:\\.\\d+)?)$");
+  function layTlFmt(t) { return String(Math.round(Number(t) * 1000) / 1000); }
+  function layTlClean(v) { return String(v == null ? "" : v).replace(/\s+/g, " ").trim(); }
+  // "3-5", "0.6-1.4", "-2-0", "3 to 5": the two ends of a phase or a break.
+  // Read as two numbers and nothing else, so a decimal end is kept (the
+  // event reader steps through a range in whole units, which is right for
+  // "every day from 5 to 18" and wrong for where a phase stops).
+  function layTlParseRange(spec) {
+    var m = String(spec == null ? "" : spec).trim().match(LAY_TL_RANGE_RE);
+    if (!m) return null;
+    var a = Number(m[1]), b = Number(m[2]);
+    if (!isFinite(a) || !isFinite(b) || a === b) return null;
+    return { from: Math.min(a, b), to: Math.max(a, b) };
+  }
+  // Every number of an event's times moved by d: "5-18" by 2 is "7-20",
+  // "1, 8, 15" by 1 is "2, 9, 16", "0-28/7" keeps its /7.
+  function layTlShiftSpec(spec, d) {
+    var parts = String(spec == null ? "" : spec).split(/[,;]+/), out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var m = parts[i].trim().match(
+        /^(-?\d+(?:\.\d+)?)(?:\s*(?:-|to)\s*(-?\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?)?$/);
+      if (!m) {
+        var r = layTlParseRange(parts[i]);
+        if (r) out.push(layTlFmt(r.from + d) + "-" + layTlFmt(r.to + d));
+        continue;
+      }
+      if (m[2] === undefined) out.push(layTlFmt(Number(m[1]) + d));
+      else out.push(layTlFmt(Number(m[1]) + d) + "-" + layTlFmt(Number(m[2]) + d) +
+                    (m[3] != null ? "/" + m[3] : ""));
+    }
+    return out.join(", ");
+  }
+  // The plan as the drawing reads it: every field given a safe value, the
+  // events' times worked out, the breaks sorted and merged (cuts). Entries
+  // keep their place in the stored lists as .i, which the rail and the
+  // canvas use to say which one they mean.
+  function layTimelinePlan(item) {
+    var p = item && item.plan;
+    if (!p || typeof p !== "object") return null;
+    var ax = p.axis && typeof p.axis === "object" ? p.axis : {};
+    var start = Number(ax.start), end = Number(ax.end), step = Number(ax.step), i, k;
+    if (!isFinite(start)) start = 0;
+    if (!isFinite(end) || !(end > start)) end = start + 10;
+    if (!(step > 0)) step = (end - start) / 10;
+    if ((end - start) / step > 400) step = (end - start) / 400;
+    var out = { axis: { start: start, end: end, step: step, unit: layTlClean(ax.unit),
+                        format: ax.format === "number" || ax.format === "none"
+                          ? ax.format : "prefix" },
+                rows: [], events: [], phases: [], breaks: [], cuts: [] };
+    var rows = Array.isArray(p.rows) ? p.rows : [];
+    for (i = 0; i < rows.length; i++) {
+      var rn = layTlClean(rows[i]);
+      if (rn && out.rows.indexOf(rn) === -1) out.rows.push(rn);
+    }
+    function rowOf(v) {
+      var r = layTlClean(v);
+      return out.rows.indexOf(r) === -1 ? "" : r;
+    }
+    var evs = Array.isArray(p.events) ? p.events : [];
+    for (i = 0; i < evs.length; i++) {
+      var e = evs[i] || {}, all = layTlParseTimes(e.when), times = [];
+      for (k = 0; k < all.length; k++)
+        if (all[k] >= start - 1e-9 && all[k] <= end + 1e-9) times.push(all[k]);
+      out.events.push({ i: i, name: String(e.name == null ? "" : e.name),
+        when: String(e.when == null ? "" : e.when), times: times,
+        marker: LAY_TL_MARKERS.indexOf(e.marker) === -1 ? "tick" : e.marker,
+        color: e.color ? (layHexOr(e.color, "") || null) : null, row: rowOf(e.row) });
+    }
+    var phs = Array.isArray(p.phases) ? p.phases : [];
+    for (i = 0; i < phs.length; i++) {
+      var ph = phs[i] || {}, a = Number(ph.from), b = Number(ph.to);
+      var ok = isFinite(a) && isFinite(b) && b > a;
+      var ca = ok ? Math.max(start, a) : NaN, cb = ok ? Math.min(end, b) : NaN;
+      out.phases.push({ i: i, name: String(ph.name == null ? "" : ph.name),
+        from: a, to: b, a: ca, b: cb, shown: ok && cb > ca,
+        fill: layHexOr(ph.fill, LAY_TL_PHASE_FILLS[i % LAY_TL_PHASE_FILLS.length]),
+        row: rowOf(ph.row) });
+    }
+    var brs = Array.isArray(p.breaks) ? p.breaks : [], cuts = [];
+    for (i = 0; i < brs.length; i++) {
+      var br = brs[i] || {}, f = Number(br.from), t = Number(br.to);
+      out.breaks.push({ i: i, from: f, to: t });
+      if (!isFinite(f) || !isFinite(t) || !(t > f)) continue;
+      f = Math.max(start, f); t = Math.min(end, t);
+      if (t > f) cuts.push({ from: f, to: t });
+    }
+    cuts.sort(function (x, y) { return x.from - y.from; });
+    for (i = 0; i < cuts.length; i++) {
+      var last = out.cuts[out.cuts.length - 1];
+      if (last && cuts[i].from <= last.to + 1e-9) last.to = Math.max(last.to, cuts[i].to);
+      else out.cuts.push({ from: cuts[i].from, to: cuts[i].to });
+    }
+    // A break never swallows the whole axis.
+    var hidden = 0;
+    for (i = 0; i < out.cuts.length; i++) hidden += out.cuts[i].to - out.cuts[i].from;
+    if (hidden >= (end - start) - 1e-9) out.cuts = [];
+    return out;
+  }
+  // Time to pixels and back. A break takes a short fixed gap whatever its
+  // length; a time inside one lands inside the gap, so nothing jumps.
+  function layTlScale(plan, x0, x1) {
+    var start = plan.axis.start, end = plan.axis.end, cuts = plan.cuts, i;
+    var hidden = 0;
+    for (i = 0; i < cuts.length; i++) hidden += cuts[i].to - cuts[i].from;
+    var vis = Math.max(1e-9, (end - start) - hidden);
+    var gapPx = LAY_TL_BREAK_PX;
+    if ((x1 - x0) - cuts.length * gapPx < 20)
+      gapPx = Math.max(4, ((x1 - x0) - 20) / Math.max(1, cuts.length));
+    var k = Math.max(1e-9, (x1 - x0) - cuts.length * gapPx) / vis;
+    function X(t) {
+      t = Math.max(start, Math.min(end, t));
+      var x = x0, prev = start;
+      for (var j = 0; j < cuts.length; j++) {
+        var c = cuts[j];
+        if (t <= c.from) return x + (t - prev) * k;
+        x += (c.from - prev) * k;
+        if (t < c.to) return x + gapPx * (t - c.from) / (c.to - c.from);
+        x += gapPx; prev = c.to;
+      }
+      return x + (t - prev) * k;
+    }
+    function T(px) {
+      var x = x0, prev = start;
+      if (px <= x0) return start;
+      for (var j = 0; j < cuts.length; j++) {
+        var c = cuts[j], seg = (c.from - prev) * k;
+        if (px <= x + seg) return prev + (px - x) / k;
+        x += seg;
+        if (px < x + gapPx) return px - x < gapPx / 2 ? c.from : c.to;
+        x += gapPx; prev = c.to;
+      }
+      return Math.min(end, prev + (px - x) / k);
+    }
+    var gaps = [];
+    for (i = 0; i < cuts.length; i++) gaps.push({ x0: X(cuts[i].from), x1: X(cuts[i].to) });
+    return { X: X, T: T, gaps: gaps, k: k };
+  }
+  // What a drag snaps to: whole units on an axis that counts in them, half
+  // a step on one that does not.
+  function layTlSnapUnit(plan) {
+    var s = plan.axis.step;
+    if (Math.abs(s - Math.round(s)) < 1e-9 && s >= 1 &&
+        Math.abs(plan.axis.start - Math.round(plan.axis.start)) < 1e-9) return 1;
+    return s / 2;
+  }
+  // The axis ticks and the numbers under them, as many as fit side by side:
+  // the unit on every one, then once, then every second or fifth step.
+  function layTlAxisTicks(plan, sc, subFs) {
+    var ax = plan.axis, ticks = [], n = 0, i;
+    for (var t = Math.ceil(ax.start / ax.step - 1e-9) * ax.step;
+         t <= ax.end + 1e-9 && n < 401; t += ax.step, n++) {
+      var tv = Math.round(t * 1e6) / 1e6, inside = false;
+      for (i = 0; i < plan.cuts.length; i++)
+        if (tv > plan.cuts[i].from + 1e-9 && tv < plan.cuts[i].to - 1e-9) inside = true;
+      if (!inside) ticks.push({ t: tv, x: sc.X(tv), label: "" });
+    }
+    if (ax.format === "none" || !ticks.length) return ticks;
+    var unit = ax.format !== "number" && ax.unit ? ax.unit + " " : "", gap = 6;
+    function attempt(show, once) {
+      var first = true, out = [];
+      for (var q = 0; q < ticks.length; q++) {
+        if (!show(ticks[q], q)) { out.push(""); continue; }
+        out.push((once && !first ? "" : unit) + layTlFmt(ticks[q].t));
+        first = false;
+      }
+      return out;
+    }
+    function clear(labels) {
+      var edge = -Infinity;
+      for (var q = 0; q < labels.length; q++) {
+        if (!labels[q]) continue;
+        var half = layWizTextW(labels[q], subFs) / 2;
+        if (ticks[q].x - half < edge + gap) return false;
+        edge = ticks[q].x + half;
+      }
+      return true;
+    }
+    function every() { return true; }
+    var tries = [attempt(every, false)];
+    if (unit) tries.push(attempt(every, true));
+    var mults = [2, 5, 10, 20, 50, 100, 200, 500];
+    for (i = 0; i < mults.length; i++) (function (mm) {
+      var on = function (tk) {
+        return Math.abs(tk.t / (ax.step * mm) - Math.round(tk.t / (ax.step * mm))) < 1e-6;
+      };
+      var any = false;
+      for (var q = 0; q < ticks.length; q++) if (on(ticks[q])) any = true;
+      tries.push(attempt(any ? on : function (tk, q2) { return q2 % mm === 0; }, true));
+    })(mults[i]);
+    var picked = tries[tries.length - 1];
+    for (i = 0; i < tries.length; i++) if (clear(tries[i])) { picked = tries[i]; break; }
+    for (i = 0; i < ticks.length; i++) ticks[i].label = picked[i];
+    return ticks;
+  }
+  // The whole drawing of a planned timeline as a list of plain shapes, so
+  // the page, the file and the height the item needs all come from one
+  // place. From the top down: one row per group (its name at the left, its
+  // phases as blocks on a faint line, its events above them), then the
+  // axis with every phase and event that belongs to no group, and the
+  // numbers under it. Marks and brackets sit above the phases, labels above
+  // those; a label that would run into its neighbour climbs a row.
+  function layTimelinePlanLayout(item) {
+    var plan = layTimelinePlan(item);
+    if (!plan) return null;
+    var st = layTimelineStyle(item), fs = st.fs, subFs = Math.max(7, fs - 1), i, j, k;
+    var W = Math.max(120, Number(item.w) || 360);
+    var pad = 14, m = Math.max(6, Math.round(fs * 0.7));
+    var tickHalf = st.tickLen / 2;
+    var phaseH = Math.max(16, Math.round(fs * 1.7)), phaseGap = 2;
+    var muted = "#5f6f80";
+    var gutter = 0;
+    for (i = 0; i < plan.rows.length; i++)
+      gutter = Math.max(gutter, layWizTextW(plan.rows[i], fs, true));
+    if (gutter) gutter = Math.min(Math.round(W * 0.3), Math.ceil(gutter) + 12);
+    var unitText = plan.axis.format === "number" && plan.axis.unit ? plan.axis.unit + "s" : "";
+    var unitW = unitText ? Math.ceil(layWizTextW(unitText, fs)) + 8 : 0;
+    var headLen = st.ends === "arrow" ? 8 + st.width * 2 : 0;
+    var x0 = pad + gutter, lineEnd = W - pad - unitW;
+    var x1 = lineEnd - (headLen ? headLen + 8 : 0);
+    if (x1 - x0 < 40) { x1 = x0 + 40; lineEnd = x1 + (headLen ? headLen + 8 : 0); }
+    var sc = layTlScale(plan, x0, x1);
+    var back = [], lines = [], marks = [], texts = [], hits = [], under = [];
+    // A stretch of line or block, cut where a break in time crosses it.
+    function cutSegs(a, b) {
+      var segs = [[a, b]], out = [];
+      for (var g = 0; g < sc.gaps.length; g++) {
+        var lo = sc.gaps[g].x0 + 4, hi = sc.gaps[g].x1 - 4, next = [];
+        if (!(hi > lo)) continue;
+        for (var s = 0; s < segs.length; s++) {
+          var p0 = segs[s][0], p1 = segs[s][1];
+          if (p1 <= lo || p0 >= hi) { next.push([p0, p1]); continue; }
+          if (p0 < lo) next.push([p0, lo]);
+          if (p1 > hi) next.push([hi, p1]);
+        }
+        segs = next;
+      }
+      for (var q = 0; q < segs.length; q++) if (segs[q][1] - segs[q][0] > 0.5) out.push(segs[q]);
+      return out;
+    }
+    var tracks = [], main = { name: "", main: true, phases: [], events: [] };
+    for (i = 0; i < plan.rows.length; i++)
+      tracks.push({ name: plan.rows[i], main: false, phases: [], events: [] });
+    tracks.push(main);
+    function trackOf(row) {
+      var at = row ? plan.rows.indexOf(row) : -1;
+      return at === -1 ? main : tracks[at];
+    }
+    for (i = 0; i < plan.phases.length; i++)
+      if (plan.phases[i].shown) trackOf(plan.phases[i].row).phases.push(plan.phases[i]);
+    for (i = 0; i < plan.events.length; i++)
+      if (plan.events[i].times.length) trackOf(plan.events[i].row).events.push(plan.events[i]);
+    var y = 4;
+    for (i = 0; i < tracks.length; i++) {
+      var T = tracks[i];
+      // Phases that overlap in time stack in rows of their own.
+      var ph = T.phases.slice().sort(function (a, b) { return a.a - b.a || a.i - b.i; });
+      var subEnd = [];
+      for (j = 0; j < ph.length; j++) {
+        var r = 0;
+        while (r < subEnd.length && ph[j].a < subEnd[r] - 1e-9) r++;
+        ph[j].sub = r; subEnd[r] = ph[j].b;
+      }
+      T.nPh = subEnd.length;
+      T.base0 = T.main ? tickHalf + 3 : 3;
+      T.phTop = T.nPh ? T.base0 + T.nPh * phaseH + (T.nPh - 1) * phaseGap : 0;
+      T.markTop = (T.nPh ? T.phTop + 2 : (T.main ? tickHalf : 2)) + m;
+      T.labelBase = T.markTop + 5;
+      var spans = [], hasRun = false;
+      for (j = 0; j < T.events.length; j++) {
+        var ev = T.events[j], xs = [];
+        for (k = 0; k < ev.times.length; k++) xs.push(sc.X(ev.times[k]));
+        var run = xs.length > 1;
+        var tw = ev.name ? layWizTextW(ev.name, fs) : 0;
+        var cx = run ? (xs[0] + xs[xs.length - 1]) / 2 : xs[0];
+        var tx = Math.max(2 + tw / 2, Math.min(W - 2 - tw / 2, cx));
+        ev.geo = { xs: xs, run: run, tx: tx, tw: tw, row: -1 };
+        if (!ev.name && !run) continue;
+        if (run) hasRun = true;
+        spans.push({ left: Math.min(tx - tw / 2, xs[0]),
+                     right: Math.max(tx + tw / 2, xs[xs.length - 1]),
+                     tl: tx - tw / 2, tr: tx + tw / 2, ax: run ? null : xs[0],
+                     key: xs[0], ev: ev });
+      }
+      for (j = 0; j < ph.length; j++) {
+        var P = ph[j], px0 = sc.X(P.a), px1 = sc.X(P.b);
+        var pw = P.name ? layWizTextW(P.name, subFs, true) : 0;
+        P.geo = { x0: px0, x1: px1, tw: pw, inside: !P.name || pw + 8 <= px1 - px0, row: -1 };
+        if (!P.geo.inside) {
+          P.geo.tx = Math.max(2 + pw / 2, Math.min(W - 2 - pw / 2, (px0 + px1) / 2));
+          spans.push({ left: P.geo.tx - pw / 2, right: P.geo.tx + pw / 2,
+                       tl: P.geo.tx - pw / 2, tr: P.geo.tx + pw / 2,
+                       ax: (px0 + px1) / 2, key: (px0 + px1) / 2, ph: P });
+        }
+      }
+      // In time order, each name takes the lowest row where it is clear of
+      // its neighbours AND no stem runs through a name: not its own stem
+      // through a name below, not the stem of a name above through it.
+      // When no row is that clean, the lowest row clear of neighbours.
+      spans.sort(function (a, b) { return a.key - b.key || a.left - b.left; });
+      var placed = [], gap = 6, nRows = 0;
+      for (j = 0; j < spans.length; j++) {
+        var sp = spans[j], pick = -1, loose = -1, rr, q;
+        for (rr = 0; rr < LAY_TL_LABEL_ROWS && pick === -1; rr++) {
+          var free = true, clean = true;
+          for (q = 0; q < placed.length; q++) {
+            var o = placed[q];
+            if (o.row === rr) {
+              if (sp.left < o.right + gap && o.left < sp.right + gap) free = false;
+            } else if (o.row < rr) {
+              if (sp.ax != null && sp.ax > o.tl - 3 && sp.ax < o.tr + 3) clean = false;
+            } else if (o.ax != null && o.ax > sp.tl - 3 && o.ax < sp.tr + 3) clean = false;
+          }
+          if (free && loose === -1) loose = rr;
+          if (free && clean) pick = rr;
+        }
+        if (pick === -1) pick = loose === -1 ? LAY_TL_LABEL_ROWS - 1 : loose;
+        sp.row = pick;
+        placed.push(sp);
+        nRows = Math.max(nRows, pick + 1);
+        if (sp.ev) sp.ev.geo.row = pick; else sp.ph.geo.row = pick;
+      }
+      T.nLab = nRows;
+      T.rowStep = Math.round(fs * 1.3) + (hasRun ? 7 : 0);
+      T.above = T.nLab
+        ? T.labelBase + (T.nLab - 1) * T.rowStep + (hasRun ? 4 : 0) + Math.ceil(fs * 0.85) + 2
+        : T.events.length ? T.markTop + 3
+        : T.nPh ? T.phTop + 3
+        : T.main ? tickHalf + 3 : 9;
+      T.below = T.main
+        ? tickHalf + (plan.axis.format !== "none" ? 4 + subFs + 3 : 3) : 7;
+      T.y = Math.round(y + T.above);
+      y = T.y + T.below;
+      T.ph = ph;
+    }
+    var H = Math.ceil(y + 4);
+    function mark(T, x, kind, color, small) {
+      var yb = T.y, s = small ? Math.max(5, m - 2) : m, over = !!T.nPh;
+      var a = over ? T.phTop + 2 : 0;
+      var floor = over ? a : (T.main ? tickHalf : 2);
+      if (kind === "tick") {
+        // On a bare line the tick crosses it, a little taller than the
+        // axis ticks. Over a row of phases it stands on the blocks: a line
+        // down through them would cut their names.
+        marks.push({ k: "line", x1: x, y1: over ? yb - (a - 2) : yb + (T.main ? tickHalf : 0),
+                     x2: x, y2: yb - (floor + s), stroke: color,
+                     w: Math.max(1, layTickWidth(st, null)) });
+        return;
+      }
+      var tip = over ? a - 1 : st.width / 2 + 1;
+      if (kind === "arrow") {
+        var top = floor + s, hh = Math.max(3, Math.min(s * 0.7, top - tip - 1)), hw = hh * 0.6;
+        marks.push({ k: "line", x1: x, y1: yb - top, x2: x, y2: yb - (tip + hh * 0.7),
+                     stroke: color, w: 1.25 });
+        marks.push({ k: "poly", fill: color, pts: [[x, yb - tip], [x - hw, yb - (tip + hh)],
+                                                   [x + hw, yb - (tip + hh)]] });
+      } else if (kind === "triangle") {
+        var th = s * 0.9, tw2 = s * 0.5;
+        marks.push({ k: "poly", fill: color, pts: [[x, yb - tip], [x - tw2, yb - (tip + th)],
+                                                   [x + tw2, yb - (tip + th)]] });
+      } else {
+        var cy = yb - (over ? a + s / 2 : 0), rad = s / 2;
+        if (kind === "dot") marks.push({ k: "circle", cx: x, cy: cy, r: rad, fill: color });
+        else marks.push({ k: "poly", fill: color, pts: [[x, cy - rad - 0.5], [x + rad + 0.5, cy],
+                                                        [x, cy + rad + 0.5], [x - rad - 0.5, cy]] });
+      }
+    }
+    var axisTicks = layTlAxisTicks(plan, sc, subFs);
+    for (i = 0; i < tracks.length; i++) {
+      var R = tracks[i], yb = R.y, segs, q;
+      // The line of the row, cut at every break, and the break marks on it.
+      segs = cutSegs(x0, R.main ? lineEnd - headLen : x1);
+      for (q = 0; q < segs.length; q++)
+        lines.push({ k: "line", x1: segs[q][0], y1: yb, x2: segs[q][1], y2: yb,
+                     stroke: st.color, w: R.main ? st.width : 1, op: R.main ? null : 0.3 });
+      for (q = 0; q < sc.gaps.length; q++) {
+        var gx = (sc.gaps[q].x0 + sc.gaps[q].x1) / 2;
+        lines.push({ k: "line", x1: gx - 4.5, y1: yb + 5, x2: gx - 0.5, y2: yb - 5,
+                     stroke: st.color, w: 1, op: R.main ? null : 0.5, role: "lay-break" });
+        lines.push({ k: "line", x1: gx + 0.5, y1: yb + 5, x2: gx + 4.5, y2: yb - 5,
+                     stroke: st.color, w: 1, op: R.main ? null : 0.5 });
+      }
+      under.push({ x: x0, y: yb - 8, w: x1 - x0, h: 16, role: "lay-axis",
+                   cls: "ps-ltl-line-hit", row: R.name });
+      if (R.main) {
+        if (headLen) {
+          var hw2 = headLen * 0.45;
+          lines.push({ k: "poly", fill: st.color, pts: [[lineEnd, yb], [lineEnd - headLen, yb - hw2],
+                                                        [lineEnd - headLen, yb + hw2]] });
+        }
+        for (q = 0; q < axisTicks.length; q++) {
+          lines.push({ k: "line", x1: axisTicks[q].x, y1: yb - tickHalf, x2: axisTicks[q].x,
+                       y2: yb + tickHalf, stroke: st.color, w: layTickWidth(st, null),
+                       role: "lay-axis-tick" });
+          if (axisTicks[q].label)
+            texts.push({ x: axisTicks[q].x, y: yb + tickHalf + 3 + subFs * 0.8,
+                         s: axisTicks[q].label, size: subFs, fill: muted, role: "lay-axis-label" });
+        }
+        if (unitText)
+          texts.push({ x: lineEnd + 6, y: yb + fs * 0.35, s: unitText, size: fs, fill: muted,
+                       anchor: "start", italic: true, role: "lay-axis-unit" });
+      } else {
+        texts.push({ x: x0 - 8, y: yb - (R.nPh ? R.base0 + phaseH / 2 : 4) + fs * 0.35,
+                     s: R.name, size: fs, fill: st.color, weight: "600", anchor: "end",
+                     role: "lay-row-label", row: R.name });
+      }
+      // Phases: a block each, its name inside when it fits and above when
+      // it does not.
+      for (j = 0; j < R.ph.length; j++) {
+        var B = R.ph[j], G = B.geo;
+        var topOff = R.base0 + (B.sub + 1) * phaseH + B.sub * phaseGap;
+        var bs = cutSegs(G.x0, G.x1), widest = null;
+        for (q = 0; q < bs.length; q++) {
+          back.push({ k: "rect", x: bs[q][0], y: yb - topOff, w: Math.max(1, bs[q][1] - bs[q][0]),
+                      h: phaseH, fill: B.fill, rx: 2, role: "lay-phase", idx: B.i,
+                      cls: "ps-ltl-band" });
+          if (!widest || bs[q][1] - bs[q][0] > widest[1] - widest[0]) widest = bs[q];
+        }
+        if (B.name && G.inside && widest)
+          texts.push({ x: Math.max(widest[0] + G.tw / 2 + 3,
+                                   Math.min(widest[1] - G.tw / 2 - 3, (G.x0 + G.x1) / 2)),
+                       y: yb - topOff + phaseH / 2 + subFs * 0.36, s: B.name, size: subFs,
+                       fill: st.color, weight: "600", inert: true, role: "lay-phase-name",
+                       idx: B.i });
+        else if (B.name && G.row >= 0) {
+          var pb = R.labelBase + G.row * R.rowStep;
+          lines.push({ k: "line", x1: (G.x0 + G.x1) / 2, y1: yb - topOff - 1, x2: (G.x0 + G.x1) / 2,
+                       y2: yb - (pb - 2), stroke: st.color, w: 0.75, op: 0.55 });
+          texts.push({ x: G.tx, y: yb - pb, s: B.name, size: subFs, fill: st.color,
+                       weight: "600", role: "lay-phase-label", idx: B.i });
+        }
+        hits.push({ x: G.x0 - 3, y: yb - topOff, w: 7, h: phaseH, role: "lay-phase-edge",
+                    idx: B.i, edge: "from", cls: "ps-ltl-tick-hit" });
+        hits.push({ x: G.x1 - 4, y: yb - topOff, w: 7, h: phaseH, role: "lay-phase-edge",
+                    idx: B.i, edge: "to", cls: "ps-ltl-tick-hit" });
+      }
+      // Events: a mark at every time; one that happens more than once gets
+      // a bracket over all its times, with its name on the bracket.
+      for (j = 0; j < R.events.length; j++) {
+        var E = R.events[j], Eg = E.geo, col = E.color || st.color;
+        var n = Eg.xs.length, dense = Eg.run && (Eg.xs[n - 1] - Eg.xs[0]) / (n - 1) < 4;
+        if (dense) {
+          var dOff = (R.nPh ? R.phTop + 2 : (R.main ? tickHalf : 2)) + 1;
+          marks.push({ k: "rect", x: Eg.xs[0], y: yb - dOff - 3, w: Eg.xs[n - 1] - Eg.xs[0],
+                       h: 3, fill: col, role: "lay-ev-bar", idx: E.i });
+        } else {
+          for (k = 0; k < n; k++) mark(R, Eg.xs[k], E.marker, col, Eg.run);
+        }
+        // The grab area of a mark is the mark: over a row of phases it
+        // stops at their top, so the blocks stay free to press.
+        for (k = 0; k < n; k++)
+          hits.push({ x: Eg.xs[k] - 6, y: yb - (R.markTop + 2), w: 12,
+                      h: R.nPh ? R.markTop + 2 - R.phTop
+                               : R.markTop + 2 + (R.main ? tickHalf + 2 : 4),
+                      role: "lay-ev", idx: E.i, occ: k, cls: "ps-ltl-tick-hit" });
+        if (Eg.row < 0) continue;
+        var rowOff = Eg.row * R.rowStep;
+        if (Eg.run) {
+          var bl = R.markTop + 4 + rowOff;
+          lines.push({ k: "path", d: "M" + layNum2(Eg.xs[0]) + " " + layNum2(yb - bl + 4) +
+                       " V" + layNum2(yb - bl) + " H" + layNum2(Eg.xs[n - 1]) +
+                       " V" + layNum2(yb - bl + 4), stroke: col, w: 1, role: "lay-ev-bracket",
+                       idx: E.i, ax: Eg.xs[0], ay: yb - bl });
+          hits.push({ x: Eg.xs[0], y: yb - bl - 4, w: Math.max(1, Eg.xs[n - 1] - Eg.xs[0]), h: 8,
+                      role: "lay-ev", idx: E.i, occ: -1, cls: "ps-ltl-tick-hit" });
+          if (E.name)
+            texts.push({ x: Eg.tx, y: yb - (bl + 4), s: E.name, size: fs, fill: st.color,
+                         role: "lay-ev-label", idx: E.i });
+        } else {
+          var tb = R.labelBase + rowOff;
+          if (Eg.row > 0)
+            lines.push({ k: "line", x1: Eg.xs[0], y1: yb - (R.markTop + 1), x2: Eg.xs[0],
+                         y2: yb - (tb - 2), stroke: st.color, w: 0.75, op: 0.55 });
+          texts.push({ x: Eg.tx, y: yb - tb, s: E.name, size: fs, fill: st.color,
+                       role: "lay-ev-label", idx: E.i });
+        }
+      }
+    }
+    return { W: W, H: H, st: st, plan: plan, sc: sc, tracks: tracks, x0: x0, x1: x1,
+             prims: back.concat(lines, marks, texts), under: under, hits: hits };
+  }
+  // The shapes as SVG, for the page (hit areas and roles added) and for the
+  // file (offset to the item's place, nothing but the drawing).
+  function layTimelinePlanDraw(doc, item, opts) {
+    var ns = "http://www.w3.org/2000/svg", L = layTimelinePlanLayout(item);
+    var ox = opts.ox || 0, oy = opts.oy || 0, canvas = !!opts.canvas, i, k;
+    var root = doc.createElementNS(ns, "g");
+    if (!L) return root;
+    function mk(tag, attrs) {
+      var node = doc.createElementNS(ns, tag);
+      for (var a in attrs)
+        if (attrs.hasOwnProperty(a) && attrs[a] != null) node.setAttribute(a, String(attrs[a]));
+      return node;
+    }
+    function hit(h) {
+      var a = { x: layNum2(h.x), y: layNum2(h.y), width: layNum2(Math.max(1, h.w)),
+                height: layNum2(Math.max(1, h.h)), fill: "transparent",
+                "class": h.cls, "data-role": h.role };
+      if (h.idx != null) a["data-idx"] = h.idx;
+      if (h.edge) a["data-edge"] = h.edge;
+      if (h.occ != null) a["data-occ"] = h.occ;
+      if (h.row != null) a["data-row"] = h.row;
+      return mk("rect", a);
+    }
+    if (canvas) for (i = 0; i < L.under.length; i++) root.appendChild(hit(L.under[i]));
+    for (i = 0; i < L.prims.length; i++) {
+      var p = L.prims[i], a, node;
+      if (p.k === "line") {
+        a = { x1: layNum2(p.x1 + ox), y1: layNum2(p.y1 + oy), x2: layNum2(p.x2 + ox),
+              y2: layNum2(p.y2 + oy), stroke: p.stroke, "stroke-width": p.w };
+        if (p.op != null) a["stroke-opacity"] = p.op;
+        if (canvas) a["pointer-events"] = "none";
+        node = mk("line", a);
+      } else if (p.k === "path") {
+        a = { d: p.d, fill: "none", stroke: p.stroke, "stroke-width": p.w };
+        if (ox || oy) a.transform = "translate(" + layNum2(ox) + " " + layNum2(oy) + ")";
+        if (canvas) a["pointer-events"] = "none";
+        node = mk("path", a);
+      } else if (p.k === "rect") {
+        a = { x: layNum2(p.x + ox), y: layNum2(p.y + oy), width: layNum2(p.w),
+              height: layNum2(p.h), fill: p.fill };
+        if (p.rx) a.rx = p.rx;
+        if (canvas && p.cls) a["class"] = p.cls;
+        node = mk("rect", a);
+      } else if (p.k === "poly") {
+        var pts = [];
+        for (k = 0; k < p.pts.length; k++)
+          pts.push(layNum2(p.pts[k][0] + ox) + "," + layNum2(p.pts[k][1] + oy));
+        a = { points: pts.join(" "), fill: p.fill };
+        if (canvas) a["pointer-events"] = "none";
+        node = mk("polygon", a);
+      } else if (p.k === "circle") {
+        a = { cx: layNum2(p.cx + ox), cy: layNum2(p.cy + oy), r: layNum2(p.r), fill: p.fill };
+        if (canvas) a["pointer-events"] = "none";
+        node = mk("circle", a);
+      } else {
+        a = { x: layNum2(p.x + ox), y: layNum2(p.y + oy), "text-anchor": p.anchor || "middle",
+              fill: p.fill, "font-size": layNum2(p.size), "font-family": "sans-serif",
+              "font-weight": p.weight || "400" };
+        if (p.italic) a["font-style"] = "italic";
+        if (canvas && p.inert) a["pointer-events"] = "none";
+        node = mk("text", a);
+        node.textContent = p.s;
+      }
+      if (canvas && p.role) {
+        node.setAttribute("data-role", p.role);
+        if (p.idx != null) node.setAttribute("data-idx", String(p.idx));
+        if (p.row != null) node.setAttribute("data-row", p.row);
+      }
+      root.appendChild(node);
+    }
+    if (canvas) for (i = 0; i < L.hits.length; i++) root.appendChild(hit(L.hits[i]));
+    return root;
+  }
+  // A planned timeline is as tall as its drawing: rows, phases and label
+  // rows decide the height, the user decides the width.
+  function layTimelineHug(item) {
+    var L = layTimelinePlanLayout(item);
+    if (!L) return false;
+    var was = Number(item.h) || 0;
+    item.w = L.W; item.h = L.H;
+    return Math.abs(was - L.H) > 0.5;
+  }
+  function layTimelineSyncIn(items) {
+    for (var i = 0; i < (items || []).length; i++)
+      if (items[i] && items[i].kind === "timeline" && items[i].plan) layTimelineHug(items[i]);
+  }
+  // The typed table. One line each:
+  //   events   [Group] Name | when | marker color     (when: 7, 1-5, 1, 8, 15 or 0-28/7)
+  //   phases   [Group] Name | from-to | color
+  // The group, the marker and the color are optional. A colon serves for
+  // the first bar when a line has none.
+  function layTlSplitLine(line) {
+    var row = "", m = String(line).match(/^\[([^\]]*)\]\s*(.*)$/);
+    if (m) { row = layTlClean(m[1]); line = m[2]; }
+    var parts = String(line).split("|"), name, spec, opt = "";
+    if (parts.length >= 2) {
+      name = parts[0]; spec = parts[1]; opt = parts.slice(2).join(" ");
+    } else {
+      var at = line.lastIndexOf(":");
+      if (at < 0) return null;
+      name = line.slice(0, at); spec = line.slice(at + 1);
+    }
+    name = layTlClean(name); spec = layTlClean(spec);
+    if (!spec) return null;
+    return { row: row, name: name, spec: spec, opt: layTlClean(opt) };
+  }
+  function layTlOptions(opt, palette) {
+    var out = { marker: null, color: null };
+    var toks = String(opt || "").toLowerCase().split(/[\s,]+/);
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i];
+      if (!t) continue;
+      if (LAY_TL_MARKERS.indexOf(t) !== -1) out.marker = t;
+      else if (palette.hasOwnProperty(t)) out.color = palette[t];
+      else if (/^#[0-9a-f]{6}$/.test(t)) out.color = t;
+    }
+    return out;
+  }
+  function layTlColorWord(palette, hex) {
+    var h = String(hex || "").toLowerCase();
+    for (var k in palette) if (palette.hasOwnProperty(k) && palette[k] === h) return k;
+    return h;
+  }
+  // The wizard's answers as a plan. Throws when the axis has no length.
+  function layTlPlanFromValues(v) {
+    var start = Number(v.start), end = Number(v.end), step = Number(v.step), i, L, o, r;
+    if (v.start === "" || v.end === "" || !isFinite(start) || !isFinite(end) || !(end > start))
+      throw new Error("range");
+    if (!(step > 0)) step = (end - start) / 10;
+    var plan = { axis: { start: start, end: end, step: step, unit: layTlClean(v.unit),
+                         format: v.format === "number" || v.format === "none"
+                           ? v.format : "prefix" },
+                 rows: [], events: [], phases: [], breaks: [] };
+    function addRow(name) {
+      name = layTlClean(name);
+      if (name && plan.rows.indexOf(name) === -1) plan.rows.push(name);
+      return name;
+    }
+    var groups = String(v.groups == null ? "" : v.groups).split(/[,;\n]+/);
+    for (i = 0; i < groups.length; i++) addRow(groups[i]);
+    var lines = layWizLines(v.events);
+    for (i = 0; i < lines.length; i++) {
+      L = layTlSplitLine(lines[i]);
+      if (!L || !layTlParseTimes(L.spec).length) continue;
+      o = layTlOptions(L.opt, LAY_TL_INK_NAMES);
+      var ev = { name: L.name, when: L.spec };
+      if (o.marker && o.marker !== "tick") ev.marker = o.marker;
+      if (o.color) ev.color = o.color;
+      if (L.row) ev.row = addRow(L.row);
+      plan.events.push(ev);
+    }
+    lines = layWizLines(v.phases);
+    for (i = 0; i < lines.length; i++) {
+      L = layTlSplitLine(lines[i]);
+      r = L ? layTlParseRange(L.spec) : null;
+      if (!r) continue;
+      o = layTlOptions(L.opt, LAY_TL_PHASE_NAMES);
+      var ph = { name: L.name, from: r.from, to: r.to,
+                 fill: o.color || LAY_TL_PHASE_FILLS[plan.phases.length % LAY_TL_PHASE_FILLS.length] };
+      if (L.row) ph.row = addRow(L.row);
+      plan.phases.push(ph);
+    }
+    var br = String(v.breaks == null ? "" : v.breaks).split(/[,;\n]+/);
+    for (i = 0; i < br.length; i++) {
+      r = layTlParseRange(br[i]);
+      if (r) plan.breaks.push({ from: r.from, to: r.to });
+    }
+    return plan;
+  }
+  // And back: a timeline's plan as the answers the form shows, so the
+  // table of a timeline already on the page can be reopened and changed.
+  function layTlValuesFromPlan(item) {
+    var plan = layTimelinePlan(item), v = {}, i, out = [], line, opts;
+    if (!plan) return v;
+    v.unit = plan.axis.unit; v.start = plan.axis.start; v.end = plan.axis.end;
+    v.step = plan.axis.step; v.format = plan.axis.format;
+    v.groups = plan.rows.join(", ");
+    for (i = 0; i < plan.events.length; i++) {
+      var e = plan.events[i];
+      line = (e.row ? "[" + e.row + "] " : "") + layTlClean(e.name) + " | " + layTlClean(e.when);
+      opts = [];
+      if (e.marker !== "tick") opts.push(e.marker);
+      if (e.color) opts.push(layTlColorWord(LAY_TL_INK_NAMES, e.color));
+      if (opts.length) line += " | " + opts.join(" ");
+      out.push(line);
+    }
+    v.events = out.join("\n");
+    out = [];
+    for (i = 0; i < plan.phases.length; i++) {
+      var p = plan.phases[i];
+      if (!isFinite(p.from) || !isFinite(p.to)) continue;
+      line = (p.row ? "[" + p.row + "] " : "") + layTlClean(p.name) + " | " +
+        layTlFmt(p.from) + "-" + layTlFmt(p.to);
+      if (p.fill.toLowerCase() !== LAY_TL_PHASE_FILLS[out.length % LAY_TL_PHASE_FILLS.length])
+        line += " | " + layTlColorWord(LAY_TL_PHASE_NAMES, p.fill);
+      out.push(line);
+    }
+    v.phases = out.join("\n");
+    out = [];
+    for (i = 0; i < plan.breaks.length; i++)
+      if (isFinite(plan.breaks[i].from) && isFinite(plan.breaks[i].to))
+        out.push(layTlFmt(plan.breaks[i].from) + "-" + layTlFmt(plan.breaks[i].to));
+    v.breaks = out.join(", ");
+    v.arrow = layTimelineStyle(item).ends === "arrow";
+    return v;
+  }
+  // ---- A planned timeline on the page: its names are edited where they
+  // stand, a mark dragged along the line changes its time, the end of a
+  // phase dragged changes where it stops, and the rail lists events,
+  // phases, breaks and groups, the way the table that made it does.
+  function layTimelineIsPlanned(item) {
+    return !!(item && item.kind === "timeline" && item.plan && typeof item.plan === "object");
+  }
+  // A click on a part of a planned timeline acts a moment later, so the
+  // first click of a double-click (which edits the name where it stands)
+  // opens nothing: no color card flashing up, no field in the rail taking
+  // the focus on the way.
+  var LAY_TL_SOON = null;
+  function layTimelineSoon(fn) {
+    window.clearTimeout(LAY_TL_SOON);
+    LAY_TL_SOON = window.setTimeout(function () { LAY_TL_SOON = null; fn(); }, 280);
+  }
+  function layTimelineSoonCancel() {
+    window.clearTimeout(LAY_TL_SOON);
+    LAY_TL_SOON = null;
+  }
+  function layTimelineItemNode(id) {
+    var cv = el("ps-lcanvas");
+    return cv ? cv.querySelector('.ps-litem[data-item-id="' + id + '"]') : null;
+  }
+  // The drawn part with this role and this value of attr (names are data,
+  // so they are compared, never put into a selector).
+  function layTimelineFindNode(id, role, attr, value, attr2, value2) {
+    var itemEl = layTimelineItemNode(id);
+    if (!itemEl) return null;
+    var nodes = itemEl.querySelectorAll('[data-role="' + role + '"]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].getAttribute(attr) !== String(value)) continue;
+      if (attr2 && (nodes[i].getAttribute(attr2) || "") !== String(value2)) continue;
+      return nodes[i];
+    }
+    return null;
+  }
+  // A word of a timeline, edited where it stands: a field over the word.
+  // Enter or a press elsewhere keeps it, Escape leaves it as it was.
+  function layTimelineEditInPlace(id, node, value, what, apply) {
+    var itemEl = layTimelineItemNode(id), item = layItemById(id);
+    if (!itemEl || !node || !item) return false;
+    var z = layZoom() || 1, fs = layTimelineStyle(item).fs;
+    var r = node.getBoundingClientRect(), ir = itemEl.getBoundingClientRect();
+    var w = Math.max(84, r.width / z + 30), h = Math.max(20, Math.round(fs * 1.75));
+    var inp = document.createElement("input");
+    inp.type = "text";
+    inp.className = "ps-ltl-edit";
+    inp.value = value;
+    inp.setAttribute("aria-label", "Edit " + what);
+    inp.setAttribute("spellcheck", "false");
+    inp.setAttribute("autocomplete", "off");
+    inp.style.width = layNum2(w) + "px";
+    inp.style.height = h + "px";
+    inp.style.left = layNum2((r.left + r.width / 2 - ir.left) / z - w / 2) + "px";
+    inp.style.top = layNum2((r.top + r.height / 2 - ir.top) / z - h / 2) + "px";
+    inp.style.fontSize = fs + "px";
+    var returnFocus = document.activeElement === el("ps-lviewport");
+    itemEl.removeAttribute("aria-hidden");
+    itemEl.appendChild(inp);
+    // The same rule as a box being typed in: while a field is open inside
+    // it, the viewport is a plain group, not an option list.
+    layComposeEditingAria(true);
+    inp.focus(); inp.select();
+    var done = false;
+    function commit(cancel) {
+      if (done) return;
+      done = true;
+      var v = laySymbolize(inp.value).replace(/\s+/g, " ").trim();
+      layComposeEditingAria(false);
+      if (!cancel && v !== value) apply(v);
+      else renderLayout();
+      var msg = cancel ? "Text edit canceled." : "Text saved.";
+      if (returnFocus) {
+        layFocusViewport();
+        window.setTimeout(function () { layAnnounce(msg); }, 25);
+      } else layAnnounce(msg);
+    }
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); commit(false); }
+      else if (ev.key === "Escape") commit(true);
+      ev.stopPropagation();
+    });
+    inp.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); });
+    inp.addEventListener("dblclick", function (ev) { ev.stopPropagation(); });
+    inp.addEventListener("blur", function () { commit(false); });
+    return true;
+  }
+  // A group renamed takes its events and phases with it; renamed to the
+  // name of another group, the two become one.
+  function layTlRenameRow(plan, from, to) {
+    to = layTlClean(to);
+    var rows = Array.isArray(plan.rows) ? plan.rows : [], at = -1, other = -1, i;
+    for (i = 0; i < rows.length; i++) {
+      if (layTlClean(rows[i]) === from && at === -1) at = i;
+      else if (layTlClean(rows[i]) === to) other = i;
+    }
+    if (at === -1 || !to) return false;
+    if (other !== -1) rows.splice(at, 1);
+    else rows[at] = to;
+    var lists = [plan.events, plan.phases];
+    for (var k = 0; k < lists.length; k++)
+      for (i = 0; i < (lists[k] || []).length; i++)
+        if (lists[k][i] && layTlClean(lists[k][i].row) === from) lists[k][i].row = to;
+    return true;
+  }
+  function layTlRemoveRow(plan, name) {
+    var rows = Array.isArray(plan.rows) ? plan.rows : [], i;
+    for (i = rows.length - 1; i >= 0; i--) if (layTlClean(rows[i]) === name) rows.splice(i, 1);
+    var lists = [plan.events, plan.phases];
+    for (var k = 0; k < lists.length; k++)
+      for (i = 0; i < (lists[k] || []).length; i++)
+        if (lists[k][i] && layTlClean(lists[k][i].row) === name) delete lists[k][i].row;
+  }
+  // Open the field over one part: an event's name, a phase's, a group's.
+  function layTimelineEditPart(id, kind, key) {
+    var item = layItemById(id);
+    if (!layTimelineIsPlanned(item)) return false;
+    laySetSelection([id]);
+    renderLayout();
+    var raw = item.plan, node = null, value = "", what = "", apply = null;
+    if (kind === "event") {
+      if (!Array.isArray(raw.events) || !raw.events[key]) return false;
+      node = layTimelineFindNode(id, "lay-ev-label", "data-idx", key) ||
+             layTimelineFindNode(id, "lay-ev", "data-idx", key);
+      value = String(raw.events[key].name || "");
+      what = "event name";
+      apply = function (v) {
+        layPartApply([item], "event name", null, function (t) {
+          if (t.plan.events[key]) t.plan.events[key].name = v;
+        });
+      };
+    } else if (kind === "phase") {
+      if (!Array.isArray(raw.phases) || !raw.phases[key]) return false;
+      node = layTimelineFindNode(id, "lay-phase-name", "data-idx", key) ||
+             layTimelineFindNode(id, "lay-phase-label", "data-idx", key) ||
+             layTimelineFindNode(id, "lay-phase", "data-idx", key);
+      value = String(raw.phases[key].name || "");
+      what = "phase name";
+      apply = function (v) {
+        layPartApply([item], "phase name", null, function (t) {
+          if (t.plan.phases[key]) t.plan.phases[key].name = v;
+        });
+      };
+    } else if (kind === "row") {
+      node = layTimelineFindNode(id, "lay-row-label", "data-row", key);
+      value = String(key);
+      what = "group name";
+      apply = function (v) {
+        if (!v) { renderLayout(); return; }
+        layPartApply([item], "group name", null, function (t) {
+          layTlRenameRow(t.plan, String(key), v);
+        });
+      };
+    }
+    return layTimelineEditInPlace(id, node, value, what, apply);
+  }
+  // The hand-built kind: a tick's label, the line under it, a band's name.
+  function layTimelineEditTick(id, idx, part) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "timeline" || !Array.isArray(item.ticks) || !item.ticks[idx])
+      return false;
+    laySetSelection([id]);
+    renderLayout();
+    var node = layTimelineFindNode(id, "lay-tick-label", "data-idx", idx, "data-part",
+                                   part === "sub" ? "sub" : "") ||
+               layTimelineFindNode(id, "lay-tick", "data-idx", idx);
+    return layTimelineEditInPlace(id, node, String(item.ticks[idx][part] || ""),
+      part === "sub" ? "the line under the tick" : "tick label", function (v) {
+        layPartApply([item], "tick text", null, function (t) {
+          if (t.ticks && t.ticks[idx]) t.ticks[idx][part] = v;
+        });
+      });
+  }
+  function layTimelineEditBand(id, idx) {
+    var item = layItemById(id);
+    if (!item || item.kind !== "timeline" || !Array.isArray(item.bands)) return false;
+    // idx counts the bands that draw; a band that cannot (it names a tick
+    // that is gone) still has its place in the stored list.
+    var shown = layTimelineBands(item, layTimelineTicks(item).length)[idx];
+    var at = shown ? shown.i : idx;
+    if (!item.bands[at]) return false;
+    laySetSelection([id]);
+    renderLayout();
+    var node = layTimelineFindNode(id, "lay-band-label", "data-idx", idx);
+    return layTimelineEditInPlace(id, node, String(item.bands[at].label || ""),
+      "phase band name", function (v) {
+        layPartApply([item], "band text", null, function (t) {
+          if (t.bands && t.bands[at]) t.bands[at].label = v;
+        });
+      });
+  }
+  function layTimelinePlanDblClick(item, e) {
+    var id = item.id;
+    function tg(sel) { return e.target.closest ? e.target.closest(sel) : null; }
+    var n = tg('[data-role="lay-ev-label"],[data-role="lay-ev"]');
+    if (n) { layTimelineEditPart(id, "event", Number(n.getAttribute("data-idx"))); return; }
+    n = tg('[data-role="lay-phase"],[data-role="lay-phase-label"],[data-role="lay-phase-edge"]');
+    if (n) { layTimelineEditPart(id, "phase", Number(n.getAttribute("data-idx"))); return; }
+    n = tg('[data-role="lay-row-label"]');
+    if (n) { layTimelineEditPart(id, "row", n.getAttribute("data-row")); return; }
+    n = tg('[data-role="lay-axis"]');
+    var node = layTimelineItemNode(id), L = layTimelinePlanLayout(item);
+    if (!n || !node || !L) return;
+    // The line: a new event at the time under the pointer.
+    var r = node.getBoundingClientRect(), z = layZoom() || 1;
+    var u = layTlSnapUnit(L.plan), ax = L.plan.axis;
+    var t = Math.round(L.sc.T((e.clientX - r.left) / z) / u) * u;
+    t = Math.round(Math.max(ax.start, Math.min(ax.end, t)) * 1e6) / 1e6;
+    var row = n.getAttribute("data-row") || "";
+    laySnapshot("add event");
+    if (!Array.isArray(item.plan.events)) item.plan.events = [];
+    var ev = { name: "Event", when: layTlFmt(t) };
+    if (row) ev.row = row;
+    item.plan.events.push(ev);
+    laySetSelection([id]);
+    persist();
+    renderLayout();
+    layAnnounce("Added an event at " + (ax.unit ? ax.unit + " " : "") + layTlFmt(t) +
+      ". Type its name.");
+    layTimelineEditPart(id, "event", item.plan.events.length - 1);
+  }
+  // A mark or the end of a phase in hand. The scale is the one the press
+  // found (the axis does not change while an event moves), so a mark stays
+  // under the pointer; times land on whole units, or anywhere with Alt.
+  function layPlanDragStart(item, handle) {
+    var L = layTimelinePlanLayout(item);
+    if (!L) return null;
+    var pd = { role: handle.getAttribute("data-role"),
+               idx: Number(handle.getAttribute("data-idx")),
+               edge: handle.getAttribute("data-edge") || "",
+               plan0: JSON.stringify(item.plan), L0: L, grab: null };
+    if (pd.role === "lay-ev") {
+      var occ = Number(handle.getAttribute("data-occ"));
+      var ev = L.plan.events[pd.idx];
+      if (ev && occ >= 0 && ev.times[occ] != null) pd.grab = ev.times[occ];
+    }
+    return pd;
+  }
+  function layPlanDrag(d, e) {
+    var it = d.timeline, pd = d.planDrag, node = layTimelineItemNode(it.id);
+    if (!node || !pd || !layTimelineIsPlanned(it)) return;
+    var base = JSON.parse(pd.plan0), ax = pd.L0.plan.axis;
+    var u = e.altKey ? (ax.end - ax.start) / 1000 : layTlSnapUnit(pd.L0.plan);
+    function snap(x) { return Math.round(Math.round(x / u) * u * 1e6) / 1e6; }
+    var r = node.getBoundingClientRect();
+    var t = pd.L0.sc.T((e.clientX - r.left) / d.zoom);
+    if (pd.role === "lay-ev") {
+      var ev0 = base.events && base.events[pd.idx];
+      if (!ev0 || !it.plan.events || !it.plan.events[pd.idx]) return;
+      var times = layTlParseTimes(ev0.when);
+      if (!times.length) return;
+      if (pd.grab == null) pd.grab = snap(pd.L0.sc.T((d.sx - r.left) / d.zoom));
+      var by = snap(t) - pd.grab;
+      by = Math.max(ax.start - times[0], Math.min(ax.end - times[times.length - 1], by));
+      by = Math.round(by * 1e6) / 1e6;
+      it.plan.events[pd.idx].when = by ? layTlShiftSpec(ev0.when, by) : ev0.when;
+    } else {
+      var p0 = base.phases && base.phases[pd.idx];
+      if (!p0 || !it.plan.phases || !it.plan.phases[pd.idx]) return;
+      var v = Math.max(ax.start, Math.min(ax.end, snap(t)));
+      if (pd.edge === "from")
+        it.plan.phases[pd.idx].from = Math.round(Math.min(v, Number(p0.to) - u) * 1e6) / 1e6;
+      else
+        it.plan.phases[pd.idx].to = Math.round(Math.max(v, Number(p0.from) + u) * 1e6) / 1e6;
+    }
+    layTimelineHug(it);
+    layItemRefresh(it);
+  }
+  // A press on a mark that never travelled: its row in the rail.
+  function layTimelineFocusPart(item, pd) {
+    laySetSelection([item.id]);
+    renderLayout();
+    var inp = el((pd.role === "lay-ev" ? "ps-ltl-ev-name-" : "ps-ltl-ph-name-") + pd.idx);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+  function layTlRowSelect(plan, value, label) {
+    var sel = document.createElement("select"), o = document.createElement("option");
+    sel.setAttribute("aria-label", label);
+    o.value = ""; o.textContent = "On the axis";
+    sel.appendChild(o);
+    for (var i = 0; i < plan.rows.length; i++) {
+      o = document.createElement("option");
+      o.value = plan.rows[i]; o.textContent = plan.rows[i];
+      sel.appendChild(o);
+    }
+    sel.value = value || "";
+    return sel;
+  }
+  function layTlField(type, value, attr, what, label, placeholder) {
+    var inp = document.createElement("input");
+    inp.type = type;
+    if (type === "number") inp.step = "any";
+    inp.value = value;
+    if (placeholder) inp.placeholder = placeholder;
+    inp.setAttribute(attr, what);
+    inp.setAttribute("aria-label", label);
+    if (type === "text") { inp.setAttribute("spellcheck", "false"); inp.setAttribute("autocomplete", "off"); }
+    return inp;
+  }
+  // The rail for one planned timeline: the axis, then one entry per event,
+  // phase, break and group. The lists are rebuilt on every sync except
+  // while one of their fields is being typed in (force rebuilds anyway).
+  // True while a typed field of the lists is landing its value: the redraw
+  // that follows must not rebuild the lists, or the field the Tab key is
+  // on its way to is gone before the focus arrives (by then the browser no
+  // longer reports the old field as the one with the focus).
+  var LAY_TL_HOLD = false;
+  function layTimelinePlanSync(item, force) {
+    var box = el("ps-ltl-plan");
+    if (!box) return;
+    var plan = layTimelinePlan(item), st = layTimelineStyle(item), i, act = document.activeElement;
+    if (!plan) return;
+    function setv(id, v) { var n = el(id); if (n && n !== act) n.value = v; }
+    setv("ps-ltl-ax-unit", plan.axis.unit);
+    setv("ps-ltl-ax-start", layTlFmt(plan.axis.start));
+    setv("ps-ltl-ax-end", layTlFmt(plan.axis.end));
+    setv("ps-ltl-ax-step", layTlFmt(plan.axis.step));
+    var segs = box.querySelectorAll("[data-ltl-format]");
+    for (i = 0; i < segs.length; i++) {
+      var fmt = segs[i].getAttribute("data-ltl-format");
+      segs[i].setAttribute("aria-pressed", fmt === plan.axis.format ? "true" : "false");
+      if (fmt === "prefix") segs[i].textContent = (plan.axis.unit || "Day") + " 7";
+    }
+    if (!force && (LAY_TL_HOLD || (act && act.tagName === "INPUT" && box.contains(act) &&
+        act.closest && act.closest(".ps-ltl-list")))) return;
+    var evBox = el("ps-ltl-events"), phBox = el("ps-ltl-phases");
+    var brBox = el("ps-ltl-breaks"), rwBox = el("ps-ltl-rows");
+    if (!evBox || !phBox || !brBox || !rwBox) return;
+    evBox.innerHTML = ""; phBox.innerHTML = ""; brBox.innerHTML = ""; rwBox.innerHTML = "";
+    var X = String.fromCharCode(215), hasRows = plan.rows.length > 0;
+    function entry(boxEl, idx) {
+      var wrap = mkEl("div", "ps-ltl-item");
+      wrap.setAttribute("data-idx", String(idx));
+      boxEl.appendChild(wrap);
+      return wrap;
+    }
+    function line(wrap) { var r = mkEl("div", "ps-ltl-row"); wrap.appendChild(r); return r; }
+    function remove(attr, label, tip) {
+      var b = mkEl("button", "ps-ltl-x", X);
+      b.type = "button";
+      b.setAttribute(attr, "remove");
+      b.setAttribute("aria-label", label);
+      setTip(b, tip);
+      return b;
+    }
+    function swatch(attr, id, hex, label, tip) {
+      var b = mkEl("button", "ps-ltl-sw", "");
+      b.type = "button";
+      b.id = id;
+      b.setAttribute(attr, "color");
+      b.style.background = hex;
+      b.setAttribute("aria-label", label);
+      setTip(b, tip);
+      return b;
+    }
+    function word(text) { return mkEl("span", "ps-ltl-to", text); }
+    for (i = 0; i < plan.events.length; i++) {
+      var e = plan.events[i], n = i + 1, w = entry(evBox, i), r1 = line(w), r2 = line(w);
+      var nm = layTlField("text", e.name, "data-ltl-ev", "name", "Event " + n + " name", "Name");
+      nm.id = "ps-ltl-ev-name-" + i;
+      r1.appendChild(nm);
+      r1.appendChild(remove("data-ltl-ev", "Remove event " + n, "Remove this event"));
+      var wh = layTlField("text", e.when, "data-ltl-ev", "when",
+        "Event " + n + ": when it happens", "7, 1-5 or 1, 8, 15");
+      wh.className = "ps-ltl-when";
+      if (!e.times.length) wh.setAttribute("aria-invalid", "true");
+      r2.appendChild(wh);
+      var mk = document.createElement("select");
+      mk.setAttribute("data-ltl-ev", "marker");
+      mk.setAttribute("aria-label", "Event " + n + " mark");
+      for (var q = 0; q < LAY_TL_MARKERS.length; q++) {
+        var mo = document.createElement("option");
+        mo.value = LAY_TL_MARKERS[q]; mo.textContent = LAY_TL_MARKER_NAMES[LAY_TL_MARKERS[q]];
+        mk.appendChild(mo);
+      }
+      mk.value = e.marker;
+      r2.appendChild(mk);
+      r2.appendChild(swatch("data-ltl-ev", "ps-ltl-ev-color-" + i, e.color || st.color,
+        "Event " + n + " color", "Choose this event's color"));
+      if (hasRows) {
+        var es = layTlRowSelect(plan, e.row, "Event " + n + " group");
+        es.setAttribute("data-ltl-ev", "row");
+        line(w).appendChild(es);
+      }
+    }
+    if (!plan.events.length) evBox.appendChild(mkEl("div", "ps-loader-hint", "No events yet."));
+    for (i = 0; i < plan.phases.length; i++) {
+      var p = plan.phases[i], pn = i + 1, pw = entry(phBox, i), p1 = line(pw), p2 = line(pw);
+      var pm = layTlField("text", p.name, "data-ltl-ph", "name", "Phase " + pn + " name", "Name");
+      pm.id = "ps-ltl-ph-name-" + i;
+      p1.appendChild(pm);
+      p1.appendChild(remove("data-ltl-ph", "Remove phase " + pn, "Remove this phase"));
+      p2.appendChild(layTlField("number", isFinite(p.from) ? layTlFmt(p.from) : "",
+        "data-ltl-ph", "from", "Phase " + pn + " starts at"));
+      p2.appendChild(word("to"));
+      p2.appendChild(layTlField("number", isFinite(p.to) ? layTlFmt(p.to) : "",
+        "data-ltl-ph", "to", "Phase " + pn + " ends at"));
+      p2.appendChild(swatch("data-ltl-ph", "ps-ltl-ph-color-" + i, p.fill,
+        "Phase " + pn + " color", "Choose this phase's color"));
+      if (hasRows) {
+        var ps = layTlRowSelect(plan, p.row, "Phase " + pn + " group");
+        ps.setAttribute("data-ltl-ph", "row");
+        line(pw).appendChild(ps);
+      }
+    }
+    if (!plan.phases.length) phBox.appendChild(mkEl("div", "ps-loader-hint", "No phases yet."));
+    for (i = 0; i < plan.breaks.length; i++) {
+      var b = plan.breaks[i], bn = i + 1, b1 = line(entry(brBox, i));
+      b1.appendChild(layTlField("number", isFinite(b.from) ? layTlFmt(b.from) : "",
+        "data-ltl-br", "from", "Break " + bn + " starts at"));
+      b1.appendChild(word("to"));
+      b1.appendChild(layTlField("number", isFinite(b.to) ? layTlFmt(b.to) : "",
+        "data-ltl-br", "to", "Break " + bn + " ends at"));
+      b1.appendChild(remove("data-ltl-br", "Remove break " + bn, "Remove this break"));
+    }
+    for (i = 0; i < plan.rows.length; i++) {
+      var g1 = line(entry(rwBox, i));
+      var gm = layTlField("text", plan.rows[i], "data-ltl-rw", "name",
+        "Group " + (i + 1) + " name", "Name");
+      gm.id = "ps-ltl-rw-name-" + i;
+      g1.appendChild(gm);
+      g1.appendChild(remove("data-ltl-rw", "Remove group " + (i + 1),
+        "Remove this group; its events and phases go back to the axis"));
+    }
+  }
+  function wireLayoutTimelinePlan() {
+    var box = el("ps-ltl-plan");
+    if (!box) return;
+    var ATTRS = ["data-ltl-ev", "data-ltl-ph", "data-ltl-br", "data-ltl-rw"];
+    function one() {
+      var t = layTimelineTargets();
+      return t.length === 1 && layTimelineIsPlanned(t[0]) ? t[0] : null;
+    }
+    function idxOf(t) {
+      var w = t.closest ? t.closest(".ps-ltl-item") : null;
+      return w ? Number(w.getAttribute("data-idx")) : -1;
+    }
+    function list(t, key) {
+      if (!Array.isArray(t.plan[key])) t.plan[key] = [];
+      return t.plan[key];
+    }
+    function numOf(v) {
+      var n = Number(v);
+      return v === "" || v == null || !isFinite(n) ? null : n;
+    }
+    // Which field of which entry a control is, noted before a change
+    // redraws the lists (a list choice is replaced by the redraw).
+    function keyOf(ctl) {
+      var w = ctl && ctl.closest ? ctl.closest(".ps-ltl-item") : null;
+      var ls = ctl && ctl.closest ? ctl.closest(".ps-ltl-list") : null;
+      if (!w || !ls || document.activeElement !== ctl) return null;
+      for (var k = 0; k < ATTRS.length; k++)
+        if (ctl.hasAttribute(ATTRS[k]))
+          return { list: ls.id, attr: ATTRS[k], what: ctl.getAttribute(ATTRS[k]),
+                   idx: w.getAttribute("data-idx") };
+      return null;
+    }
+    // A choice from a list redraws the lists (the control chosen from is
+    // replaced), so the keyboard is handed back to the same control. A
+    // typed field is left alone: the lists are not rebuilt under it, and
+    // Tab goes on to the next field as it should.
+    function refresh(it, key) {
+      var k;
+      layTimelinePlanSync(it, true);
+      if (!key) return;
+      var listEl = el(key.list), items = listEl ? listEl.querySelectorAll(".ps-ltl-item") : [];
+      for (k = 0; k < items.length; k++) {
+        if (items[k].getAttribute("data-idx") !== key.idx) continue;
+        var f = items[k].querySelector("[" + key.attr + '="' + key.what + '"]');
+        if (f) f.focus();
+      }
+    }
+    function held(fn) {
+      LAY_TL_HOLD = true;
+      try { fn(); } finally { LAY_TL_HOLD = false; }
+    }
+    function focusNew(id) {
+      var it = one();
+      if (it) layTimelinePlanSync(it, true);
+      var inp = el(id);
+      if (inp) { inp.focus(); inp.select(); }
+    }
+    // Names follow every keystroke; numbers and times land when the field
+    // is left or Enter is pressed.
+    box.addEventListener("input", function (e) {
+      var it = one(), t = e.target, idx = idxOf(t), v = t.value;
+      if (!it) return;
+      if (t.id === "ps-ltl-ax-unit") {
+        layPartApply([it], "timeline unit", "ltl-unit", function (x) {
+          if (!x.plan.axis || typeof x.plan.axis !== "object") x.plan.axis = {};
+          x.plan.axis.unit = v;
+        }, true);
+        return;
+      }
+      if (idx < 0) return;
+      if (t.getAttribute("data-ltl-ev") === "name")
+        layPartApply([it], "event name", "ltl-ev:" + idx, function (x) {
+          if (list(x, "events")[idx]) x.plan.events[idx].name = v;
+        }, true);
+      else if (t.getAttribute("data-ltl-ph") === "name")
+        layPartApply([it], "phase name", "ltl-ph:" + idx, function (x) {
+          if (list(x, "phases")[idx]) x.plan.phases[idx].name = v;
+        }, true);
+    });
+    box.addEventListener("change", function (e) {
+      var it = one(), t = e.target, idx = idxOf(t), what, v, n;
+      if (!it) return;
+      var plan = layTimelinePlan(it), keep = keyOf(t);
+      if (t.id === "ps-ltl-ax-unit") { persist(); return; }
+      if (t.id === "ps-ltl-ax-start" || t.id === "ps-ltl-ax-end" || t.id === "ps-ltl-ax-step") {
+        n = numOf(t.value);
+        var key = t.id.slice("ps-ltl-ax-".length);
+        var next = { start: plan.axis.start, end: plan.axis.end, step: plan.axis.step };
+        if (n != null) next[key] = n;
+        if (n == null || !(next.end > next.start) || !(next.step > 0)) {
+          t.value = layTlFmt(plan.axis[key]);
+          layAnnounce(key === "step" ? "The step has to be more than zero."
+            : "The axis has to end after it starts.");
+          return;
+        }
+        layPartApply([it], "timeline axis", null, function (x) {
+          if (!x.plan.axis || typeof x.plan.axis !== "object") x.plan.axis = {};
+          x.plan.axis.start = next.start; x.plan.axis.end = next.end; x.plan.axis.step = next.step;
+        });
+        return;
+      }
+      what = t.getAttribute("data-ltl-ev");
+      if (what) {
+        if (what === "name") { persist(); return; }
+        if (idx < 0 || !list(it, "events")[idx]) return;
+        if (what === "when") {
+          v = layTlClean(t.value);
+          if (!layTlParseTimes(v).length) {
+            t.value = String(it.plan.events[idx].when || "");
+            layAnnounce("That is not a time. Type one number, a run such as 1-5, " +
+              "or a list such as 1, 8, 15.");
+            return;
+          }
+          held(function () {
+            layPartApply([it], "event time", null, function (x) { x.plan.events[idx].when = v; });
+          });
+          t.value = v;
+          t.removeAttribute("aria-invalid");
+          return;
+        } else if (what === "marker") {
+          v = t.value;
+          layPartApply([it], "event mark", null, function (x) {
+            if (v === "tick") delete x.plan.events[idx].marker;
+            else x.plan.events[idx].marker = v;
+          });
+        } else if (what === "row") {
+          v = t.value;
+          layPartApply([it], "event group", null, function (x) {
+            if (v) x.plan.events[idx].row = v; else delete x.plan.events[idx].row;
+          });
+        }
+        refresh(it, keep);
+        return;
+      }
+      what = t.getAttribute("data-ltl-ph");
+      if (what) {
+        if (what === "name") { persist(); return; }
+        if (idx < 0 || !list(it, "phases")[idx]) return;
+        if (what === "row") {
+          v = t.value;
+          layPartApply([it], "phase group", null, function (x) {
+            if (v) x.plan.phases[idx].row = v; else delete x.plan.phases[idx].row;
+          });
+        } else {
+          n = numOf(t.value);
+          var p0 = it.plan.phases[idx];
+          var from = what === "from" ? n : Number(p0.from), to = what === "to" ? n : Number(p0.to);
+          if (n == null || !(to > from)) {
+            t.value = isFinite(Number(p0[what])) ? layTlFmt(p0[what]) : "";
+            layAnnounce("A phase has to end after it starts.");
+            return;
+          }
+          held(function () {
+            layPartApply([it], "phase time", null, function (x) { x.plan.phases[idx][what] = n; });
+          });
+          return;
+        }
+        refresh(it, keep);
+        return;
+      }
+      what = t.getAttribute("data-ltl-br");
+      if (what) {
+        if (idx < 0 || !list(it, "breaks")[idx]) return;
+        n = numOf(t.value);
+        var b0 = it.plan.breaks[idx];
+        var bf = what === "from" ? n : Number(b0.from), bt = what === "to" ? n : Number(b0.to);
+        if (n == null || !(bt > bf)) {
+          t.value = isFinite(Number(b0[what])) ? layTlFmt(b0[what]) : "";
+          layAnnounce("A break has to end after it starts.");
+          return;
+        }
+        held(function () {
+          layPartApply([it], "break in time", null, function (x) { x.plan.breaks[idx][what] = n; });
+        });
+        return;
+      }
+      if (t.getAttribute("data-ltl-rw") === "name") {
+        if (idx < 0 || !plan.rows[idx]) return;
+        v = layTlClean(t.value);
+        if (!v) { t.value = plan.rows[idx]; return; }
+        if (v === plan.rows[idx]) return;
+        var was = plan.rows[idx];
+        held(function () {
+          layPartApply([it], "group name", null, function (x) { layTlRenameRow(x.plan, was, v); });
+        });
+        // The group choices of the events and phases take the new name
+        // where they stand (no rebuild under the field being typed in).
+        var opts = box.querySelectorAll('select[data-ltl-ev="row"] option, select[data-ltl-ph="row"] option');
+        for (var oi = 0; oi < opts.length; oi++)
+          if (opts[oi].value === was) { opts[oi].value = v; opts[oi].textContent = v; }
+        t.value = v;
+      }
+    });
+    box.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("button") : null, it = one();
+      if (!b || !it) return;
+      var idx = idxOf(b), plan = layTimelinePlan(it), ax = plan.axis, span = ax.end - ax.start;
+      var u = layTlSnapUnit(plan), i;
+      function snap(x) {
+        return Math.round(Math.max(ax.start, Math.min(ax.end, Math.round(x / u) * u)) * 1e6) / 1e6;
+      }
+      var fmt = b.getAttribute("data-ltl-format");
+      if (fmt) {
+        layPartApply([it], "tick numbers", null, function (x) {
+          if (!x.plan.axis || typeof x.plan.axis !== "object") x.plan.axis = {};
+          x.plan.axis.format = fmt;
+        });
+        return;
+      }
+      if (b.id === "ps-ltl-edit-table") { showLayoutWizards("timeline", it.id); return; }
+      if (b.id === "ps-ltl-add-event") {
+        // Halfway into the widest stretch with nothing in it.
+        var times = [ax.start, ax.end], best = -1, at = ax.start + span / 2;
+        for (i = 0; i < plan.events.length; i++) times = times.concat(plan.events[i].times);
+        times.sort(function (p, q) { return p - q; });
+        for (i = 1; i < times.length; i++)
+          if (times[i] - times[i - 1] > best) {
+            best = times[i] - times[i - 1]; at = (times[i] + times[i - 1]) / 2;
+          }
+        at = snap(at);
+        layPartApply([it], "add event", null, function (x) {
+          list(x, "events").push({ name: "Event", when: layTlFmt(at) });
+        });
+        focusNew("ps-ltl-ev-name-" + (it.plan.events.length - 1));
+        return;
+      }
+      if (b.id === "ps-ltl-add-phase") {
+        var last = ax.start;
+        for (i = 0; i < plan.phases.length; i++)
+          if (plan.phases[i].shown && !plan.phases[i].row) last = Math.max(last, plan.phases[i].b);
+        if (last >= ax.end - 1e-9) last = ax.start;
+        var end2 = snap(Math.min(ax.end, last + Math.max(u, span / 5)));
+        if (!(end2 > last)) end2 = ax.end;
+        layPartApply([it], "add phase", null, function (x) {
+          var ls = list(x, "phases");
+          ls.push({ name: "Phase", from: last, to: end2,
+                    fill: LAY_TL_PHASE_FILLS[ls.length % LAY_TL_PHASE_FILLS.length] });
+        });
+        focusNew("ps-ltl-ph-name-" + (it.plan.phases.length - 1));
+        return;
+      }
+      if (b.id === "ps-ltl-add-break") {
+        var bf = snap(ax.start + span * 0.4), bt = snap(ax.start + span * 0.6);
+        if (!(bt > bf)) { bf = ax.start + span * 0.4; bt = ax.start + span * 0.6; }
+        layPartApply([it], "add break", null, function (x) {
+          list(x, "breaks").push({ from: bf, to: bt });
+        });
+        layTimelinePlanSync(it, true);
+        layAnnounce("Added a break in time from " + layTlFmt(bf) + " to " + layTlFmt(bt) + ".");
+        return;
+      }
+      if (b.id === "ps-ltl-add-row") {
+        var k = plan.rows.length + 1, name = "Group " + k;
+        while (plan.rows.indexOf(name) !== -1) name = "Group " + (++k);
+        layPartApply([it], "add group", null, function (x) { list(x, "rows").push(name); });
+        focusNew("ps-ltl-rw-name-" + (layTimelinePlan(it).rows.length - 1));
+        return;
+      }
+      if (idx < 0) return;
+      // The button pressed goes with its entry, so the keyboard is handed
+      // to the list's Add button.
+      function after(addId, said) {
+        layTimelinePlanSync(it, true);
+        var add = el(addId);
+        if (add) add.focus();
+        layAnnounce(said);
+      }
+      if (b.getAttribute("data-ltl-ev") === "remove") {
+        layPartApply([it], "remove event", null, function (x) { list(x, "events").splice(idx, 1); });
+        after("ps-ltl-add-event", "Event removed.");
+      } else if (b.getAttribute("data-ltl-ph") === "remove") {
+        layPartApply([it], "remove phase", null, function (x) { list(x, "phases").splice(idx, 1); });
+        after("ps-ltl-add-phase", "Phase removed.");
+      } else if (b.getAttribute("data-ltl-br") === "remove") {
+        layPartApply([it], "remove break", null, function (x) { list(x, "breaks").splice(idx, 1); });
+        after("ps-ltl-add-break", "Break removed.");
+      } else if (b.getAttribute("data-ltl-rw") === "remove") {
+        var gone = plan.rows[idx];
+        if (gone == null) return;
+        layPartApply([it], "remove group", null, function (x) { layTlRemoveRow(x.plan, gone); });
+        after("ps-ltl-add-row", "Group removed. Its events and phases are on the axis.");
+      } else if (b.getAttribute("data-ltl-ev") === "color") {
+        if (!list(it, "events")[idx]) return;
+        layOpenColorPop(b, plan.events[idx] ? (plan.events[idx].color || layTimelineStyle(it).color)
+                                            : "#22364d", function (hex, live) {
+          layPartApply([it], "event color", "cpop:ev:" + it.id + ":" + idx, function (x) {
+            if (x.plan.events[idx]) x.plan.events[idx].color = hex;
+          }, live);
+        });
+      } else if (b.getAttribute("data-ltl-ph") === "color") {
+        layOpenBandColor(it, idx);
+      }
+    });
   }
   function layTimelineTargets() {
     var ids = laySelectedIds(), out = [];
@@ -25650,11 +29472,19 @@
   function layTimelineDblClick(id, e) {
     var item = layItemById(id);
     if (!item || item.kind !== "timeline") return;
+    layTimelineSoonCancel();
+    if (layTimelineIsPlanned(item)) { layTimelinePlanDblClick(item, e); return; }
+    // A label is edited where it stands (Nov 2026; it used to send the
+    // pointer to a field in the rail).
     var label = e.target.closest && e.target.closest('[data-role="lay-tick-label"]');
     if (label) {
-      laySetSelection([id]); renderLayout();
-      var inp = el("ps-ltl-tick-label-" + label.getAttribute("data-idx"));
-      if (inp) { inp.focus(); inp.select(); }
+      layTimelineEditTick(id, Number(label.getAttribute("data-idx")),
+        label.getAttribute("data-part") === "sub" ? "sub" : "label");
+      return;
+    }
+    var bandLabel = e.target.closest && e.target.closest('[data-role="lay-band-label"]');
+    if (bandLabel) {
+      layTimelineEditBand(id, Number(bandLabel.getAttribute("data-idx")));
       return;
     }
     if (!(e.target.closest &&
@@ -25669,9 +29499,8 @@
     item.ticks.push({ pos: Math.round(pos * 100) / 100, label: "Tick", sub: "" });
     laySetSelection([id]);
     persist(); renderLayout();
-    var inp2 = el("ps-ltl-tick-label-" + (item.ticks.length - 1));
-    if (inp2) { inp2.focus(); inp2.select(); }
-    layAnnounce("Added a tick at " + Math.round(pos * 100) + " percent of the line.");
+    layAnnounce("Added a tick at " + Math.round(pos * 100) + " percent of the line. Type its name.");
+    layTimelineEditTick(id, item.ticks.length - 1, "label");
   }
   function layTimelineSyncControls(items) {
     var item = items[0], st = layTimelineStyle(item), i;
@@ -25720,6 +29549,16 @@
       chips[i].setAttribute("aria-pressed", on ? "true" : "false");
     }
     layPaintCustomChip("ps-ltl-custom", st.color, !colMixed && !colHit);
+    // A timeline that keeps its table lists events and phases; the
+    // hand-built kind lists ticks and bands. Labels above or below is a
+    // choice of the hand-built kind only.
+    var planned = items.length === 1 && layTimelineIsPlanned(items[0]), anyFree = false;
+    for (i = 0; i < items.length; i++) if (!layTimelineIsPlanned(items[i])) anyFree = true;
+    var freeBox = el("ps-ltl-free"), planBox = el("ps-ltl-plan"), labRow = el("ps-ltl-labels-row");
+    if (freeBox) freeBox.style.display = planned ? "none" : "";
+    if (planBox) planBox.style.display = planned ? "" : "none";
+    if (labRow) labRow.style.display = anyFree ? "" : "none";
+    if (planned) { layTimelinePlanSync(items[0]); return; }
     // The tick and band lists edit ONE timeline. While a field in them has
     // focus the list is not rebuilt (typing would lose the field); the
     // model already holds what was typed.
@@ -25753,13 +29592,23 @@
       wd.value = ticks[i].width == null ? "" : String(ticks[i].width);
       wd.placeholder = String(layTickWidth(st, null));
       wd.setAttribute("data-ltl-tick", "width");
+      wd.className = "ps-ltl-narrow";
+      // Where the tick sits, typed: a percent of the line.
+      var ps = document.createElement("input");
+      ps.type = "number"; ps.min = "0"; ps.max = "100"; ps.step = "1";
+      ps.value = String(Math.round(ticks[i].pos * 100));
+      ps.className = "ps-ltl-narrow";
+      ps.setAttribute("data-ltl-tick", "pos");
+      ps.setAttribute("aria-label", "Tick " + (i + 1) + " position, percent of the line");
+      setTip(ps, "Where this tick sits, as a percent of the line");
       wd.setAttribute("aria-label", "Tick " + (i + 1) + " width in pixels (blank = all ticks)");
       setTip(wd, "This tick's width; blank follows the Ticks width above");
       var x = mkEl("button", "ps-ltl-x", "×");
       x.type = "button"; x.setAttribute("data-ltl-tick", "remove");
       x.setAttribute("aria-label", "Remove tick " + (i + 1));
       setTip(x, "Remove this tick");
-      row.appendChild(lab); row.appendChild(sub); row.appendChild(wd); row.appendChild(x);
+      row.appendChild(lab); row.appendChild(sub); row.appendChild(ps);
+      row.appendChild(wd); row.appendChild(x);
       tl.appendChild(row);
     }
     if (addB) {
@@ -25804,6 +29653,7 @@
   function wireLayoutTimelineControls() {
     var colors = el("ps-ltl-colors");
     if (!colors) return;
+    wireLayoutTimelinePlan();
     var i;
     var colorNames = { "#22364d": "Ink", "#5f6f80": "Muted", "#94a3b1": "Faint",
       "#417499": "Blue", "#902634": "Red", "#266741": "Green" };
@@ -25934,7 +29784,16 @@
       }, true);
     });
     tl.addEventListener("change", function (e) {
-      if (e.target.getAttribute("data-ltl-tick")) persist();
+      var what = e.target.getAttribute("data-ltl-tick");
+      if (what === "pos") {
+        var it = one(), idx = rowIdx(e.target), pv = Number(e.target.value);
+        if (!it || idx < 0 || e.target.value === "" || !isFinite(pv)) return;
+        layPartApply([it], "move tick", null, function (t) {
+          if (t.ticks && t.ticks[idx]) t.ticks[idx].pos = layClamp(pv / 100, 0, 1);
+        });
+        return;
+      }
+      if (what) persist();
     });
     tl.addEventListener("click", function (e) {
       var btn = e.target.closest && e.target.closest('[data-ltl-tick="remove"]');
@@ -26065,6 +29924,1135 @@
       ticks: names.map(function (nm, k) {
         return { pos: k / names.length, label: k === 0 ? "Fixation" : nm, sub: durs[k] };
       }) });
+  }
+
+  // ---- Diagram wizards (Oct 2026, Torry: the good parts of the Pandion
+  // Illustrations app belong in Layouts, without its art library). A
+  // wizard turns a few answers into a whole diagram: a PRISMA or CONSORT
+  // flow from its counts, a signaling pathway from a list of steps, a
+  // graphical abstract from three titles, a diagram from typed
+  // connections, an experimental timeline from its days and events.
+  // Everything a wizard makes is an ordinary item (box, arrow, text,
+  // timeline) in one group, edited afterward with the same tools as
+  // anything else. No new item kinds, no new workspace.
+  //
+  // A builder works on a SHEET: a scratch list of items with ids w1, w2...
+  // at coordinates of its own; layInsertItems gives them real ids and a
+  // place on the page, the New layout cards (layWizIntoDoc) put them into a
+  // fresh document.
+  var LAY_WIZ_FS = 11;
+  // The height a box needs for its text at width w, the export's own
+  // wrapping (wrapCaptionLines, the box padding, the border).
+  function layBoxFitH(text, w, fs, bold, italic, borderW) {
+    var bw = borderW == null ? 1 : borderW;
+    var font = (italic ? "italic " : "") + (bold ? "700" : "400") + " " +
+      fs + "px sans-serif";
+    var lines = wrapCaptionLines(String(text || ""),
+      Math.max(8, w - LAY_BOX_PAD_X * 2 - bw * 2), fs, font);
+    return Math.round(lines.length * fs * LAY_TEXT_LINE +
+      LAY_BOX_PAD_Y * 2 + bw * 2);
+  }
+  function layWizTextW(text, fs, bold) {
+    var ctx = layTextCtx(), lines = String(text || "").split(/\r?\n/), w = 0, i;
+    if (!ctx) {
+      for (i = 0; i < lines.length; i++) w = Math.max(w, lines[i].length * fs * 0.55);
+      return w;
+    }
+    ctx.font = (bold ? "700 " : "400 ") + fs + "px sans-serif";
+    for (i = 0; i < lines.length; i++)
+      w = Math.max(w, ctx.measureText(lines[i]).width);
+    return w;
+  }
+  function layWizSheet() {
+    var sheet = { items: [], n: 0 };
+    sheet.id = function () { return "w" + (++sheet.n); };
+    sheet.box = function (x, y, w, text, o) {
+      o = o || {};
+      var fs = o.fontSize || LAY_WIZ_FS;
+      var border = o.border || "thin";
+      var bw = border === "none" ? 0 : border === "thick" ? 2 : 1;
+      var it = { id: sheet.id(), kind: "box", text: text, fontSize: fs,
+        x: Math.round(x), y: Math.round(y), w: Math.round(w),
+        h: Math.round(o.h != null ? o.h
+          : layBoxFitH(text, w, fs, !!o.bold, !!o.italic, bw)),
+        fill: o.fill || "#ffffff", border: border,
+        corner: o.corner == null ? 4 : o.corner };
+      if (o.bold) it.bold = true;
+      if (o.italic) it.italic = true;
+      if (o.color) it.color = o.color;
+      if (o.borderColor) it.borderColor = o.borderColor;
+      if (o.rotate) it.rotate = o.rotate;
+      sheet.items.push(it);
+      return it;
+    };
+    sheet.arrow = function (a, b, o) {
+      o = o || {};
+      var it = { id: sheet.id(), kind: "arrow",
+        from: layArrowRef(a.id, o.fromSide), to: layArrowRef(b.id, o.toSide),
+        route: o.route || "elbow", heads: o.heads || "end",
+        width: o.width == null ? 1.25 : o.width, color: o.color || "#22364d",
+        x: 0, y: 0, ax: 0, ay: 0, bx: 0, by: 0 };
+      if (o.dashed) it.dashed = true;
+      if (o.label) it.label = o.label;
+      sheet.items.push(it);
+      return it;
+    };
+    // A text item by its top-left, or centred on a point.
+    sheet.text = function (x, y, text, o) {
+      o = o || {};
+      var it = { id: sheet.id(), kind: "text", text: text,
+        fontSize: o.fontSize || 12, bold: !!o.bold, italic: !!o.italic,
+        x: Math.round(x), y: Math.round(y) };
+      if (o.color) it.color = o.color;
+      sheet.items.push(it);
+      return it;
+    };
+    sheet.centered = function (cx, cy, text, o) {
+      o = o || {};
+      var r = layApproxTextRect({ text: text, fontSize: o.fontSize || 12,
+        bold: !!o.bold, italic: !!o.italic });
+      return sheet.text(cx - r.w / 2, cy - r.h / 2, text, o);
+    };
+    return sheet;
+  }
+  // Boxes, arrows and texts measured as the page will measure them.
+  function layWizBounds(items) {
+    return layWithItems(items, function () {
+      var b = null;
+      for (var i = 0; i < items.length; i++) {
+        var r = layItemRect(items[i]);
+        if (!(r.w > 0) || !(r.h > 0)) continue;
+        if (!b) b = { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+        else {
+          b.x = Math.min(b.x, r.x); b.y = Math.min(b.y, r.y);
+          b.right = Math.max(b.right, r.right);
+          b.bottom = Math.max(b.bottom, r.bottom);
+        }
+      }
+      if (!b) return null;
+      return { x: b.x, y: b.y, w: b.right - b.x, h: b.bottom - b.y };
+    });
+  }
+  // The preview is the export's own drawing of the items, so what the
+  // dialog shows is what the page and the file will show.
+  function layWizPreviewSvg(items) {
+    var ns = "http://www.w3.org/2000/svg", pad = 14;
+    var svg = document.createElementNS(ns, "svg");
+    var b = layWizBounds(items);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Preview of the diagram");
+    if (!b) return svg;
+    svg.setAttribute("viewBox", layNum2(b.x - pad) + " " + layNum2(b.y - pad) +
+      " " + layNum2(b.w + pad * 2) + " " + layNum2(b.h + pad * 2));
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", String(Math.min(360, Math.round(b.h + pad * 2))));
+    svg.setAttribute("preserveAspectRatio", "xMidYMin meet");
+    layWithItems(items, function () {
+      for (var i = 0; i < items.length; i++) {
+        var it = items[i], node = null;
+        if (it.kind === "box") node = layoutBoxNode(document, it);
+        else if (it.kind === "arrow") node = layoutArrowNode(document, it);
+        else if (it.kind === "text") node = layoutTextNode(document, it);
+        else if (it.kind === "timeline") node = layoutTimelineNode(document, it);
+        if (node) svg.appendChild(node);
+      }
+    });
+    return svg;
+  }
+  // Sheet items into a new document at (x, y), with the document's own
+  // ids (the New layout cards; layPasteClipboard's shape).
+  function layWizIntoDoc(c, items, x, y) {
+    var b = layWizBounds(items) || { x: 0, y: 0 };
+    var idMap = {}, i, n = c.items.length;
+    for (i = 0; i < items.length; i++) {
+      var copy = JSON.parse(JSON.stringify(items[i]));
+      copy.id = "i" + (++n);
+      idMap[items[i].id] = copy.id;
+      copy.x = Math.round((Number(copy.x) || 0) - b.x + x);
+      copy.y = Math.round((Number(copy.y) || 0) - b.y + y);
+      c.items.push(copy);
+    }
+    for (i = 0; i < c.items.length; i++) {
+      var it = c.items[i];
+      if (it.kind !== "arrow") continue;
+      if (it.from && idMap[it.from.id]) it.from = layArrowRef(idMap[it.from.id], it.from.side);
+      if (it.to && idMap[it.to.id]) it.to = layArrowRef(idMap[it.to.id], it.to.side);
+    }
+  }
+  // Sheet items onto the open layout: one undo step, fresh ids, one group,
+  // the first clear spot in reading order (the page grows if it must), and
+  // the new group selected.
+  function layInsertItems(items, what) {
+    if (!isLayoutTab(activeChart()) || !items || !items.length) return [];
+    var p = layPage(), existing = layItems();
+    var b = layWizBounds(items) || { x: 0, y: 0, w: 100, h: 60 };
+    var spot = layPlaceRect(existing, p, Math.round(b.w), Math.round(b.h));
+    var dx = Math.round(spot.x - b.x), dy = Math.round(spot.y - b.y);
+    var grew = spot.needH > p.h;
+    laySnapshot("add " + (what || "diagram"));
+    if (spot.needH > p.h) {
+      p.h = Math.min(LAY_PAGE_MAX, Math.round(spot.needH));
+      p.preset = "custom";
+    }
+    var idMap = {}, made = [], i;
+    var gid = items.length > 1 ? layNewGroupId() : null;
+    var base = Number(layNewItemId().slice(1));
+    for (i = 0; i < items.length; i++) {
+      var copy = JSON.parse(JSON.stringify(items[i]));
+      copy.id = "i" + (base + i);
+      idMap[items[i].id] = copy.id;
+      if (gid) copy.group = gid;
+      copy.x = (Number(copy.x) || 0) + dx;
+      copy.y = (Number(copy.y) || 0) + dy;
+      existing.push(copy);
+      made.push(copy.id);
+    }
+    layArrowsRemap(made, idMap);
+    laySetSelection(made);
+    layClampAllItems();
+    persist();
+    renderLayout();
+    layScrollItemIntoView(made[0]);
+    layFocusViewport();
+    layGrewNote(grew, spot.capped);
+    layAnnounce(made.length === 1 ? "Added " + (what || "the diagram") + "."
+      : "Added " + (what || "the diagram") + ": " + made.length +
+        " items in one group. Ungroup them to move the parts separately.");
+    return made;
+  }
+
+  // The diagrams. Every builder takes the wizard's values and returns a
+  // sheet's items; numbers are pixels at page size, type at 11 px.
+  function layWizCount(v) {
+    return v === "" || v == null || (typeof v === "number" && isNaN(v)) ? "" : v;
+  }
+  function layWizNum(v) { return Number(v) || 0; }
+  function layWizLines(text) {
+    var out = [], parts = String(text == null ? "" : text).split(/\r?\n/);
+    for (var i = 0; i < parts.length; i++) {
+      var t = parts[i].replace(/\s+/g, " ").trim();
+      if (t) out.push(t);
+    }
+    return out;
+  }
+  // PRISMA 2020, for a new review of databases and registers (Page et al.,
+  // 2021): the header, five rows of boxes, the arrows between them and the
+  // three stage bars. Counts the user leaves blank stay "(n = )" to fill in
+  // on the figure; records screened, reports sought and reports assessed
+  // are worked out from the others when those are given.
+  function layWizPrisma(v) {
+    var s = layWizSheet();
+    var c = layWizCount, n = layWizNum;
+    var given = c(v.databases) !== "" || c(v.registers) !== "";
+    var F = c(v.screened) !== "" ? v.screened : given
+      ? n(v.databases) + n(v.registers) - n(v.duplicates) - n(v.automation) -
+        n(v.removedOther) : "";
+    var H = c(v.sought) !== "" ? v.sought : F !== "" ? F - n(v.excluded) : "";
+    var J = c(v.assessed) !== "" ? v.assessed : H !== "" ? H - n(v.notRetrieved) : "";
+    var reasons = layWizLines(v.reasons);
+    var SW = 36, L = SW + 24, W = 300, R = L + W + 60, GAP = 28;
+    var header = s.box(L, 0, R + W - L,
+      "Identification of studies via databases and registers",
+      { fill: "#fdf6e3", bold: true, fontSize: 12, corner: 2 });
+    var rows = [
+      ["Records identified from:\nDatabases (n = " + c(v.databases) + ")\n" +
+       "Registers (n = " + c(v.registers) + ")",
+       "Records removed before screening:\nDuplicate records removed (n = " +
+       c(v.duplicates) + ")\nRecords marked as ineligible by automation tools (n = " +
+       c(v.automation) + ")\nRecords removed for other reasons (n = " +
+       c(v.removedOther) + ")"],
+      ["Records screened\n(n = " + F + ")",
+       "Records excluded\n(n = " + c(v.excluded) + ")"],
+      ["Reports sought for retrieval\n(n = " + H + ")",
+       "Reports not retrieved\n(n = " + c(v.notRetrieved) + ")"],
+      ["Reports assessed for eligibility\n(n = " + J + ")",
+       "Reports excluded:\n" + (reasons.length ? reasons.join("\n")
+         : "Reason 1 (n = )\nReason 2 (n = )")],
+      ["Studies included in review\n(n = " + c(v.studies) + ")\n" +
+       "Reports of included studies\n(n = " + c(v.reports) + ")", null]
+    ];
+    var y = header.h + GAP, lefts = [], tops = [], i;
+    for (i = 0; i < rows.length; i++) {
+      var a = s.box(L, y, W, rows[i][0], { corner: 2 });
+      var b = rows[i][1] ? s.box(R, y, W, rows[i][1], { corner: 2 }) : null;
+      var rowH = Math.max(a.h, b ? b.h : 0);
+      if (b) { a.h = rowH; b.h = rowH; s.arrow(a, b, { route: "straight" }); }
+      lefts.push(a);
+      tops.push([y, rowH]);
+      y += rowH + GAP;
+    }
+    for (i = 1; i < lefts.length; i++)
+      s.arrow(lefts[i - 1], lefts[i], { route: "straight" });
+    // Stage bars beside the rows each stage covers, behind everything.
+    function bar(text, i0, i1) {
+      var top = tops[i0][0], bottom = tops[i1][0] + tops[i1][1];
+      return { id: s.id(), kind: "box", text: text, fontSize: LAY_WIZ_FS,
+        x: 0, y: top, w: SW, h: bottom - top, fill: "#dbe7f7",
+        border: "none", bold: true, rotate: -90, corner: 2 };
+    }
+    s.items.unshift(bar("Identification", 0, 0), bar("Screening", 1, 3),
+                    bar("Included", 4, 4));
+    return s.items;
+  }
+  // CONSORT 2010: enrollment, allocation to two arms, follow-up, analysis.
+  function layWizConsort(v) {
+    var s = layWizSheet(), c = layWizCount;
+    var W = 660, CW = 250, armW = 300;
+    var cx = Math.round((W - CW) / 2 - 68);
+    var assessed = s.box(cx, 0, CW, "Assessed for eligibility (n = " +
+      c(v.assessed) + ")");
+    var exX = cx + CW + 40;
+    var excluded = s.box(exX, 34, W - exX,
+      "Excluded (n = " + c(v.excluded) + ")\n" +
+      "\u2022 Not meeting inclusion criteria (n = " + c(v.notEligible) + ")\n" +
+      "\u2022 Declined to participate (n = " + c(v.declined) + ")\n" +
+      "\u2022 Other reasons (n = " + c(v.otherReasons) + ")");
+    var randomized = s.box(cx, excluded.y + excluded.h + 26, CW,
+      "Randomized (n = " + c(v.randomized) + ")", { bold: true });
+    s.arrow(assessed, randomized, { route: "straight" });
+    s.arrow(assessed, excluded, { route: "elbow" });
+    function banner(text, y) {
+      return s.box(W / 2 - 85, y, 170, text,
+        { fill: "#dbe7f7", border: "none", bold: true, corner: 8, h: 26 });
+    }
+    var arms = [[0, v.armA || "Intervention", "A"],
+                [W - armW, v.armB || "Control", "B"]];
+    var y = randomized.y + randomized.h + 23, i;
+    var allocation = banner("Allocation", y);
+    y += allocation.h + 19;
+    var cols = [];
+    for (i = 0; i < arms.length; i++) {
+      var k = arms[i][2];
+      cols.push({ x: arms[i][0], k: k, alloc: s.box(arms[i][0], y, armW,
+        "Allocated to " + String(arms[i][1]).toLowerCase() + " (n = " +
+        c(v["allocated" + k]) + ")\n\u2022 Received allocated intervention (n = " +
+        c(v["received" + k]) + ")\n\u2022 Did not receive allocated intervention " +
+        "(give reasons) (n = " + c(v["notReceived" + k]) + ")") });
+    }
+    function level(key) {
+      var h = 0;
+      for (var j = 0; j < cols.length; j++) h = Math.max(h, cols[j][key].h);
+      for (j = 0; j < cols.length; j++) cols[j][key].h = h;
+      return h;
+    }
+    y += level("alloc") + 23;
+    var followup = banner("Follow-up", y);
+    y += followup.h + 19;
+    for (i = 0; i < cols.length; i++)
+      cols[i].lost = s.box(cols[i].x, y, armW,
+        "Lost to follow-up (give reasons) (n = " + c(v["lost" + cols[i].k]) +
+        ")\nDiscontinued intervention (give reasons) (n = " +
+        c(v["discontinued" + cols[i].k]) + ")");
+    y += level("lost") + 23;
+    var analysis = banner("Analysis", y);
+    y += analysis.h + 19;
+    for (i = 0; i < cols.length; i++)
+      cols[i].analysed = s.box(cols[i].x, y, armW,
+        "Analysed (n = " + c(v["analysed" + cols[i].k]) +
+        ")\n\u2022 Excluded from analysis (give reasons) (n = " +
+        c(v["excludedAnalysis" + cols[i].k]) + ")");
+    level("analysed");
+    for (i = 0; i < cols.length; i++) {
+      s.arrow(randomized, cols[i].alloc, { route: "elbow" });
+      s.arrow(cols[i].alloc, cols[i].lost, { route: "straight" });
+      s.arrow(cols[i].lost, cols[i].analysed, { route: "straight" });
+    }
+    // The banners sit over the lines that pass behind them; the stage bar
+    // sits behind everything.
+    s.items.push(s.items.splice(s.items.indexOf(allocation), 1)[0]);
+    s.items.push(s.items.splice(s.items.indexOf(followup), 1)[0]);
+    s.items.push(s.items.splice(s.items.indexOf(analysis), 1)[0]);
+    s.items.unshift({ id: s.id(), kind: "box", text: "Enrollment",
+      fontSize: LAY_WIZ_FS, x: -46, y: 0, w: 36,
+      h: randomized.y + randomized.h, fill: "#dbe7f7", border: "none",
+      bold: true, rotate: -90, corner: 2 });
+    return s.items;
+  }
+  // A signaling pathway: steps top to bottom, an inhibition where a step
+  // starts with -| or the inhibition sign, and a nucleus around the last.
+  function layWizPathway(v) {
+    var s = layWizSheet();
+    var steps = layWizLines(v.steps);
+    var W = 454, BW = 150, BH = 36, GAP = 34, i;
+    var blocks = [];
+    for (i = 0; i < steps.length; i++) {
+      var inhibit = /^(-\||\u22a3)/.test(steps[i]);
+      var text = steps[i].replace(/^(-\||\u22a3)\s*/, "");
+      var fill = i === 0 ? "#fdf6e3"
+        : i === steps.length - 1 && v.nucleus ? "#e9f4df" : "#eef4fc";
+      blocks.push({ inhibit: inhibit, b: s.box((W - BW) / 2, i * (BH + GAP),
+        BW, text, { h: BH, corner: BH / 2, fill: fill, borderColor: "#375ca0",
+                    bold: i === 0 }) });
+    }
+    if (v.nucleus && blocks.length) {
+      var last = blocks[blocks.length - 1].b;
+      var nucleus = { id: s.id(), kind: "box", text: "", fontSize: LAY_WIZ_FS,
+        x: last.x - 38, y: last.y - 19, w: last.w + 76, h: last.h + 49,
+        fill: "#f4f7fb", border: "thin", borderColor: "#9fb0c3", corner: 24 };
+      s.items.unshift(nucleus);
+      s.centered(nucleus.x + nucleus.w / 2, nucleus.y + nucleus.h - 14,
+        "Nucleus", { italic: true, fontSize: 10, color: "#5f6f80" });
+    }
+    for (i = 1; i < blocks.length; i++)
+      s.arrow(blocks[i - 1].b, blocks[i].b, { route: "straight",
+        heads: blocks[i].inhibit ? "inhibit" : "end",
+        color: blocks[i].inhibit ? "#902634" : "#22364d" });
+    return s.items;
+  }
+  // Three steps left to right across the page, with bold arrows: the shape
+  // of most graphical abstracts. The panels are boxes to drop pictures on.
+  function layWizAbstract(v) {
+    var s = layWizSheet(), p = layPage();
+    var inner = Math.max(300, (Number(p.w) || 1008) - (Number(p.margin) || 0) * 2);
+    var gap = 45, pw = Math.floor((inner - gap * 2) / 3);
+    var ph = Math.max(80, Math.min((Number(p.h) || 672) -
+      (Number(p.margin) || 0) * 2 - 60, Math.round(pw * 1.05)));
+    var title = String(v.title || "").trim(), top = title ? 44 : 0;
+    if (title) s.centered(inner / 2, 12, title, { bold: true, fontSize: 20 });
+    var titles = [v.one, v.two, v.three], blocks = [], i;
+    for (i = 0; i < 3; i++) {
+      var b = s.box(i * (pw + gap), top, pw, "", { h: ph, fill: "#f4f7fb",
+        borderColor: "#c9d4e0", corner: 9 });
+      s.box(b.x + 8, b.y + 8, pw - 16, String(titles[i] || "").trim(),
+        { fill: "none", border: "none", bold: true, fontSize: 14,
+          color: "#22364d" });
+      blocks.push(b);
+    }
+    for (i = 1; i < blocks.length; i++)
+      s.arrow(blocks[i - 1], blocks[i], { route: "straight", width: 4,
+        color: "#e3a12e" });
+    return s.items;
+  }
+
+  // A diagram from text: one connection per line, written the way people
+  // jot them down, laid out in layers so arrows run one way and cross as
+  // little as they can. An arrow that closes a loop runs around the
+  // outside (both ends pinned to the same side, the elbow's loop route).
+  //   A -> B          an arrow (also -->, the arrow sign)
+  //   A -| B          inhibits (also --|, the inhibition sign)
+  //   A -- B          a plain line;  A <-> B  both ways
+  //   A ..> B         dashed (also ..| and ..)
+  //   A -> B -> C     a chain;  A -> B: label  labels the last arrow
+  //   A               a node with no connections yet
+  // Lines starting with # or // are notes and are skipped. The bare links
+  // (.. -- and the dash) need a space on each side, so a name with an
+  // ellipsis, a range or a dash ("pH 7.4..7.6") stays whole.
+  var LAY_DIAG_LINKS = [
+    ["<->", { heads: "both" }],
+    ["..>", { heads: "end", dashed: true }],
+    ["..|", { heads: "inhibit", dashed: true }],
+    ["-->", { heads: "end" }],
+    ["--|", { heads: "inhibit" }],
+    ["->", { heads: "end" }],
+    ["\u2192", { heads: "end" }],
+    ["-|", { heads: "inhibit" }],
+    ["\u22a3", { heads: "inhibit" }],
+    ["..", { heads: "none", dashed: true }],
+    ["--", { heads: "none" }],
+    ["\u2014", { heads: "none" }]
+  ];
+  var LAY_DIAG_BARE = { "..": 1, "--": 1, "\u2014": 1 };
+  // [name, link, name, link, name ...] for one line.
+  function layDiagSplit(line) {
+    var parts = [], buf = "", i = 0;
+    while (i < line.length) {
+      var hit = null;
+      for (var t = 0; t < LAY_DIAG_LINKS.length; t++) {
+        var tok = LAY_DIAG_LINKS[t][0];
+        if (line.substr(i, tok.length) !== tok) continue;
+        if (LAY_DIAG_BARE[tok]) {
+          var pre = i > 0 ? line.charAt(i - 1) : "";
+          var post = line.charAt(i + tok.length);
+          if (!/\s/.test(pre) || !/\s/.test(post)) continue;
+        }
+        hit = tok;
+        break;
+      }
+      if (hit) { parts.push(buf); parts.push(hit); buf = ""; i += hit.length; }
+      else { buf += line.charAt(i); i++; }
+    }
+    parts.push(buf);
+    return parts;
+  }
+  function layDiagLink(tok) {
+    for (var t = 0; t < LAY_DIAG_LINKS.length; t++)
+      if (LAY_DIAG_LINKS[t][0] === tok) return LAY_DIAG_LINKS[t][1];
+    return { heads: "end" };
+  }
+  function layDiagParse(text) {
+    var nodes = [], byName = {}, edges = [];
+    function node(name) {
+      if (!byName.hasOwnProperty(name)) {
+        byName[name] = { name: name };
+        nodes.push(byName[name]);
+      }
+      return byName[name];
+    }
+    var raw = String(text == null ? "" : text).split(/\r?\n/), i, j;
+    for (i = 0; i < raw.length; i++) {
+      var line = raw[i].trim();
+      if (!line || line.charAt(0) === "#" || line.indexOf("//") === 0) continue;
+      var parts = layDiagSplit(line), label = "";
+      if (parts.length > 1) {
+        var last = parts.length - 1, colon = parts[last].indexOf(":");
+        if (colon >= 0) {
+          label = parts[last].slice(colon + 1).trim();
+          parts[last] = parts[last].slice(0, colon);
+        }
+      }
+      var here = [];
+      for (j = 0; j < parts.length; j += 2) {
+        var name = parts[j].replace(/\s+/g, " ").trim();
+        here.push(name ? node(name) : null);
+      }
+      for (j = 1; j < here.length; j++) {
+        var a = here[j - 1], b = here[j];
+        if (!a || !b || a === b) continue;
+        var style = layDiagLink(parts[j * 2 - 1]);
+        var txt = j === here.length - 1 ? label : "", dup = false;
+        for (var e = 0; e < edges.length; e++)
+          if (edges[e].from === a && edges[e].to === b &&
+              edges[e].heads === style.heads && edges[e].label === txt) dup = true;
+        if (!dup) edges.push({ from: a, to: b, heads: style.heads,
+          dashed: !!style.dashed, label: txt });
+      }
+    }
+    return { nodes: nodes, edges: edges };
+  }
+  // Layers by the longest path in (loops broken where a walk in written
+  // order closes them), nodes ordered by their neighbors' places, then
+  // placed near their neighbors without overlapping. Geometry comes in
+  // through callbacks: crossOf/mainOf give a node's size across and along
+  // the flow, laneOf the lane a long arrow keeps open through a layer.
+  function layDiagLayout(nodes, edges, o) {
+    var i, j, l, e, n;
+    for (i = 0; i < nodes.length; i++) {
+      nodes[i].out = []; nodes[i].before = []; nodes[i].after = [];
+      nodes[i].up = []; nodes[i].down = []; nodes[i].dummy = false;
+    }
+    for (i = 0; i < edges.length; i++) { edges[i].back = false; edges[i].from.out.push(edges[i]); }
+    var state = {};
+    function key(x) { return x.name; }
+    function visit(x) {
+      state[key(x)] = 1;
+      for (var k = 0; k < x.out.length; k++) {
+        var ed = x.out[k];
+        if (state[key(ed.to)] === 1) ed.back = true;
+        else if (!state.hasOwnProperty(key(ed.to))) visit(ed.to);
+      }
+      state[key(x)] = 2;
+    }
+    for (i = 0; i < nodes.length; i++) if (!state.hasOwnProperty(key(nodes[i]))) visit(nodes[i]);
+    for (i = 0; i < edges.length; i++) {
+      e = edges[i];
+      var a = e.back ? e.to : e.from, b = e.back ? e.from : e.to;
+      b.before.push(a); a.after.push(b);
+    }
+    function depth(x) {
+      if (x.layer == null) {
+        var d = 0;
+        for (var k = 0; k < x.before.length; k++) d = Math.max(d, depth(x.before[k]) + 1);
+        x.layer = d;
+      }
+      return x.layer;
+    }
+    for (i = 0; i < nodes.length; i++) nodes[i].layer = null;
+    for (i = 0; i < nodes.length; i++) depth(nodes[i]);
+    // A node nothing leads to sits just above the first thing it leads to.
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      if (n.before.length || !n.after.length) continue;
+      var first = Infinity;
+      for (j = 0; j < n.after.length; j++) first = Math.min(first, n.after[j].layer);
+      n.layer = Math.max(0, first - 1);
+    }
+    var layers = [];
+    for (i = 0; i < nodes.length; i++) {
+      while (layers.length <= nodes[i].layer) layers.push([]);
+      layers[nodes[i].layer].push(nodes[i]);
+    }
+    // Long arrows pass through stand-ins in the layers between, which keep
+    // a lane open and pull their ends into line.
+    function link(p, q) { p.down.push(q); q.up.push(p); }
+    for (i = 0; i < edges.length; i++) {
+      e = edges[i];
+      if (e.back) continue;
+      var prev = e.from, l0 = e.from.layer, l1 = e.to.layer;
+      for (l = l0 + 1; l < l1; l++) {
+        var d = { dummy: true, from: e.from, to: e.to, t: (l - l0) / (l1 - l0),
+                  lane: o.laneOf(e), layer: l, up: [], down: [] };
+        layers[l].push(d);
+        link(prev, d);
+        prev = d;
+      }
+      link(prev, e.to);
+    }
+    function reindex(L) { for (var k = 0; k < L.length; k++) L[k].pos = k; }
+    for (l = 0; l < layers.length; l++) reindex(layers[l]);
+    function center(x, by) {
+      var list = x[by];
+      if (!list.length) return x.pos;
+      var sum = 0;
+      for (var k = 0; k < list.length; k++) sum += list[k].pos;
+      return sum / list.length;
+    }
+    for (var pass = 0; pass < 8; pass++) {
+      var by = pass % 2 ? "down" : "up";
+      for (var li = 0; li < layers.length; li++) {
+        l = pass % 2 ? layers.length - 1 - li : li;
+        var sc = {};
+        for (j = 0; j < layers[l].length; j++) sc[j] = center(layers[l][j], by);
+        (function (L, scores) {
+          var keyed = [];
+          for (var k = 0; k < L.length; k++) keyed.push({ n: L[k], s: scores[k], k: k });
+          keyed.sort(function (p, q) { return p.s - q.s || p.k - q.k; });
+          for (k = 0; k < keyed.length; k++) L[k] = keyed[k].n;
+        })(layers[l], sc);
+        reindex(layers[l]);
+      }
+    }
+    function size(x) { return x.dummy ? x.lane : o.crossOf(x); }
+    function space(p, q) {
+      return p.dummy && q.dummy ? 6 : p.dummy || q.dummy ? o.gap * 0.6 : o.gap;
+    }
+    for (l = 0; l < layers.length; l++) {
+      var L = layers[l], xs = [];
+      for (j = 0; j < L.length; j++)
+        xs.push(j ? xs[j - 1] + (size(L[j - 1]) + size(L[j])) / 2 + space(L[j - 1], L[j]) : 0);
+      var mid = L.length ? (xs[0] + xs[xs.length - 1]) / 2 : 0;
+      for (j = 0; j < L.length; j++) L[j].at = xs[j] - mid;
+    }
+    for (pass = 0; pass < 12; pass++) {
+      for (li = 0; li < layers.length; li++) {
+        L = layers[pass % 2 ? layers.length - 1 - li : li];
+        if (!L.length) continue;
+        var want = [];
+        for (j = 0; j < L.length; j++) {
+          n = L[j];
+          if (n.dummy) want.push(n.from.at + (n.to.at - n.from.at) * n.t);
+          else {
+            var list = n.up.concat(n.down), sum = 0;
+            for (var k = 0; k < list.length; k++) sum += list[k].at;
+            want.push(list.length ? sum / list.length : n.at);
+          }
+        }
+        xs = want.slice();
+        for (j = 1; j < L.length; j++)
+          xs[j] = Math.max(xs[j], xs[j - 1] + (size(L[j - 1]) + size(L[j])) / 2 +
+            space(L[j - 1], L[j]));
+        var shift = 0;
+        for (j = 0; j < L.length; j++) shift += want[j] - xs[j];
+        shift /= L.length;
+        for (j = 0; j < L.length; j++) L[j].at = xs[j] + shift;
+      }
+    }
+    var m = 0;
+    for (l = 0; l < layers.length; l++) {
+      var thick = 0;
+      for (j = 0; j < layers[l].length; j++)
+        if (!layers[l][j].dummy) thick = Math.max(thick, o.mainOf(layers[l][j]));
+      for (j = 0; j < layers[l].length; j++) layers[l][j].main = m + thick / 2;
+      m += thick + o.layerGap;
+    }
+    return layers;
+  }
+  var LAY_DIAG_ROW_FILLS = ["#fdf6e3", "#eef4fc", "#e9f4df", "#fdf0f0",
+                            "#f4f7fb", "#dbe7f7"];
+  function layWizDiagram(v) {
+    var s = layWizSheet(), g = layDiagParse(v.text);
+    var nodes = g.nodes, edges = g.edges, i;
+    if (!nodes.length) return [];
+    var across = v.direction !== "right", fs = LAY_WIZ_FS;
+    var oneLine = Math.round(fs * LAY_TEXT_LINE + LAY_BOX_PAD_Y * 2 + 2);
+    for (i = 0; i < nodes.length; i++) {
+      var n = nodes[i], tw = layWizTextW(n.name, fs);
+      if (v.shape === "circle") n.w = n.h = Math.max(44, Math.round(tw + 20));
+      else {
+        n.w = Math.max(60, Math.round(tw + 24));
+        n.h = Math.max(oneLine + 4, layBoxFitH(n.name, n.w, fs));
+      }
+    }
+    var widest = 0, labelled = false;
+    for (i = 0; i < edges.length; i++) if (edges[i].label) {
+      labelled = true;
+      widest = Math.max(widest, layArrowLabelW(edges[i].label, LAY_ARROW_LABEL_FS));
+    }
+    var layers = layDiagLayout(nodes, edges, {
+      gap: across ? 28 : 20,
+      layerGap: across ? (labelled ? 52 : 40) : Math.max(56, widest + 30),
+      crossOf: function (n) { return across ? n.w : n.h; },
+      mainOf: function (n) { return across ? n.h : n.w; },
+      laneOf: function (e) {
+        return e.label ? 2 * ((across ? layArrowLabelW(e.label, LAY_ARROW_LABEL_FS)
+          : LAY_ARROW_LABEL_FS * 1.2) + 6) : 8;
+      }
+    });
+    var fills = { soft: ["#eef4fc", "#375ca0"], white: ["#ffffff", "#22364d"] };
+    var lo = Infinity, hi = -Infinity;
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      lo = Math.min(lo, n.at); hi = Math.max(hi, n.at);
+      var cx = across ? n.at : n.main, cy = across ? n.main : n.at;
+      var pair = v.fill === "rows"
+        ? [LAY_DIAG_ROW_FILLS[n.layer % LAY_DIAG_ROW_FILLS.length], "#22364d"]
+        : fills[v.fill] || fills.soft;
+      n.item = s.box(cx - n.w / 2, cy - n.h / 2, n.w, n.name,
+        { h: n.h, fill: pair[0], borderColor: pair[1],
+          corner: v.shape === "pill" || v.shape === "circle" ? Math.round(n.h / 2) : 6 });
+    }
+    var middle = (lo + hi) / 2;
+    for (i = 0; i < edges.length; i++) {
+      var e = edges[i];
+      var o = { route: "straight", heads: e.heads, dashed: e.dashed, label: e.label,
+                color: e.heads === "inhibit" && v.inhibitRed ? "#902634" : "#22364d" };
+      if (e.back) {
+        // Around the outside, on the side the two nodes lean toward.
+        var outside = (e.from.at + e.to.at) / 2 >= middle;
+        var side = across ? (outside ? "r" : "l") : (outside ? "b" : "t");
+        o.route = "elbow"; o.fromSide = side; o.toSide = side;
+      }
+      s.arrow(e.from.item, e.to.item, o);
+    }
+    return s.items;
+  }
+
+  // An experimental timeline from its days, phases and events: the axis's
+  // numbers become the ticks' sub-labels (the unit on every one where they
+  // fit, once where they crowd, every second or fifth step after that),
+  // an event names its tick (a run of times marks each and names the
+  // middle one), a phase is a band between two ticks. Labels and
+  // positions, as every timeline here: nothing is computed from them later.
+  var LAY_TL_PRESETS = [
+    { id: "pharmacology", title: "Behavioral pharmacology",
+      axis: { start: 0, end: 22, step: 2, unit: "Day", format: "prefix" },
+      phases: "Habituation | 0-3\nBaseline | 3-5\nDrug treatment | 5-19\nTesting | 19-22",
+      events: "Daily injections | 5-18 | arrow\nOpen field | 19\nElevated plus maze | 20\nTissue | 22 | triangle" },
+    { id: "viral", title: "Viral surgery and imaging",
+      axis: { start: 0, end: 8, step: 1, unit: "Week", format: "prefix" },
+      phases: "Expression | 0-4\nImaging | 4-7.5",
+      events: "AAV injection | 0 | arrow\nWindow implant | 2 | arrow\nImaging sessions | 4-7 | dot\nPerfusion | 8 | triangle" },
+    { id: "fear", title: "Fear conditioning",
+      axis: { start: 0.5, end: 6.5, step: 1, unit: "Day", format: "prefix" },
+      phases: "Conditioning | 0.6-1.4\nContext test | 1.6-2.4\nExtinction | 2.6-5.4\nRecall | 5.6-6.4",
+      events: "Tone + shock | 1 | triangle red\nContext | 2\nTone alone | 3-5\nTone | 6" },
+    { id: "self-admin", title: "Drug self-administration",
+      axis: { start: 0, end: 30, step: 5, unit: "Day", format: "prefix" },
+      phases: "Recovery | 0-7\nAcquisition (FR1) | 7-17\nExtinction | 17-27\nReinstatement | 27-30",
+      events: "Catheter surgery | 0 | arrow\nDaily sessions | 7-27\nCue / drug prime | 28 | triangle" },
+    { id: "clinical", title: "Clinical study, two arms",
+      axis: { start: -2, end: 24, step: 2, unit: "Week", format: "prefix" },
+      groups: "Drug, Placebo",
+      phases: "Screening | -2-0\n[Drug] Active drug | 0-12\n[Placebo] Placebo | 0-12 | gray\nFollow-up | 12-24",
+      events: "Randomization | 0 | arrow\nAssessments | 0, 4, 8, 12 | dot\nFollow-up visit | 24" },
+    { id: "recovery", title: "Injury and recovery, with a break in time",
+      axis: { start: 0, end: 30, step: 1, unit: "Day", format: "prefix" },
+      breaks: "4-27",
+      phases: "Acute | 0-4\nChronic | 27-30",
+      events: "Injury | 0 | arrow red\nBehavior | 1-3 | dot\nBehavior | 28-30 | dot\nHistology | 30 | triangle" },
+    { id: "blank", title: "Blank axis",
+      axis: { start: 0, end: 10, step: 1, unit: "Day", format: "prefix" },
+      phases: "", events: "" }
+  ];
+  function layTlPreset(id) {
+    for (var i = 0; i < LAY_TL_PRESETS.length; i++)
+      if (LAY_TL_PRESETS[i].id === id) return LAY_TL_PRESETS[i];
+    return LAY_TL_PRESETS[0];
+  }
+  function layTlApplyPreset(values, id) {
+    var p = layTlPreset(id);
+    values.preset = p.id;
+    values.start = p.axis.start; values.end = p.axis.end; values.step = p.axis.step;
+    values.unit = p.axis.unit; values.format = p.axis.format;
+    values.phases = p.phases; values.events = p.events;
+    values.groups = p.groups || ""; values.breaks = p.breaks || "";
+  }
+  // "7", "1-5", "1, 8, 15", "0-28/7", "1-3, 7": every time an event happens.
+  function layTlParseTimes(text) {
+    var out = [], seen = {};
+    var parts = String(text == null ? "" : text).split(/[,;]+/);
+    function add(t) {
+      t = Math.round(t * 1e6) / 1e6;
+      if (!seen.hasOwnProperty(String(t))) { seen[String(t)] = 1; out.push(t); }
+    }
+    for (var i = 0; i < parts.length; i++) {
+      var m = parts[i].trim().match(
+        /^(-?\d+(?:\.\d+)?)(?:\s*(?:-|\u2013|to)\s*(-?\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?)?$/);
+      if (!m) continue;
+      var a = Number(m[1]);
+      if (m[2] === undefined) { add(a); continue; }
+      var b = Number(m[2]), step = Number(m[3] == null ? 1 : m[3]) || 1;
+      for (var t = Math.min(a, b); t <= Math.max(a, b) + 1e-9 && out.length < 1000; t += step) add(t);
+    }
+    out.sort(function (x, y) { return x - y; });
+    return out;
+  }
+  // An experimental timeline from its table. The item it makes keeps the
+  // table as its plan (see "Timelines that keep their table"), so the form
+  // can be reopened on it; with like, it takes the look and the width of a
+  // timeline already on the page (the preview of an edit).
+  function layWizTimeline(v) {
+    var s = layWizSheet(), p = layPage();
+    var plan = layTlPlanFromValues(v);
+    var like = v.like && v.like.kind === "timeline" ? v.like : null;
+    var W = like ? Math.max(120, Number(like.w) || 360)
+      : Math.max(240, Math.min(700, (Number(p.w) || 1008) - (Number(p.margin) || 0) * 2));
+    var item = { id: s.id(), kind: "timeline", x: 0, y: 0, w: W, h: 84,
+      fontSize: like && like.fontSize != null ? like.fontSize : LAY_WIZ_FS,
+      color: like && like.color ? like.color : "#22364d",
+      width: like && like.width != null ? like.width : 1.5, labels: "above",
+      ends: v.arrow ? "arrow" : "plain", ticks: [], bands: [], plan: plan };
+    if (like && like.tickWidth != null) item.tickWidth = like.tickWidth;
+    if (like && like.tickLen != null) item.tickLen = like.tickLen;
+    layTimelineHug(item);
+    s.items.push(item);
+    return s.items;
+  }
+
+  // The wizards on offer, each with the fields its form shows.
+  //   type: number | text | textarea | choice (options [[value, label]]) |
+  //         boolean; when(values) hides a field; resets clears nothing here.
+  var LAY_WIZARDS = [
+    { id: "timeline", title: "Experimental timeline",
+      detail: "Days, phases and events: a procedure timeline from a short table",
+      fields: [
+        { key: "preset", label: "Start from", type: "select", dflt: "pharmacology",
+          options: [["pharmacology", "Behavioral pharmacology"],
+                    ["viral", "Viral surgery and imaging"], ["fear", "Fear conditioning"],
+                    ["self-admin", "Drug self-administration"],
+                    ["clinical", "Clinical study, two arms"],
+                    ["recovery", "Injury and recovery, with a break in time"],
+                    ["blank", "Blank axis"]],
+          apply: layTlApplyPreset,
+          // Reopened on a timeline already made, the form shows that
+          // timeline's own table: there is nothing to start from.
+          when: function (v) { return !v.editing; } },
+        { key: "unit", label: "Unit (Day, Week, Session)", type: "text", dflt: "Day" },
+        { key: "start", label: "Start", type: "number", dflt: 0 },
+        { key: "end", label: "End", type: "number", dflt: 22 },
+        { key: "step", label: "Ticks every", type: "number", dflt: 2 },
+        { key: "format", label: "Tick labels", type: "choice",
+          options: [["prefix", "Day 7"], ["number", "7"], ["none", "None"]], dflt: "prefix" },
+        { key: "events", label: "Events, one per line: name | when (7, 1-5, or 1, 8, 15)",
+          type: "textarea", rows: 5,
+          dflt: "Daily injections | 5-18 | arrow\nOpen field | 19\nElevated plus maze | 20\nTissue | 22 | triangle" },
+        { key: "phases", label: "Phases, one per line: name | from-to", type: "textarea", rows: 4,
+          dflt: "Habituation | 0-3\nBaseline | 3-5\nDrug treatment | 5-19\nTesting | 19-22" },
+        { key: "groups", label: "Groups, a row each (optional): Drug, Placebo",
+          type: "text", dflt: "" },
+        { key: "breaks", label: "Breaks in time (optional): 8-20", type: "text", dflt: "" },
+        { key: "arrow", label: "Arrow at the end", type: "boolean", dflt: true }
+      ],
+      build: layWizTimeline,
+      note: "An event that happens more than once (5-18, or 1, 8, 15) gets a bracket over all its times. After the when, a third part may name a mark (arrow, triangle, dot, diamond) and a color (red, blue, green): Tissue | 22 | triangle red. A phase may end with a color too. Put [Drug] before a name to draw it on that group's row. The timeline keeps this table: select it and choose Edit as a table to change it later." },
+    { id: "prisma", title: "PRISMA 2020 flow diagram",
+      detail: "Records identified, screened and included, for a systematic review",
+      fields: [
+        { key: "databases", label: "Records from databases", type: "number", dflt: 1250 },
+        { key: "registers", label: "Records from registers", type: "number", dflt: 86 },
+        { key: "duplicates", label: "Duplicates removed", type: "number", dflt: 312 },
+        { key: "automation", label: "Marked ineligible by automation", type: "number", dflt: 0 },
+        { key: "removedOther", label: "Removed for other reasons", type: "number", dflt: 14 },
+        { key: "excluded", label: "Records excluded at screening", type: "number", dflt: 880 },
+        { key: "notRetrieved", label: "Reports not retrieved", type: "number", dflt: 6 },
+        { key: "reasons", label: "Reports excluded, one reason per line", type: "textarea",
+          dflt: "Wrong population (n = 41)\nWrong outcome (n = 27)\nNot primary research (n = 18)" },
+        { key: "studies", label: "Studies included", type: "number", dflt: 38 },
+        { key: "reports", label: "Reports of included studies", type: "number", dflt: 42 }
+      ],
+      build: layWizPrisma,
+      note: "Records screened, reports sought and reports assessed are worked out from these. Edit any box afterward." },
+    { id: "consort", title: "CONSORT flow diagram",
+      detail: "Enrollment, allocation, follow-up and analysis of a randomized trial",
+      fields: [
+        { key: "armA", label: "First arm", type: "text", dflt: "Intervention" },
+        { key: "armB", label: "Second arm", type: "text", dflt: "Control" },
+        { key: "assessed", label: "Assessed for eligibility", type: "number", dflt: 248 },
+        { key: "excluded", label: "Excluded", type: "number", dflt: 48 },
+        { key: "notEligible", label: "Not meeting criteria", type: "number", dflt: 31 },
+        { key: "declined", label: "Declined", type: "number", dflt: 12 },
+        { key: "otherReasons", label: "Other reasons", type: "number", dflt: 5 },
+        { key: "randomized", label: "Randomized", type: "number", dflt: 200 },
+        { key: "allocatedA", label: "Allocated, first arm", type: "number", dflt: 100 },
+        { key: "allocatedB", label: "Allocated, second arm", type: "number", dflt: 100 },
+        { key: "lostA", label: "Lost to follow-up, first", type: "number", dflt: 6 },
+        { key: "lostB", label: "Lost to follow-up, second", type: "number", dflt: 8 },
+        { key: "analysedA", label: "Analysed, first arm", type: "number", dflt: 94 },
+        { key: "analysedB", label: "Analysed, second arm", type: "number", dflt: 92 }
+      ],
+      build: layWizConsort,
+      note: "Counts you leave out stay as (n = ) to fill in on the figure." },
+    { id: "pathway", title: "Signaling pathway",
+      detail: "A chain of steps from a signal to a response",
+      fields: [
+        { key: "steps", label: "Steps, top to bottom (start a line with -| for inhibition)",
+          type: "textarea", rows: 7,
+          dflt: "BDNF\nTrkB\nPI3K\nAkt\n-| GSK-3\u03b2\nCREB\nGene expression" },
+        { key: "nucleus", label: "A nucleus around the last step", type: "boolean", dflt: true }
+      ],
+      build: layWizPathway,
+      note: "Each step is a box joined by arrows that follow when you move things." },
+    { id: "diagram", title: "Diagram from text",
+      detail: "Circuits, pathways and flowcharts: type the connections, get the layout",
+      fields: [
+        { key: "text", label: "One connection per line: A -> B, A -| B (inhibits), A -- B, A ..> B (dashed), A -> B: label",
+          type: "textarea", rows: 7,
+          dflt: "VTA -> NAc: DA\nVTA -> PFC: DA\nPFC -> NAc\nBLA -> NAc\nvHPC -> NAc\nNAc -| VP\nVP -| VTA" },
+        { key: "direction", label: "Direction", type: "choice",
+          options: [["down", "Top to bottom"], ["right", "Left to right"]], dflt: "down" },
+        { key: "shape", label: "Nodes", type: "choice",
+          options: [["rounded", "Boxes"], ["pill", "Pills"], ["circle", "Circles"]], dflt: "rounded" },
+        { key: "fill", label: "Colors", type: "choice",
+          options: [["soft", "Blue"], ["white", "White"], ["rows", "By row"]], dflt: "soft" },
+        { key: "inhibitRed", label: "Inhibition in red", type: "boolean", dflt: true }
+      ],
+      build: layWizDiagram,
+      note: "Arrows stay attached as you move the boxes, and an arrow that closes a loop runs around the outside. Lines starting with # are notes." },
+    { id: "abstract", title: "Graphical abstract",
+      detail: "Three steps, left to right, with bold arrows",
+      fields: [
+        { key: "title", label: "Title (optional)", type: "text", dflt: "" },
+        { key: "one", label: "First step", type: "text", dflt: "Chronic stress" },
+        { key: "two", label: "Second step", type: "text", dflt: "Microglial activation" },
+        { key: "three", label: "Third step", type: "text", dflt: "Synapse loss and anxiety-like behavior" }
+      ],
+      build: layWizAbstract,
+      note: "Drop an image on each panel, or draw in it with boxes and arrows." }
+  ];
+  function layWizById(id) {
+    for (var i = 0; i < LAY_WIZARDS.length; i++)
+      if (LAY_WIZARDS[i].id === id) return LAY_WIZARDS[i];
+    return null;
+  }
+  // Every field's default; blank = the numbers and texts emptied (the New
+  // layout cards, whose counts are for the user to fill in).
+  function layWizDefaults(id, blank) {
+    var w = layWizById(id), v = {}, f;
+    if (!w) return v;
+    for (var i = 0; i < w.fields.length; i++) {
+      f = w.fields[i];
+      v[f.key] = blank && (f.type === "number" || f.type === "textarea" ||
+        (f.type === "text" && f.key !== "armA" && f.key !== "armB"))
+        ? "" : f.dflt;
+    }
+    return v;
+  }
+  var LAY_WIZ = null;   // the open dialog's state
+  function layWizControl(field, value, onChange) {
+    var ctl, i;
+    if (field.type === "textarea") {
+      ctl = document.createElement("textarea");
+      ctl.rows = field.rows || 4;
+      ctl.value = value == null ? "" : String(value);
+      ctl.setAttribute("aria-label", field.label);
+      ctl.setAttribute("spellcheck", "false");
+      ctl.addEventListener("input", function () { onChange(ctl.value); });
+      return ctl;
+    }
+    if (field.type === "choice") {
+      ctl = mkEl("div", "ps-lunit-seg");
+      ctl.setAttribute("role", "group");
+      ctl.setAttribute("aria-label", field.label);
+      for (i = 0; i < field.options.length; i++) (function (opt) {
+        var b = mkEl("button", "", opt[1]);
+        b.type = "button";
+        b.setAttribute("data-wizard-choice", opt[0]);
+        b.setAttribute("aria-pressed", opt[0] === value ? "true" : "false");
+        b.addEventListener("click", function () {
+          var all = ctl.querySelectorAll("button");
+          for (var j = 0; j < all.length; j++)
+            all[j].setAttribute("aria-pressed", all[j] === b ? "true" : "false");
+          onChange(opt[0]);
+        });
+        ctl.appendChild(b);
+      })(field.options[i]);
+      return ctl;
+    }
+    if (field.type === "boolean") {
+      ctl = document.createElement("input");
+      ctl.type = "checkbox";
+      ctl.checked = !!value;
+      ctl.addEventListener("change", function () { onChange(ctl.checked); });
+      return ctl;
+    }
+    if (field.type === "select") {
+      ctl = document.createElement("select");
+      ctl.setAttribute("aria-label", field.label);
+      for (i = 0; i < field.options.length; i++) {
+        var op = document.createElement("option");
+        op.value = field.options[i][0];
+        op.textContent = field.options[i][1];
+        ctl.appendChild(op);
+      }
+      ctl.value = value == null ? "" : String(value);
+      ctl.addEventListener("change", function () { onChange(ctl.value); });
+      return ctl;
+    }
+    ctl = document.createElement("input");
+    ctl.type = field.type === "number" ? "number" : "text";
+    ctl.value = value == null ? "" : String(value);
+    ctl.setAttribute("aria-label", field.label);
+    ctl.addEventListener("input", function () {
+      onChange(field.type === "number"
+        ? (ctl.value === "" ? "" : Number(ctl.value)) : ctl.value);
+    });
+    return ctl;
+  }
+  function layWizRenderForm() {
+    var st = LAY_WIZ, form = el("ps-wizard-form"), note = el("ps-wizard-note");
+    if (!st || !form) return;
+    form.innerHTML = "";
+    var w = st.pick, i;
+    for (i = 0; i < w.fields.length; i++) (function (field) {
+      if (field.when && !field.when(st.values)) return;
+      var row = mkEl("div", "ps-wizard-field" +
+        (field.type === "textarea" ? " ps-wizard-field-wide" : ""));
+      if (field.type === "boolean") {
+        var lab = mkEl("label", "ps-wizard-check");
+        lab.appendChild(layWizControl(field, st.values[field.key], function (v) {
+          st.values[field.key] = v; layWizRedraw();
+        }));
+        lab.appendChild(document.createTextNode(" " + field.label));
+        row.appendChild(lab);
+      } else {
+        row.appendChild(mkEl("span", "ps-wizard-label", field.label));
+        row.appendChild(layWizControl(field, st.values[field.key], function (v) {
+          st.values[field.key] = v;
+          // A field that fills in the others (a preset) rebuilds the form.
+          if (field.apply) { field.apply(st.values, v); layWizRenderForm(); }
+          else if (field.type === "choice" && layWizConditional(w)) layWizRenderForm();
+          layWizRedraw();
+        }));
+      }
+      form.appendChild(row);
+    })(w.fields[i]);
+    if (note) note.textContent = w.note || "";
+  }
+  function layWizConditional(w) {
+    for (var i = 0; i < w.fields.length; i++) if (w.fields[i].when) return true;
+    return false;
+  }
+  function layWizBuild() {
+    var st = LAY_WIZ, v = {}, k;
+    for (k in st.values) if (st.values.hasOwnProperty(k)) v[k] = st.values[k];
+    return st.pick.build(v);
+  }
+  function layWizDraw() {
+    var st = LAY_WIZ, preview = el("ps-wizard-preview");
+    if (!st || !preview) return;
+    preview.innerHTML = "";
+    try {
+      st.built = layWizBuild();
+      if (st.built.length) preview.appendChild(layWizPreviewSvg(st.built));
+      else preview.appendChild(mkEl("p", "ps-wizard-empty",
+        "Nothing to draw yet. Fill in the form on the left."));
+    } catch (e) {
+      st.built = [];
+      preview.appendChild(mkEl("p", "ps-wizard-empty",
+        "This cannot be drawn with those values."));
+    }
+    var add = el("ps-wizard-add");
+    if (add) add.disabled = !st.built.length;
+  }
+  function layWizRedraw() {
+    var st = LAY_WIZ;
+    if (!st) return;
+    window.clearTimeout(st.timer);
+    st.timer = window.setTimeout(layWizDraw, 120);
+  }
+  function layWizPick(id) {
+    var st = LAY_WIZ, w = layWizById(id) || LAY_WIZARDS[0];
+    st.pick = w;
+    st.values = layWizDefaults(w.id, false);
+    // Reopened on a timeline: its own table, and its look for the preview.
+    var editing = st.editId ? layItemById(st.editId) : null;
+    if (editing && w.id === "timeline" && layTimelineIsPlanned(editing)) {
+      var own = layTlValuesFromPlan(editing);
+      for (var key in own) if (own.hasOwnProperty(key)) st.values[key] = own[key];
+      st.values.editing = true;
+      st.values.like = editing;
+    }
+    var opts = el("ps-wizard-list").querySelectorAll("[data-wizard]");
+    for (var i = 0; i < opts.length; i++)
+      opts[i].setAttribute("aria-selected",
+        opts[i].getAttribute("data-wizard") === w.id ? "true" : "false");
+    var title = el("ps-wizard-pick-title");
+    if (title) title.textContent = w.title;
+    layWizRenderForm();
+    layWizDraw();
+  }
+  // With editId (a timeline that keeps its table) the dialog is that
+  // timeline's table, reopened: no list of wizards, Update where Add was.
+  function showLayoutWizards(startId, editId) {
+    var list = el("ps-wizard-list");
+    if (!list || !isLayoutTab(activeChart())) return;
+    var editing = editId ? layItemById(editId) : null;
+    if (!layTimelineIsPlanned(editing)) editing = null;
+    if (editing) startId = "timeline";
+    LAY_WIZ = { pick: null, values: {}, built: [], timer: null,
+                editId: editing ? editing.id : null };
+    layWizDialogMode(!!editing);
+    list.innerHTML = "";
+    for (var i = 0; i < LAY_WIZARDS.length; i++) (function (w) {
+      var b = mkEl("button", "ps-wizard-option");
+      b.type = "button";
+      b.setAttribute("role", "option");
+      b.setAttribute("data-wizard", w.id);
+      b.setAttribute("aria-selected", "false");
+      b.appendChild(mkEl("strong", "", w.title));
+      b.appendChild(mkEl("span", "", w.detail));
+      b.addEventListener("click", function () { layWizPick(w.id); });
+      list.appendChild(b);
+    })(LAY_WIZARDS[i]);
+    layWizPick(startId && layWizById(startId) ? startId : LAY_WIZARDS[0].id);
+    openShellDialog("ps-wizard-dialog");
+  }
+  function layWizDialogMode(editing) {
+    var dlg = el("ps-wizard-dialog"), title = el("ps-wizard-title");
+    var lead = el("ps-wizard-lead"), add = el("ps-wizard-add");
+    if (dlg) {
+      if (editing) dlg.classList.add("ps-wizard-editing");
+      else dlg.classList.remove("ps-wizard-editing");
+    }
+    if (title) title.textContent = editing ? "Edit timeline" : "Diagram wizards";
+    if (lead) lead.textContent = editing
+      ? "The table this timeline was made from. Change it and the timeline follows; its place, width and look stay as they are."
+      : "Build a whole diagram from a few answers. Everything it makes is ordinary boxes, arrows and text, grouped, and stays editable.";
+    if (add) add.textContent = editing ? "Update timeline" : "Add to layout";
+  }
+  function hideLayoutWizards() {
+    if (LAY_WIZ) window.clearTimeout(LAY_WIZ.timer);
+    LAY_WIZ = null;
+    closeShellDialog("ps-wizard-dialog");
+    layWizDialogMode(false);
+  }
+  function layWizAdd() {
+    var st = LAY_WIZ;
+    if (!st) return;
+    var items, what = st.pick.title, k;
+    if (st.editId) {
+      var target = layItemById(st.editId), vals = {}, plan = null;
+      for (k in st.values) if (st.values.hasOwnProperty(k)) vals[k] = st.values[k];
+      hideLayoutWizards();
+      if (!layTimelineIsPlanned(target)) return;
+      try { plan = layTlPlanFromValues(vals); } catch (e) { plan = null; }
+      if (!plan) return;
+      layPartApply([target], "edit timeline", null, function (t) {
+        t.plan = plan;
+        t.ends = vals.arrow ? "arrow" : "plain";
+      });
+      layFocusViewport();
+      layAnnounce("Timeline updated.");
+      return;
+    }
+    try { items = layWizBuild(); } catch (e) { items = []; }
+    hideLayoutWizards();
+    if (items.length) layInsertItems(items, what);
+  }
+  function wireLayoutWizards() {
+    if (!el("ps-wizard-dialog")) return;
+    el("ps-wizard-close").addEventListener("click", hideLayoutWizards);
+    el("ps-wizard-cancel").addEventListener("click", hideLayoutWizards);
+    el("ps-wizard-add").addEventListener("click", layWizAdd);
   }
 
   // ---- a shared color popover for the figure parts (slice three, Torry:
@@ -26238,6 +31226,16 @@
   function layOpenBandColor(item, idx) {
     laySetSelection([item.id]);
     renderLayout();
+    if (layTimelineIsPlanned(item)) {
+      var pchip = el("ps-ltl-ph-color-" + idx), phs = item.plan.phases;
+      if (!pchip || !Array.isArray(phs) || !phs[idx]) return;
+      layOpenColorPop(pchip, layHexOr(phs[idx].fill,
+        LAY_TL_PHASE_FILLS[idx % LAY_TL_PHASE_FILLS.length]), function (hex, live) {
+        layPartApply([item], "phase color", "cpop:phase:" + item.id + ":" + idx,
+          function (t) { if (t.plan.phases[idx]) t.plan.phases[idx].fill = hex; }, live);
+      });
+      return;
+    }
     var chip = el("ps-ltl-band-fill-" + idx);
     if (!chip || !item.bands || !item.bands[idx]) return;
     layOpenColorPop(chip, layHexOr(item.bands[idx].fill, "#e8f0fb"), function (hex, live) {
@@ -26267,7 +31265,7 @@
       Number(capW) || LAY_TEXT_MAX_W));
     var font = (item.italic ? "italic " : "") +
       (item.bold ? "700" : "400") + " " + fs + "px sans-serif";
-    var lines = wrapCaptionLines(String(item.text || "Text"),
+    var lines = wrapCaptionLines(layPlainText(item.text || "Text"),
       cap - LAY_TEXT_PAD_X * 2, fs, font);
     var ctx = layTextCtx(), wide = 0, i;
     if (ctx) {
@@ -26287,11 +31285,14 @@
   // resize, proportional default); text items self-size.
   function laySizedKind(item) {
     return item && (item.kind === "chart" || item.kind === "image" ||
-                    item.kind === "box" || item.kind === "timeline");
+                    item.kind === "box" || item.kind === "timeline" ||
+                    item.kind === "path");
   }
   function layMinSize(item) {
     if (item.kind === "image") return { w: 24, h: 24 };
-    if (item.kind === "box") return { w: 36, h: 22 };
+    if (item.kind === "path") return { w: 2, h: 2 };
+    if (item.kind === "box")
+      return LAY_LINE_SHAPES[layBoxShape(item)] ? { w: 10, h: 22 } : { w: 36, h: 22 };
     if (item.kind === "timeline") return { w: 80, h: 40 };
     // The minimum keeps the chart's SHAPE. A flat 120 by 80 is 1.5 against
     // the engine's 1.469, so a figure scaled onto a small page hit the floor
@@ -26449,6 +31450,8 @@
     if (!isLayoutTab(activeChart())) return;
     if (LAY_NODE_POOL.docId !== activeChart().id) layPoolReset(activeChart().id);
     layNormalizeLayout(activeChart());
+    layLensSync();
+    layTimelineSync();
     laySelectedIds();
     var canvas = el("ps-lcanvas"), stage = el("ps-lstage");
     var p = layPage(), v = layView(), z = layZoom();
@@ -26464,7 +31467,9 @@
     canvas.appendChild(margin);
     laySyncMarginGuide();
     var items = layItems();
-    for (var i = 0; i < items.length; i++) canvas.appendChild(layBuildItem(items[i]));
+    for (var i = 0; i < items.length; i++)
+      if (!items[i].hidden) canvas.appendChild(layBuildItem(items[i]));
+    if (LAY_DRAW) layDrawPreview();
     var semanticItems = el("ps-layout-options");
     semanticItems.innerHTML = "";
     for (var oi = 0; oi < items.length; oi++) {
@@ -26583,7 +31588,10 @@
   }
   function layDecorateItemElement(node, item, selected, primary) {
     node.className = "ps-litem" + (selected ? " ps-litem-sel" : "") +
-      (primary ? " ps-litem-primary" : "");
+      (primary ? " ps-litem-primary" : "") +
+      (item.locked ? " ps-litem-locked" : "");
+    var opacity = layItemOpacity(item);
+    node.style.opacity = opacity < 1 ? String(opacity) : "";
     node.removeAttribute("id");
     node.removeAttribute("role");
     node.removeAttribute("aria-selected");
@@ -26651,7 +31659,9 @@
     // all. The old single-unit gate left a multi-selection with no way to
     // resize at all.
     var multiUnits = layUnits(laySelectedIds()).length > 1;
-    if ((primary && !multiUnits) || (selected && multiUnits)) {
+    // A locked item wears no handles and no bar: nothing on it is for the
+    // pointer. The Layers list is where it is unlocked.
+    if (!item.locked && ((primary && !multiUnits) || (selected && multiUnits))) {
       if (laySizedKind(item)) {
         var hnd = mkEl("div", "ps-lhandle");
         hnd.setAttribute("data-role", "lay-resize");
@@ -26670,6 +31680,7 @@
       if (item.kind === "text")
         layAttachRotateHandle(node, item, node.__ltxFrame || null);
       if (item.kind === "arrow" && primary) layAttachArrowEnds(node, item);
+      if (item.kind === "path" && primary && !item.locked) layAttachPathNodes(node, item);
       node.appendChild(layMiniBar(item));
     }
   }
@@ -26721,11 +31732,42 @@
       elI.style.width = (Number(item.w) || 240) + "px";
       elI.style.height = (Number(item.h) || 180) + "px";
       var pic = document.createElement("img");
-      pic.src = item.src || "";
+      var baked = layImageBaked(item), adj = layImageAdjust(item);
+      pic.src = baked ? baked.src : (item.src || "");
       pic.alt = ""; pic.draggable = false;
-      pic.style.cssText = "width:100%;height:100%;object-fit:contain;" +
-        "pointer-events:none;display:block;";
-      elI.appendChild(pic);
+      var art = layImageArt(item);
+      if (art)
+        pic.style.cssText = "position:absolute;left:" + layNum2(art.x) + "px;top:" +
+          layNum2(art.y) + "px;width:" + layNum2(art.w) + "px;height:" + layNum2(art.h) +
+          "px;pointer-events:none;display:block;";
+      else
+        pic.style.cssText = "width:100%;height:100%;object-fit:contain;" +
+          "pointer-events:none;display:block;";
+      if (adj && !baked) {
+        pic.style.filter = layAdjustCss(adj);
+        // The bake lands on this very node once it is ready.
+        (function (id) { layBakeImage(item, function () { layImageRefreshBaked(id); }); })(item.id);
+      }
+      // The clip is the window: it mirrors (so the visible part mirrors in
+      // place) and takes the mask's shape.
+      var clip = mkEl("div", "ps-limg-clip");
+      var mask = layImageCropShape(item);
+      if (mask === "rounded")
+        clip.style.borderRadius = layNum2(0.12 * Math.min(Number(item.w) || 240, Number(item.h) || 180)) + "px";
+      else if (mask === "ellipse") clip.style.clipPath = "ellipse(50% 50% at 50% 50%)";
+      if (item.flipX || item.flipY)
+        clip.style.transform = "scale(" + (item.flipX ? -1 : 1) + ", " + (item.flipY ? -1 : 1) + ")";
+      clip.appendChild(pic);
+      var imgWrap = mkEl("div", "ps-limg-wrap");
+      var imgTurn = layItemTurn(item);
+      if (imgTurn) {
+        imgWrap.style.transform = "rotate(" + imgTurn + "deg)";
+        imgWrap.style.transformOrigin = "center center";
+      }
+      imgWrap.appendChild(clip);
+      var decor = layImageDecorSvg(item);
+      if (decor) imgWrap.appendChild(decor);
+      elI.appendChild(imgWrap);
       setTip(elI, "Image");
     } else if (item.kind === "box") {
       elI.style.width = (Number(item.w) || 150) + "px";
@@ -26735,8 +31777,26 @@
     } else if (item.kind === "timeline") {
       elI.style.width = (Number(item.w) || 360) + "px";
       elI.style.height = (Number(item.h) || 84) + "px";
-      elI.appendChild(layTimelineSvg(item, selected));
-      setTip(elI, "Timeline. Drag a tick along the line; double-click the line to add one.");
+      var tlSvg = layTimelineSvg(item, selected), tlTurn = layItemTurn(item);
+      if (tlTurn) {
+        tlSvg.style.transform = "rotate(" + tlTurn + "deg)";
+        tlSvg.style.transformOrigin = "center center";
+      }
+      elI.appendChild(tlSvg);
+      setTip(elI, layTimelineIsPlanned(item)
+        ? "Timeline. Drag a mark to change its time; double-click a name to edit it, or the line to add an event."
+        : "Timeline. Drag a tick along the line; double-click the line to add one, or a label to edit it.");
+    } else if (item.kind === "path") {
+      elI.style.width = layNum2(Math.max(1, Number(item.w) || 1)) + "px";
+      elI.style.height = layNum2(Math.max(1, Number(item.h) || 1)) + "px";
+      var pathSvg = layPathSvg(item, selected), pathTurn = layItemTurn(item);
+      if (pathTurn) {
+        pathSvg.style.transform = "rotate(" + pathTurn + "deg)";
+        pathSvg.style.transformOrigin = "center center";
+      }
+      elI.appendChild(pathSvg);
+      setTip(elI, (item.closed ? "Drawn shape." : "Drawn line.") +
+        " Drag a node to reshape; Alt-click a node removes it; double-click the line adds one.");
     } else if (item.kind === "arrow") {
       // The sync re-derives the box from the attached boxes, so the
       // position set above (from the stored x/y) is re-read here: a
@@ -26750,7 +31810,9 @@
       elI.appendChild(layArrowSvg(item, selected));
       setTip(elI, layArrowTip(item));
     } else {
-      var txt = mkEl("div", "ps-ltext", exportSafeText(item.text || "Text"));
+      var txt = mkEl("div", "ps-ltext",
+        layHasMarks(item.text) ? "" : exportSafeText(item.text || "Text"));
+      if (layHasMarks(item.text)) layMarkedDom(txt, item.text);
       txt.style.fontSize = (item.fontSize || 14) + "px";
       txt.style.fontWeight = item.bold ? "700" : "400";
       txt.style.fontStyle = item.italic ? "italic" : "normal";
@@ -26768,6 +31830,1192 @@
     }
     layDecorateItemElement(elI, item, selected, primary);
     return elI;
+  }
+  // ---- image scale bars and frames (Oct 2026, from the Illustrations
+  // app). A micrograph carries its calibration as a size per pixel; the
+  // bar's length on the page follows the picture's painted size, so
+  // resizing the image keeps the bar true. A frame outlines the painted
+  // picture, not the item box, so a letterboxed image is framed where its
+  // pixels are. Both are flat fields on the item (frame, frameColor,
+  // sb*), the arrow idiom, so they ride JSON, copies and the .pand file
+  // with nothing to teach the loader.
+  var LAY_SB_UNITS = { nm: "nm", um: "\u00b5m", mm: "mm" };
+  var LAY_SB_CORNERS = { tl: 1, tr: 1, bl: 1, br: 1 };
+  function layImageIsRaster(item) {
+    var src = String(item && item.src || "");
+    return src.indexOf("data:image/") === 0 &&
+      src.indexOf("data:image/svg+xml") !== 0;
+  }
+  // The pixels a calibration refers to: the camera's, when the import
+  // made a smaller copy (origW), else the embedded picture's.
+  function layImagePx(item) {
+    return { w: Number(item.origW) || Number(item.natW) || 0,
+             h: Number(item.origH) || Number(item.natH) || 0 };
+  }
+  // Where the picture paints inside the item box (object-fit: contain on
+  // the canvas, xMidYMid meet in the export); the box itself when the
+  // embedded size is unknown.
+  function layImageBox(item) {
+    var w = Math.max(1, Number(item.w) || 240);
+    var h = Math.max(1, Number(item.h) || 180);
+    var nw = Number(item.natW) || 0, nh = Number(item.natH) || 0;
+    // A cropped picture fills its box exactly: the box IS the window.
+    if (!(nw > 0) || !(nh > 0) || layImageCrop(item)) return { x: 0, y: 0, w: w, h: h };
+    var sc = Math.min(w / nw, h / nh);
+    var pw = nw * sc, ph = nh * sc;
+    return { x: (w - pw) / 2, y: (h - ph) / 2, w: pw, h: ph };
+  }
+  // ---- crop, mask and adjustments (Oct 2026, from the Illustrations app).
+  // A CROP keeps fractions of the whole picture cut from each side; the
+  // item box then shows exactly the rest, the picture drawn at its full
+  // size behind a clip (a rectangle, a rounded one, or an ellipse: the
+  // MASK). ADJUSTMENTS (brightness, contrast, saturation, grayscale,
+  // invert, a tint by brightness, a cleared white or black background)
+  // preview on the canvas as a CSS filter where one exists and are BAKED
+  // into the pixels for the file: every export waits for the bake.
+  function layImageCrop(item) {
+    var c = item && item.crop;
+    if (!c) return null;
+    function f(v) { v = Number(v); return isFinite(v) ? layClamp(v, 0, 0.95) : 0; }
+    var out = { l: f(c.l), t: f(c.t), r: f(c.r), b: f(c.b) };
+    if (out.l + out.r > 0.96) out.r = Math.max(0, 0.96 - out.l);
+    if (out.t + out.b > 0.96) out.b = Math.max(0, 0.96 - out.t);
+    return out.l || out.t || out.r || out.b ? out : null;
+  }
+  function layImageCropShape(item) {
+    return item && (item.cropShape === "rounded" || item.cropShape === "ellipse")
+      ? item.cropShape : "rect";
+  }
+  // The whole picture's rect in item coordinates when cropped: the box is
+  // the window, the picture extends past it by the cut fractions.
+  function layImageArt(item) {
+    var c = layImageCrop(item);
+    if (!c) return null;
+    var w = Math.max(1, Number(item.w) || 240), h = Math.max(1, Number(item.h) || 180);
+    var W = w / (1 - c.l - c.r), H = h / (1 - c.t - c.b);
+    return { x: -c.l * W, y: -c.t * H, w: W, h: H };
+  }
+  // Change one side's cut; the picture stays where it is on the page and
+  // the box shrinks or grows around the part that stays visible.
+  function layImageSetCrop(item, side, frac) {
+    var c = layImageCrop(item) || { l: 0, t: 0, r: 0, b: 0 };
+    var w = Math.max(1, Number(item.w) || 240), h = Math.max(1, Number(item.h) || 180);
+    var W = w / (1 - c.l - c.r), H = h / (1 - c.t - c.b);
+    var ax = (Number(item.x) || 0) - c.l * W, ay = (Number(item.y) || 0) - c.t * H;
+    var opp = { l: "r", r: "l", t: "b", b: "t" }[side];
+    frac = Math.round(layClamp(Number(frac) || 0, 0, 0.96 - c[opp]) * 10000) / 10000;
+    c[side] = frac;
+    if (c.l < 0.0005 && c.t < 0.0005 && c.r < 0.0005 && c.b < 0.0005) delete item.crop;
+    else item.crop = c;
+    item.w = Math.round(W * (1 - c.l - c.r) * 100) / 100;
+    item.h = Math.round(H * (1 - c.t - c.b) * 100) / 100;
+    item.x = Math.round((ax + c.l * W) * 100) / 100;
+    item.y = Math.round((ay + c.t * H) * 100) / 100;
+  }
+  function layImageAdjust(item) {
+    var a = item && item.adjust;
+    if (!a) return null;
+    function n(v) { v = Number(v); return isFinite(v) ? layClamp(Math.round(v), -100, 100) : 0; }
+    var out = { brightness: n(a.brightness), contrast: n(a.contrast), saturation: n(a.saturation),
+                grayscale: !!a.grayscale, invert: !!a.invert,
+                tint: layHexOr(a.tint, "") || null,
+                clear: a.clear === "white" || a.clear === "black" ? a.clear : null,
+                clearAmount: layClamp(Math.round(Number(a.clearAmount)) || 15, 1, 60) };
+    if (!out.brightness && !out.contrast && !out.saturation && !out.grayscale &&
+        !out.invert && !out.tint && !out.clear) return null;
+    return out;
+  }
+  function layAdjustKey(a) {
+    return [a.brightness, a.contrast, a.saturation, a.grayscale ? 1 : 0, a.invert ? 1 : 0,
+            a.tint || "", a.clear || "", a.clear ? a.clearAmount : ""].join("|");
+  }
+  // The part of an adjustment a CSS filter can show while the bake runs.
+  function layAdjustCss(a) {
+    var f = [];
+    if (a.brightness) f.push("brightness(" + layNum2(1 + a.brightness / 100) + ")");
+    if (a.contrast) f.push("contrast(" + layNum2(1 + a.contrast / 100) + ")");
+    if (a.grayscale) f.push("saturate(0)");
+    else if (a.saturation) f.push("saturate(" + layNum2(1 + a.saturation / 100) + ")");
+    if (a.invert) f.push("invert(1)");
+    return f.join(" ");
+  }
+  var LAY_BAKE = {}, LAY_BAKE_PENDING = {};
+  function layBakeKey(item, a) {
+    return layAdjustKey(a) + "|" + String(item.src || "").length;
+  }
+  function layImageBaked(item) {
+    var a = layImageAdjust(item);
+    if (!a) return null;
+    var e = LAY_BAKE[item.id];
+    return e && e.key === layBakeKey(item, a) ? e : null;
+  }
+  // The pixel pass, in the donor's order: brightness, contrast,
+  // saturation or grayscale, invert, tint by brightness, then clearing the
+  // background by its nearness to white or black.
+  function layAdjustPixels(data, a) {
+    var shift = a.brightness / 100 * 128;
+    var c = a.contrast / 100 * 255 * 0.98;
+    var stretch = 259 * (c + 255) / (255 * (259 - c));
+    var sat = a.grayscale ? 0 : 1 + a.saturation / 100;
+    var tint = null;
+    if (a.tint) {
+      var th = a.tint.slice(1);
+      if (th.length === 3) th = th.charAt(0) + th.charAt(0) + th.charAt(1) + th.charAt(1) + th.charAt(2) + th.charAt(2);
+      tint = [parseInt(th.substr(0, 2), 16), parseInt(th.substr(2, 2), 16), parseInt(th.substr(4, 2), 16)];
+    }
+    var edge = 255 - 2 * a.clearAmount;
+    for (var i = 0; i < data.length; i += 4) {
+      var r = data[i], g = data[i + 1], b = data[i + 2];
+      if (a.brightness) { r += shift; g += shift; b += shift; }
+      if (a.contrast) {
+        r = stretch * (r - 128) + 128; g = stretch * (g - 128) + 128; b = stretch * (b - 128) + 128;
+      }
+      var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (sat !== 1) { r = lum + (r - lum) * sat; g = lum + (g - lum) * sat; b = lum + (b - lum) * sat; }
+      if (a.invert) { r = 255 - r; g = 255 - g; b = 255 - b; lum = 255 - lum; }
+      if (tint) {
+        var l01 = Math.max(0, Math.min(255, lum)) / 255;
+        r = tint[0] * l01; g = tint[1] * l01; b = tint[2] * l01;
+      }
+      if (a.clear) {
+        var near = a.clear === "white" ? Math.min(r, g, b) : 255 - Math.max(r, g, b);
+        data[i + 3] = data[i + 3] * Math.max(0, Math.min(1, (edge - near) / 24));
+      }
+      data[i] = r; data[i + 1] = g; data[i + 2] = b;
+    }
+  }
+  function layBakeImage(item, done) {
+    var a = layImageAdjust(item);
+    if (!a || !layImageIsRaster(item)) { done(null); return; }
+    var key = layBakeKey(item, a);
+    var have = LAY_BAKE[item.id];
+    if (have && have.key === key) { done(have); return; }
+    var pend = item.id + "|" + key;
+    if (LAY_BAKE_PENDING[pend]) { LAY_BAKE_PENDING[pend].push(done); return; }
+    LAY_BAKE_PENDING[pend] = [done];
+    function flush(entry) {
+      var list = LAY_BAKE_PENDING[pend] || [];
+      delete LAY_BAKE_PENDING[pend];
+      for (var k = 0; k < list.length; k++) { try { list[k](entry); } catch (e) {} }
+    }
+    var img = new Image();
+    img.onload = function () {
+      var entry = null;
+      try {
+        var cv = document.createElement("canvas");
+        cv.width = img.naturalWidth || 1; cv.height = img.naturalHeight || 1;
+        var ctx = cv.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        var px = ctx.getImageData(0, 0, cv.width, cv.height);
+        layAdjustPixels(px.data, a);
+        ctx.putImageData(px, 0, 0);
+        var jpeg = !a.clear && /^data:image\/jpe?g/.test(String(item.src));
+        entry = { key: key, src: cv.toDataURL(jpeg ? "image/jpeg" : "image/png", 0.95) };
+        LAY_BAKE[item.id] = entry;
+      } catch (e) { entry = null; }
+      flush(entry);
+    };
+    img.onerror = function () { flush(null); };
+    img.src = item.src;
+  }
+  // Every adjusted raster on the layout baked, then done: the export's
+  // precondition (an export never waits on a filter the file cannot hold).
+  function layBakeImagesThen(items, done) {
+    var left = 0, i;
+    function step() { if (--left <= 0) done(); }
+    for (i = 0; i < items.length; i++)
+      if (items[i].kind === "image" && !items[i].hidden && layImageAdjust(items[i]) &&
+          layImageIsRaster(items[i]) && !layImageBaked(items[i])) left++;
+    if (!left) { done(); return; }
+    for (i = 0; i < items.length; i++)
+      if (items[i].kind === "image" && !items[i].hidden && layImageAdjust(items[i]) &&
+          layImageIsRaster(items[i]) && !layImageBaked(items[i])) layBakeImage(items[i], step);
+  }
+  // The canvas swaps the baked pixels in without a re-render of the whole
+  // layout: the picture's own node changes source and drops its preview
+  // filter.
+  function layImageRefreshBaked(id) {
+    var cv = el("ps-lcanvas");
+    var pic = cv && cv.querySelector('.ps-litem[data-item-id="' + id + '"] img');
+    var it = layItemById(id), baked = it && layImageBaked(it);
+    if (pic && baked) { pic.src = baked.src; pic.style.filter = ""; }
+  }
+  // ---- magnified views (Oct 2026, from the Illustrations app). A FRAME
+  // (a plain box with no fill and a red border, carrying `lens`) sits on a
+  // picture; an INSET, a copy of that picture cropped to the frame's
+  // region, sits beside it; two LINES (arrows with no heads, carrying
+  // `lensLine`) join the frame's corners to the inset's. Every render and
+  // every export re-reads the frame's place on the picture into the
+  // inset's crop and redraws the lines, so moving or resizing the frame
+  // moves the view, and resizing the inset changes how much larger it is.
+  var LAY_LENS_COLOR = "#d43d33";
+  function layLensOf(item) {
+    return item && item.kind === "box" && item.lens && item.lens.source && item.lens.inset
+      ? item.lens : null;
+  }
+  function layLensFrameFor(id) {
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var ln = layLensOf(items[i]);
+      if (ln && (ln.inset === id || ln.source === id)) return items[i];
+    }
+    return null;
+  }
+  function layLensIsInset(item) {
+    if (!item || item.kind !== "image") return false;
+    var items = layItems();
+    for (var i = 0; i < items.length; i++) {
+      var ln = layLensOf(items[i]);
+      if (ln && ln.inset === item.id) return true;
+    }
+    return false;
+  }
+  // The whole picture's rect on the page: the painted box, widened by a
+  // crop's cut fractions.
+  function layLensArt(src) {
+    var r = layItemRect(src), box = layImageBox(src), c = layImageCrop(src);
+    var x = r.x + box.x, y = r.y + box.y, w = box.w, h = box.h;
+    if (c) {
+      var W = w / (1 - c.l - c.r), H = h / (1 - c.t - c.b);
+      return { x: x - c.l * W, y: y - c.t * H, w: W, h: H };
+    }
+    return { x: x, y: y, w: w, h: h };
+  }
+  // Frames whose picture or inset is gone become plain boxes; lines whose
+  // frame is gone, or no longer a frame, are dropped.
+  function layLensPrune(items) {
+    var i, frames = {};
+    for (i = 0; i < items.length; i++) {
+      var it = items[i], ln = layLensOf(it);
+      if (!ln) continue;
+      var okSrc = false, okInset = false;
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].id === ln.source && items[k].kind === "image") okSrc = true;
+        if (items[k].id === ln.inset && items[k].kind === "image") okInset = true;
+      }
+      if (okSrc && okInset) frames[it.id] = ln;
+      else delete it.lens;
+    }
+    for (i = items.length - 1; i >= 0; i--)
+      if (items[i].kind === "arrow" && items[i].lensLine && !frames[items[i].lensLine])
+        items.splice(i, 1);
+  }
+  function layLensSyncIn(items) {
+    layLensPrune(items);
+    for (var i = 0; i < items.length; i++) {
+      var frame = items[i], ln = layLensOf(frame);
+      if (!ln) continue;
+      var src = null, inset = null, lines = [], k;
+      for (k = 0; k < items.length; k++) {
+        if (items[k].id === ln.source) src = items[k];
+        if (items[k].id === ln.inset) inset = items[k];
+        if (items[k].kind === "arrow" && items[k].lensLine === frame.id) lines.push(items[k]);
+      }
+      if (!src || !inset) continue;
+      var art = layLensArt(src), fr = layItemRect(frame);
+      var u0 = layClamp((fr.x - art.x) / art.w, 0, 1), u1 = layClamp((fr.right - art.x) / art.w, 0, 1);
+      var v0 = layClamp((fr.y - art.y) / art.h, 0, 1), v1 = layClamp((fr.bottom - art.y) / art.h, 0, 1);
+      if (u1 - u0 > 0.002 && v1 - v0 > 0.002) {
+        var r5 = function (v) { return Math.round(v * 100000) / 100000; };
+        inset.crop = { l: r5(u0), t: r5(v0), r: r5(1 - u1), b: r5(1 - v1) };
+        var iw = Math.max(24, Number(inset.w) || 240);
+        inset.h = Math.round(iw * ((v1 - v0) * art.h) / ((u1 - u0) * art.w) * 100) / 100;
+        inset.flipX = src.flipX; inset.flipY = src.flipY;
+        if (!inset.flipX) delete inset.flipX;
+        if (!inset.flipY) delete inset.flipY;
+      }
+      // The lines: the frame's two corners on the side facing the inset,
+      // to the inset's matching corners.
+      var ir = layItemRect(inset), ends;
+      if (ir.x >= fr.right) ends = [[fr.right, fr.y, ir.x, ir.y], [fr.right, fr.bottom, ir.x, ir.bottom]];
+      else if (ir.right <= fr.x) ends = [[fr.x, fr.y, ir.right, ir.y], [fr.x, fr.bottom, ir.right, ir.bottom]];
+      else if (ir.y >= fr.bottom) ends = [[fr.x, fr.bottom, ir.x, ir.y], [fr.right, fr.bottom, ir.right, ir.y]];
+      else ends = [[fr.x, fr.y, ir.x, ir.bottom], [fr.right, fr.y, ir.right, ir.bottom]];
+      for (k = 0; k < lines.length && k < 2; k++) {
+        var e = ends[k], a = lines[k];
+        a.from = null; a.to = null; a.x = 0; a.y = 0;
+        a.ax = e[0]; a.ay = e[1]; a.bx = e[2]; a.by = e[3];
+        layArrowSync(a);
+      }
+    }
+  }
+  function layLensSync() {
+    var doc = activeChart();
+    if (!doc || !isLayoutTab(doc) || !Array.isArray(doc.items)) return;
+    layLensSyncIn(doc.items);
+  }
+  function layTimelineSync() {
+    var doc = activeChart();
+    if (!doc || !isLayoutTab(doc) || !Array.isArray(doc.items)) return;
+    layTimelineSyncIn(doc.items);
+  }
+  // Copies of a view link among themselves; a frame copied without its
+  // picture or inset becomes a plain box, a line copied without its frame
+  // a plain line.
+  function layLensRemap(ids, idMap) {
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (!it) continue;
+      if (it.kind === "box" && it.lens) {
+        if (idMap[it.lens.source] && idMap[it.lens.inset])
+          it.lens = { source: idMap[it.lens.source], inset: idMap[it.lens.inset] };
+        else delete it.lens;
+      }
+      if (it.kind === "arrow" && it.lensLine) {
+        if (idMap[it.lensLine]) it.lensLine = idMap[it.lensLine]; else delete it.lensLine;
+      }
+    }
+  }
+  function layMagnify(imageId) {
+    var src = layItemById(imageId);
+    if (!src || src.kind !== "image" || !isLayoutTab(activeChart())) return null;
+    if (layLensIsInset(src)) { showToast("This picture is itself a magnified view."); return null; }
+    var items = layItems(), page = layPage(), r = layItemRect(src);
+    var side = Math.max(24, Math.round(0.3 * Math.min(r.w, r.h)));
+    var base = Number(layNewItemId().slice(1));
+    var frameId = "i" + base, insetId = "i" + (base + 1), l1 = "i" + (base + 2), l2 = "i" + (base + 3);
+    var frame = { id: frameId, kind: "box", text: "", fill: "none", border: "thick",
+                  borderColor: LAY_LENS_COLOR, corner: 0,
+                  x: Math.round(r.x + (r.w - side) / 2), y: Math.round(r.y + (r.h - side) / 2),
+                  w: side, h: side, lens: { source: src.id, inset: insetId } };
+    var inset = JSON.parse(JSON.stringify(src));
+    inset.id = insetId;
+    delete inset.group; delete inset.name; delete inset.lens; delete inset.turn;
+    delete inset.sbShow; delete inset.hidden; delete inset.locked;
+    inset.frame = "thick"; inset.frameColor = LAY_LENS_COLOR;
+    var iw = Math.round(layClamp(2.5 * side, 1.5 * side, Math.max(1.5 * side, page.w * 0.4)));
+    inset.w = iw; inset.h = iw;
+    var gap = 24;
+    if (r.right + gap + iw <= page.w) { inset.x = r.right + gap; inset.y = r.y; }
+    else if (r.x - gap - iw >= 0) { inset.x = r.x - gap - iw; inset.y = r.y; }
+    else if (r.bottom + gap + iw <= page.h) { inset.x = r.x; inset.y = r.bottom + gap; }
+    else if (r.y - gap - iw >= 0) { inset.x = r.x; inset.y = r.y - gap - iw; }
+    else { var spot = layPlaceRect(items, page, iw, iw); inset.x = spot.x; inset.y = spot.y; }
+    function line(id) {
+      return { id: id, kind: "arrow", route: "straight", heads: "none", width: 0.75,
+               color: LAY_LENS_COLOR, from: null, to: null, x: 0, y: 0,
+               ax: 0, ay: 0, bx: 1, by: 1, lensLine: frameId };
+    }
+    laySnapshot("magnify");
+    var at = items.indexOf(src);
+    items.splice(at + 1, 0, frame);
+    items.push(line(l1)); items.push(line(l2)); items.push(inset);
+    layLensSyncIn(items);
+    layClampAllItems();
+    laySetSelection([frameId]);
+    persist(); renderLayout();
+    layAnnounce("Added a magnified view: a frame on the picture, a larger copy of what is inside it, " +
+      "and two lines between them. Move or resize the frame to choose the region.");
+    return frameId;
+  }
+  function layMagnifySelected() {
+    var ids = laySelectedIds(), pick = null;
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "image") pick = it;
+    }
+    if (!pick) { showToast("Select a picture to magnify a region of it."); return null; }
+    return layMagnify(pick.id);
+  }
+  function layRemoveMagnifier(id) {
+    var it = layItemById(id), frame = layLensOf(it) ? it : layLensFrameFor(id);
+    if (!frame) return;
+    var ln = layLensOf(frame), items = layItems(), drop = [frame.id, ln.inset];
+    for (var i = 0; i < items.length; i++)
+      if (items[i].kind === "arrow" && items[i].lensLine === frame.id) drop.push(items[i].id);
+    laySnapshot("remove magnified view");
+    for (i = items.length - 1; i >= 0; i--)
+      if (drop.indexOf(items[i].id) !== -1) items.splice(i, 1);
+    layDropOrphanGroups();
+    laySetSelection([ln.source]);
+    persist(); renderLayout();
+    layAnnounce("Removed the magnified view.");
+  }
+  // ---- drawn paths: the pen, the pencil, node reshaping and brushes
+  // (Oct 2026, from the Illustrations app). A PATH item keeps its points as
+  // fractions of its box, so the corner handle scales it like any sized
+  // item; the pen places points by clicks (a click back on the first point
+  // closes it), the pencil records a drag and simplifies it; a selected
+  // path shows a handle per node to drag, Alt-click removes one, a
+  // double-click on the line adds one. A BRUSH draws marks along the path
+  // in place of its stroke: a membrane's lipid heads, a DNA double helix,
+  // actin's beaded strands, a microtubule's rows, plain beads.
+  var LAY_DRAW = null;
+  var LAY_PATH_FILL = "#eef4fc", LAY_PATH_STROKE = "#22364d";
+  var LAY_BRUSHES = ["none", "membrane", "dna", "actin", "microtubule", "beads"];
+  var LAY_BRUSH_COLOR = { membrane: "#efc47d", dna: "#2d5c94", actin: "#d35a80",
+                          microtubule: "#5bb1ba", beads: "#e18e4c" };
+  var LAY_BRUSH_SECOND = { dna: "#902634", microtubule: "#2d5c94", actin: "#a83d63" };
+  var LAY_BRUSH_UNIT = 3.78;   // one donor millimetre, in page pixels
+  function layPathStyle(item) {
+    var brush = LAY_BRUSHES.indexOf(item.brush) > 0 ? item.brush : "none";
+    var color = layHexOr(item.brushColor, LAY_BRUSH_COLOR[brush] || "#888888");
+    return { closed: !!item.closed, smooth: !!item.smooth,
+             fill: item.fill === "none" || !item.fill ? "none" : layHexOr(item.fill, LAY_PATH_FILL),
+             stroke: item.stroke === "none" ? "none" : layHexOr(item.stroke, LAY_PATH_STROKE),
+             width: layClamp(item.width == null ? 1.5 : Number(item.width) || 0, 0.25, 8),
+             dashed: !!item.dashed,
+             heads: item.heads === "end" || item.heads === "both" ? item.heads : "none",
+             brush: brush,
+             brushSize: layClamp(item.brushSize == null ? 1 : Number(item.brushSize) || 1, 0.4, 3),
+             brushColor: color,
+             brushColor2: layHexOr(item.brushColor2, LAY_BRUSH_SECOND[brush] || layShade(color, -0.25)) };
+  }
+  // The points on the page.
+  function layPathPoints(item) {
+    var x = Number(item.x) || 0, y = Number(item.y) || 0;
+    var w = Number(item.w) || 1, h = Number(item.h) || 1, out = [];
+    var pts = Array.isArray(item.points) ? item.points : [];
+    for (var i = 0; i < pts.length; i++)
+      out.push({ x: x + (Number(pts[i][0]) || 0) * w, y: y + (Number(pts[i][1]) || 0) * h });
+    return out;
+  }
+  // A box that hugs page points (a flat dimension widened to 2 px about
+  // its middle), the points written back as 5-decimal fractions.
+  function layPathFit(item, pts) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i;
+    for (i = 0; i < pts.length; i++) {
+      minX = Math.min(minX, pts[i].x); maxX = Math.max(maxX, pts[i].x);
+      minY = Math.min(minY, pts[i].y); maxY = Math.max(maxY, pts[i].y);
+    }
+    if (!isFinite(minX)) { minX = 0; maxX = 2; minY = 0; maxY = 2; }
+    if (maxX - minX < 2) { var cxm = (minX + maxX) / 2; minX = cxm - 1; maxX = cxm + 1; }
+    if (maxY - minY < 2) { var cym = (minY + maxY) / 2; minY = cym - 1; maxY = cym + 1; }
+    item.x = Math.round(minX * 100) / 100; item.y = Math.round(minY * 100) / 100;
+    item.w = Math.round((maxX - minX) * 100) / 100; item.h = Math.round((maxY - minY) * 100) / 100;
+    item.points = [];
+    for (i = 0; i < pts.length; i++)
+      item.points.push([Math.round((pts[i].x - minX) / item.w * 100000) / 100000,
+                        Math.round((pts[i].y - minY) / item.h * 100000) / 100000]);
+  }
+  function layPathFrom(pts, style) {
+    var item = { id: layNewItemId(), kind: "path", points: [], x: 0, y: 0, w: 2, h: 2,
+                 closed: !!style.closed, smooth: !!style.smooth,
+                 fill: style.closed ? LAY_PATH_FILL : "none",
+                 stroke: LAY_PATH_STROKE, width: 1.5 };
+    layPathFit(item, pts);
+    return item;
+  }
+  // Catmull-Rom (tension 0.5) through the points; the ends clamp when the
+  // path is open.
+  function layPathCubics(pts, closed) {
+    var n = pts.length, out = [];
+    if (n < 2) return out;
+    var segs = closed ? n : n - 1;
+    for (var i = 0; i < segs; i++) {
+      var p1 = pts[i], p2 = pts[(i + 1) % n];
+      var p0 = closed ? pts[(i - 1 + n) % n] : pts[Math.max(0, i - 1)];
+      var p3 = closed ? pts[(i + 2) % n] : pts[Math.min(n - 1, i + 2)];
+      out.push([p1, { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 },
+                { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 }, p2]);
+    }
+    return out;
+  }
+  function layPathD(pts, closed, smooth, ox, oy) {
+    ox = ox || 0; oy = oy || 0;
+    if (!pts.length) return "";
+    var d = "M" + layNum2(pts[0].x + ox) + " " + layNum2(pts[0].y + oy), i;
+    if (smooth && pts.length > 2) {
+      var cubics = layPathCubics(pts, closed);
+      for (i = 0; i < cubics.length; i++) {
+        var c = cubics[i];
+        d += " C" + layNum2(c[1].x + ox) + " " + layNum2(c[1].y + oy) + " " +
+          layNum2(c[2].x + ox) + " " + layNum2(c[2].y + oy) + " " +
+          layNum2(c[3].x + ox) + " " + layNum2(c[3].y + oy);
+      }
+      return closed ? d + " Z" : d;
+    }
+    for (i = 1; i < pts.length; i++) d += " L" + layNum2(pts[i].x + ox) + " " + layNum2(pts[i].y + oy);
+    return closed ? d + " Z" : d;
+  }
+  // Ramer-Douglas-Peucker, for the pencil's raw trail.
+  function layPathSimplify(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    var first = pts[0], last = pts[pts.length - 1], maxD = 0, at = 0;
+    for (var i = 1; i < pts.length - 1; i++) {
+      var dx = last.x - first.x, dy = last.y - first.y, L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var d = Math.abs((pts[i].x - first.x) * dy - (pts[i].y - first.y) * dx) / L;
+      if (d > maxD) { maxD = d; at = i; }
+    }
+    if (maxD <= tol) return [first, last];
+    var a = layPathSimplify(pts.slice(0, at + 1), tol), b = layPathSimplify(pts.slice(at), tol);
+    return a.slice(0, -1).concat(b);
+  }
+  // Even samples along the drawn curve, each with its tangent and normal.
+  function layPathSamples(pts, closed, smooth, step) {
+    var poly = [], i, k;
+    if (smooth && pts.length > 2) {
+      var cubics = layPathCubics(pts, closed);
+      for (i = 0; i < cubics.length; i++) {
+        var c = cubics[i];
+        for (k = 0; k < 24; k++) {
+          var t = k / 24, u = 1 - t;
+          poly.push({ x: u * u * u * c[0].x + 3 * u * u * t * c[1].x + 3 * u * t * t * c[2].x + t * t * t * c[3].x,
+                      y: u * u * u * c[0].y + 3 * u * u * t * c[1].y + 3 * u * t * t * c[2].y + t * t * t * c[3].y });
+        }
+      }
+      poly.push(closed ? cubics[0][0] : pts[pts.length - 1]);
+    } else {
+      poly = pts.slice();
+      if (closed && pts.length > 1) poly.push(pts[0]);
+    }
+    var out = [], acc = 0, next = 0;
+    for (i = 1; i < poly.length; i++) {
+      var ax = poly[i - 1].x, ay = poly[i - 1].y, bx = poly[i].x, by = poly[i].y;
+      var dx = bx - ax, dy = by - ay, L = Math.sqrt(dx * dx + dy * dy);
+      if (!L) continue;
+      var tx = dx / L, ty = dy / L;
+      while (next <= acc + L) {
+        var f = (next - acc) / L;
+        out.push({ x: ax + dx * f, y: ay + dy * f, tx: tx, ty: ty, nx: ty, ny: -tx, s: next });
+        next += step;
+      }
+      acc += L;
+    }
+    return out;
+  }
+  function layPathHeadsInto(parent, doc, pts, st, ox, oy) {
+    if (st.heads === "none" || pts.length < 2 || st.closed) return;
+    var ns = "http://www.w3.org/2000/svg", len = layArrowHeadLen(st.width), half = len * 0.42;
+    function tri(tip, prev) {
+      var dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dx / L, uy = dy / L, bx = tip.x - ux * len, by = tip.y - uy * len;
+      var poly = doc.createElementNS(ns, "polygon");
+      poly.setAttribute("points", layArrowPoly([tip, { x: bx - uy * half, y: by + ux * half },
+        { x: bx + uy * half, y: by - ux * half }], ox, oy));
+      poly.setAttribute("fill", st.stroke === "none" ? LAY_PATH_STROKE : st.stroke);
+      parent.appendChild(poly);
+    }
+    tri(pts[pts.length - 1], pts[pts.length - 2]);
+    if (st.heads === "both") tri(pts[0], pts[1]);
+  }
+  // The brush marks, one path per kind of mark per colour.
+  function layBrushInto(parent, doc, pts, st, ox, oy) {
+    var ns = "http://www.w3.org/2000/svg", k = LAY_BRUSH_UNIT * st.brushSize, i;
+    var color = st.brushColor, second = st.brushColor2, ink = "#22364d";
+    function mk(attrs) {
+      var n = doc.createElementNS(ns, "path");
+      for (var a in attrs) if (attrs.hasOwnProperty(a)) n.setAttribute(a, String(attrs[a]));
+      parent.appendChild(n);
+      return n;
+    }
+    function circle(x, y, r) {
+      return "M" + layNum2(x - r + ox) + " " + layNum2(y + oy) + " a" + layNum2(r) + " " + layNum2(r) +
+        " 0 1 0 " + layNum2(2 * r) + " 0 a" + layNum2(r) + " " + layNum2(r) + " 0 1 0 " + layNum2(-2 * r) + " 0";
+    }
+    function seg(ax, ay, bx, by) {
+      return "M" + layNum2(ax + ox) + " " + layNum2(ay + oy) + " L" + layNum2(bx + ox) + " " + layNum2(by + oy);
+    }
+    var b = st.brush;
+    if (b === "membrane") {
+      var r = 0.42 * k, half = 1.15 * k, sm = layPathSamples(pts, st.closed, st.smooth, 2.15 * r);
+      var heads = "", tails = "";
+      for (i = 0; i < sm.length; i++) for (var side = -1; side <= 1; side += 2) {
+        var p = sm[i], hx = p.x + p.nx * half * side, hy = p.y + p.ny * half * side;
+        heads += circle(hx, hy, r);
+        var run = half - r - 0.08 * k;
+        for (var tOff = -0.4; tOff <= 0.4; tOff += 0.8) {
+          var sx = hx - p.nx * r * side + p.tx * tOff * r, sy = hy - p.ny * r * side + p.ty * tOff * r;
+          tails += seg(sx, sy, sx - p.nx * run * side, sy - p.ny * run * side);
+        }
+      }
+      if (tails) mk({ d: tails, fill: "none", stroke: "#9fb0c3", "stroke-width": layNum2(0.12 * k), "stroke-linecap": "round", "data-brush": "membrane-tails" });
+      if (heads) mk({ d: heads, fill: color, stroke: ink, "stroke-width": layNum2(0.1 * k), "data-brush": "membrane-heads" });
+    } else if (b === "dna") {
+      var amp = 1.1 * k, period = 7 * k, sd = layPathSamples(pts, st.closed, st.smooth, 0.25 * k);
+      var farA = "", farB = "", nearA = "", nearB = "", rungsA = "", rungsB = "";
+      var prevA = null, prevB = null, prevNearA = false, prevNearB = false;
+      for (i = 0; i < sd.length; i++) {
+        var q = sd[i], ph = 2 * Math.PI * q.s / period;
+        var oa = amp * Math.sin(ph), ob = amp * Math.sin(ph + Math.PI);
+        var A = { x: q.x + q.nx * oa, y: q.y + q.ny * oa }, B = { x: q.x + q.nx * ob, y: q.y + q.ny * ob };
+        var nearAnow = Math.cos(ph) >= 0, nearBnow = Math.cos(ph + Math.PI) >= 0;
+        if (prevA) {
+          if (nearAnow) nearA += seg(prevA.x, prevA.y, A.x, A.y); else farA += seg(prevA.x, prevA.y, A.x, A.y);
+          if (nearBnow) nearB += seg(prevB.x, prevB.y, B.x, B.y); else farB += seg(prevB.x, prevB.y, B.x, B.y);
+        }
+        if (i > 0 && i % 3 === 0) {
+          if ((i / 3) % 2) rungsA += seg(A.x, A.y, B.x, B.y); else rungsB += seg(A.x, A.y, B.x, B.y);
+        }
+        prevA = A; prevB = B; prevNearA = nearAnow; prevNearB = nearBnow;
+      }
+      var sw = layNum2(0.5 * k);
+      if (farA) mk({ d: farA, fill: "none", stroke: color, "stroke-width": sw, "stroke-linecap": "round", "data-brush": "dna-far-a" });
+      if (farB) mk({ d: farB, fill: "none", stroke: second, "stroke-width": sw, "stroke-linecap": "round", "data-brush": "dna-far-b" });
+      if (rungsA) mk({ d: rungsA, fill: "none", stroke: "#e3a12e", "stroke-width": layNum2(0.28 * k), "data-brush": "dna-rungs" });
+      if (rungsB) mk({ d: rungsB, fill: "none", stroke: "#597b2f", "stroke-width": layNum2(0.28 * k), "data-brush": "dna-rungs" });
+      if (nearA) mk({ d: nearA, fill: "none", stroke: color, "stroke-width": sw, "stroke-linecap": "round", "data-brush": "dna-near-a" });
+      if (nearB) mk({ d: nearB, fill: "none", stroke: second, "stroke-width": sw, "stroke-linecap": "round", "data-brush": "dna-near-b" });
+    } else if (b === "actin") {
+      var ra = 0.48 * k, sa = layPathSamples(pts, st.closed, st.smooth, 1.7 * ra), s1 = "", s2 = "";
+      for (i = 0; i < sa.length; i++) {
+        var pa = sa[i], phase = Math.sin(2 * Math.PI * pa.s / (1.7 * ra * 13)), off = (0.42 + 0.2 * phase) * k;
+        s1 += circle(pa.x + pa.nx * off, pa.y + pa.ny * off, ra);
+        s2 += circle(pa.x - pa.nx * off, pa.y - pa.ny * off, ra);
+      }
+      if (s2) mk({ d: s2, fill: second, stroke: ink, "stroke-width": layNum2(0.08 * k), "data-brush": "actin-2" });
+      if (s1) mk({ d: s1, fill: color, stroke: ink, "stroke-width": layNum2(0.08 * k), "data-brush": "actin-1" });
+    } else if (b === "microtubule") {
+      var rm = 0.42 * k, smt = layPathSamples(pts, st.closed, st.smooth, 2.05 * rm), m1 = "", m2 = "";
+      for (i = 0; i < smt.length; i++) for (var row = 0; row < 3; row++) {
+        var pm = smt[i], offm = (row - 1) * 0.9 * k;
+        var dm = circle(pm.x + pm.nx * offm, pm.y + pm.ny * offm, rm);
+        if ((i + row) % 2) m1 += dm; else m2 += dm;
+      }
+      if (m2) mk({ d: m2, fill: second, stroke: ink, "stroke-width": layNum2(0.08 * k), "data-brush": "microtubule-2" });
+      if (m1) mk({ d: m1, fill: color, stroke: ink, "stroke-width": layNum2(0.08 * k), "data-brush": "microtubule-1" });
+    } else if (b === "beads") {
+      var rb = 0.8 * k, sb = layPathSamples(pts, st.closed, st.smooth, 2.4 * rb), db = "";
+      for (i = 0; i < sb.length; i++) db += circle(sb[i].x, sb[i].y, rb);
+      if (db) mk({ d: db, fill: color, stroke: ink, "stroke-width": layNum2(0.12 * k), "data-brush": "beads" });
+    }
+  }
+  // The drawn path into parent: the fill (closed), the stroke or the
+  // brush, the heads. Shared by the canvas and the file.
+  function layPathInto(parent, doc, item, ox, oy) {
+    var ns = "http://www.w3.org/2000/svg", st = layPathStyle(item), pts = layPathPoints(item);
+    if (pts.length < 2) return;
+    var d = layPathD(pts, st.closed, st.smooth, ox, oy);
+    var main = doc.createElementNS(ns, "path");
+    main.setAttribute("class", "ps-lpath-line");
+    main.setAttribute("d", d);
+    main.setAttribute("fill", st.closed ? st.fill : "none");
+    if (st.brush === "none" && st.stroke !== "none") {
+      main.setAttribute("stroke", st.stroke);
+      main.setAttribute("stroke-width", String(st.width));
+      main.setAttribute("stroke-linecap", "round");
+      main.setAttribute("stroke-linejoin", "round");
+      if (st.dashed) main.setAttribute("stroke-dasharray", st.width * 4 + " " + st.width * 3);
+    } else main.setAttribute("stroke", "none");
+    parent.appendChild(main);
+    if (st.brush !== "none") layBrushInto(parent, doc, pts, st, ox, oy);
+    else layPathHeadsInto(parent, doc, pts, st, ox, oy);
+  }
+  function layPathSvg(item, selected) {
+    var ns = "http://www.w3.org/2000/svg", st = layPathStyle(item), pts = layPathPoints(item);
+    var svg = document.createElementNS(ns, "svg");
+    var w = Math.max(1, Number(item.w) || 1), h = Math.max(1, Number(item.h) || 1);
+    svg.setAttribute("width", layNum2(w)); svg.setAttribute("height", layNum2(h));
+    svg.setAttribute("viewBox", "0 0 " + layNum2(w) + " " + layNum2(h));
+    svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false");
+    svg.style.overflow = "visible";
+    var ox = -(Number(item.x) || 0), oy = -(Number(item.y) || 0);
+    var d = layPathD(pts, st.closed, st.smooth, ox, oy);
+    if (selected) {
+      var halo = document.createElementNS(ns, "path");
+      halo.setAttribute("class", "ps-larrow-halo");
+      halo.setAttribute("d", d); halo.setAttribute("fill", "none");
+      halo.setAttribute("stroke-width", String(st.width + 8));
+      halo.setAttribute("stroke-linejoin", "round"); halo.setAttribute("stroke-linecap", "round");
+      svg.appendChild(halo);
+    }
+    var hit = document.createElementNS(ns, "path");
+    hit.setAttribute("class", "ps-lpath-hit" + (st.closed && st.fill !== "none" ? " ps-lpath-hit-filled" : ""));
+    hit.setAttribute("d", d);
+    hit.setAttribute("stroke-width", String(Math.max(16, st.width + 12)));
+    svg.appendChild(hit);
+    layPathInto(svg, document, item, ox, oy);
+    return svg;
+  }
+  function layoutPathNode(doc, item) {
+    var g = doc.createElementNS("http://www.w3.org/2000/svg", "g");
+    layPathInto(g, doc, item, 0, 0);
+    return g;
+  }
+  function layPathTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "path") out.push(it);
+    }
+    return out;
+  }
+  // Rebuild ONE path's node in place during a node drag.
+  function layPathRefresh(it) {
+    var cv = el("ps-lcanvas");
+    var old = cv && cv.querySelector('.ps-litem[data-item-id="' + it.id + '"]');
+    if (!old) return;
+    var fresh = layBuildItem(it);
+    old.parentNode.replaceChild(fresh, old);
+  }
+  // Node handles on a selected path: drag moves the node (the box refits
+  // on release), Alt-click removes it while more than two remain.
+  function layAttachPathNodes(node, item) {
+    var pts = layPathPoints(item);
+    for (var i = 0; i < pts.length; i++) (function (idx) {
+      var h = mkEl("div", "ps-lhandle-end ps-lhandle-node");
+      h.setAttribute("data-role", "lay-path-node");
+      h.setAttribute("data-idx", String(idx));
+      h.setAttribute("aria-hidden", "true");
+      h.style.left = layNum2(pts[idx].x - item.x) + "px";
+      h.style.top = layNum2(pts[idx].y - item.y) + "px";
+      setTip(h, "Drag to move this node. Alt-click removes it.");
+      node.appendChild(h);
+    })(i);
+  }
+  function layPathNodeDragStart(e, item, idx) {
+    var cv = el("ps-lcanvas"), z = layZoom(), box = cv.getBoundingClientRect(), v = layView();
+    if (e.altKey) {
+      var cur = layPathPoints(item);
+      if (cur.length <= 2) return;
+      laySnapshot("remove node");
+      cur.splice(idx, 1);
+      layPathFit(item, cur);
+      persist(); renderLayout();
+      return;
+    }
+    laySnapshot("move node", "pnode:" + item.id + ":" + idx);
+    var pts = layPathPoints(item), moved = false;
+    function at(ev) {
+      var px = layClamp((ev.clientX - box.left) / z, 0, layPage().w);
+      var py = layClamp((ev.clientY - box.top) / z, 0, layPage().h);
+      if (v.snap && !ev.metaKey && !ev.ctrlKey) {
+        px = Math.round(px / v.grid) * v.grid; py = Math.round(py / v.grid) * v.grid;
+      }
+      return { x: px, y: py };
+    }
+    function mv(ev) {
+      var p = at(ev);
+      if (Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) > 2) moved = true;
+      pts[idx] = p;
+      layPathFit(item, pts);
+      layPathRefresh(item);
+    }
+    function up() {
+      document.removeEventListener("pointermove", mv);
+      document.removeEventListener("pointerup", up);
+      if (moved) { layClampAllItems(); persist(); }
+      renderLayout();
+    }
+    document.addEventListener("pointermove", mv);
+    document.addEventListener("pointerup", up);
+  }
+  // A double-click on the line adds a node on its nearest straight run.
+  function layPathInsertNode(item, px, py) {
+    var pts = layPathPoints(item), st = layPathStyle(item);
+    if (pts.length < 2) return;
+    var best = -1, bestD = Infinity, bestP = null, n = pts.length;
+    var segs = st.closed ? n : n - 1;
+    for (var i = 0; i < segs; i++) {
+      var a = pts[i], b = pts[(i + 1) % n];
+      var dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1;
+      var t = layClamp(((px - a.x) * dx + (py - a.y) * dy) / L2, 0, 1);
+      var qx = a.x + dx * t, qy = a.y + dy * t, d = Math.sqrt((px - qx) * (px - qx) + (py - qy) * (py - qy));
+      if (d < bestD) { bestD = d; best = i; bestP = { x: qx, y: qy }; }
+    }
+    if (best < 0) return;
+    laySnapshot("add node");
+    pts.splice(best + 1, 0, bestP);
+    layPathFit(item, pts);
+    persist(); renderLayout();
+  }
+  // ---- the pen and the pencil
+  function layStartDraw(kind) {
+    if (!isLayoutTab(activeChart())) return;
+    layFinishDraw(true);
+    LAY_DRAW = { kind: kind, pts: [], cursor: null, down: false, raw: [] };
+    laySetSelection([]);
+    var cv = el("ps-lcanvas");
+    if (cv) cv.classList.add("ps-ldraw-on");
+    renderLayout();
+    showToast(kind === "pen"
+      ? "Pen: click to place points; click the first point again to close the shape; " +
+        "double-click, Enter or Escape to finish a line."
+      : "Pencil: drag to draw; let go to finish. Escape cancels.");
+    layAnnounce(kind === "pen" ? "Pen drawing. Click to place points." : "Pencil drawing. Drag to draw.");
+  }
+  function layDrawPoint(e) {
+    var cv = el("ps-lcanvas"), z = layZoom(), box = cv.getBoundingClientRect(), v = layView(), p = layPage();
+    var px = layClamp((e.clientX - box.left) / z, 0, p.w), py = layClamp((e.clientY - box.top) / z, 0, p.h);
+    if (LAY_DRAW && LAY_DRAW.kind === "pen" && v.snap && !e.metaKey && !e.ctrlKey) {
+      px = Math.round(px / v.grid) * v.grid; py = Math.round(py / v.grid) * v.grid;
+    }
+    return { x: px, y: py };
+  }
+  function layDrawPreview() {
+    var cv = el("ps-lcanvas");
+    if (!cv) return;
+    var old = cv.querySelector("#ps-ldraw-preview");
+    if (old) old.parentNode.removeChild(old);
+    if (!LAY_DRAW) return;
+    var ns = "http://www.w3.org/2000/svg", p = layPage();
+    var svg = document.createElementNS(ns, "svg");
+    svg.id = "ps-ldraw-preview";
+    svg.setAttribute("width", String(p.w)); svg.setAttribute("height", String(p.h));
+    svg.setAttribute("viewBox", "0 0 " + p.w + " " + p.h);
+    svg.setAttribute("aria-hidden", "true");
+    var pts = LAY_DRAW.pts.slice();
+    if (LAY_DRAW.kind === "pen" && LAY_DRAW.cursor && pts.length) pts.push(LAY_DRAW.cursor);
+    if (pts.length > 1) {
+      var line = document.createElementNS(ns, "path");
+      line.setAttribute("d", layPathD(pts, false, LAY_DRAW.kind === "pencil", 0, 0));
+      line.setAttribute("fill", "none"); line.setAttribute("stroke", "#1a5fb4");
+      line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "5 4");
+      svg.appendChild(line);
+    }
+    if (LAY_DRAW.kind === "pen") for (var i = 0; i < LAY_DRAW.pts.length; i++) {
+      var dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("cx", layNum2(LAY_DRAW.pts[i].x)); dot.setAttribute("cy", layNum2(LAY_DRAW.pts[i].y));
+      dot.setAttribute("r", i === 0 ? "5" : "3.5");
+      dot.setAttribute("fill", i === 0 ? "#ffffff" : "#1a5fb4"); dot.setAttribute("stroke", "#1a5fb4");
+      dot.setAttribute("stroke-width", "1.5");
+      svg.appendChild(dot);
+    }
+    cv.appendChild(svg);
+  }
+  function layDrawPointerDown(e) {
+    var d = LAY_DRAW;
+    if (!d) return;
+    var p = layDrawPoint(e), z = layZoom();
+    if (d.kind === "pen") {
+      if (d.pts.length >= 3) {
+        var f = d.pts[0], dist = Math.sqrt((f.x - p.x) * (f.x - p.x) + (f.y - p.y) * (f.y - p.y)) * z;
+        if (dist <= 8) { layFinishDraw(false, true); return; }
+      }
+      var last = d.pts[d.pts.length - 1];
+      if (last && e.shiftKey) {
+        var ang = Math.round(Math.atan2(p.y - last.y, p.x - last.x) / (Math.PI / 4)) * (Math.PI / 4);
+        var L = Math.sqrt((p.x - last.x) * (p.x - last.x) + (p.y - last.y) * (p.y - last.y));
+        p = { x: last.x + Math.cos(ang) * L, y: last.y + Math.sin(ang) * L };
+      }
+      if (last && Math.abs(last.x - p.x) < 1 && Math.abs(last.y - p.y) < 1) return;
+      d.pts.push(p);
+      layDrawPreview();
+      return;
+    }
+    d.down = true; d.raw = [p]; d.pts = [p];
+    var sx = e.clientX, sy = e.clientY;
+    function mv(ev) {
+      if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 2) return;
+      sx = ev.clientX; sy = ev.clientY;
+      var q = layDrawPoint(ev);
+      d.raw.push(q); d.pts = d.raw;
+      layDrawPreview();
+    }
+    function up() {
+      document.removeEventListener("pointermove", mv);
+      document.removeEventListener("pointerup", up);
+      d.down = false;
+      var raw = d.raw, length = 0, i;
+      for (i = 1; i < raw.length; i++)
+        length += Math.sqrt((raw[i].x - raw[i - 1].x) * (raw[i].x - raw[i - 1].x) + (raw[i].y - raw[i - 1].y) * (raw[i].y - raw[i - 1].y));
+      var ends = raw.length > 1 ? Math.sqrt((raw[0].x - raw[raw.length - 1].x) * (raw[0].x - raw[raw.length - 1].x) +
+        (raw[0].y - raw[raw.length - 1].y) * (raw[0].y - raw[raw.length - 1].y)) : Infinity;
+      var closed = length > 45 && ends < 11;
+      var simple;
+      if (closed && raw.length > 3) {
+        // A ring's first-to-last chord is a point, so the simplifier would
+        // keep nothing: simplify the two halves, split at the sample
+        // farthest from the start, then drop the duplicate end.
+        var far = 1, farD = 0;
+        for (i = 1; i < raw.length; i++) {
+          var dd = (raw[i].x - raw[0].x) * (raw[i].x - raw[0].x) + (raw[i].y - raw[0].y) * (raw[i].y - raw[0].y);
+          if (dd > farD) { farD = dd; far = i; }
+        }
+        simple = layPathSimplify(raw.slice(0, far + 1), 1).slice(0, -1)
+          .concat(layPathSimplify(raw.slice(far), 1));
+        if (simple.length > 2) simple = simple.slice(0, -1);
+      } else simple = layPathSimplify(raw, 1);
+      d.pts = simple;
+      layFinishDraw(false, closed, true);
+    }
+    document.addEventListener("pointermove", mv);
+    document.addEventListener("pointerup", up);
+  }
+  function layDrawPointerMove(e) {
+    if (!LAY_DRAW || LAY_DRAW.kind !== "pen" || !LAY_DRAW.pts.length) return;
+    LAY_DRAW.cursor = layDrawPoint(e);
+    layDrawPreview();
+  }
+  // cancel: drop whatever was drawn. closed: the pen closed on its first
+  // point, or the pencil's ends met. smooth: the pencil's curve.
+  function layFinishDraw(cancel, closed, smooth) {
+    var d = LAY_DRAW;
+    if (!d) return false;
+    LAY_DRAW = null;
+    var cv = el("ps-lcanvas");
+    if (cv) cv.classList.remove("ps-ldraw-on");
+    if (cancel || d.pts.length < 2) {
+      renderLayout();
+      if (!cancel) layAnnounce("Nothing drawn.");
+      return false;
+    }
+    var item = layPathFrom(d.pts, { closed: !!closed, smooth: !!smooth });
+    layAddItem(item, false, 0);
+    layAnnounce("Added a drawn " + (closed ? "shape" : "line") + " with " + d.pts.length +
+      " points. Drag a node to reshape it; Alt-click removes a node; double-click the line adds one.");
+    return true;
+  }
+  function layImageFrame(item) {
+    var f = item.frame === "thin" || item.frame === "thick" ? item.frame : "none";
+    return { kind: f, width: f === "none" ? 0 : f === "thick" ? 2 : 1,
+             color: layHexOr(item.frameColor, "#22364d") };
+  }
+  function layScaleBarStyle(item) {
+    var per = Number(item.sbPerPixel), len = Number(item.sbLength);
+    return { show: !!item.sbShow,
+             perPixel: per > 0 ? per : 1,
+             unit: LAY_SB_UNITS[item.sbUnit] ? item.sbUnit : "um",
+             length: len > 0 ? len : 50,
+             corner: LAY_SB_CORNERS[item.sbCorner] ? item.sbCorner : "br",
+             color: layHexOr(item.sbColor, "#ffffff"),
+             label: item.sbLabel !== false };
+  }
+  function layScaleBarText(st) {
+    return String(Math.round(st.length * 1000) / 1000) + " " +
+      LAY_SB_UNITS[st.unit];
+  }
+  // The bar in item coordinates, or null when nothing draws (off, an
+  // SVG source, or no pixel size to measure by). Thickness and inset
+  // follow the picture's smaller side, the label is a small fixed face.
+  // A bar longer than the picture is held to the picture's width and
+  // flagged, so the rail can say the length is wrong instead of letting
+  // the bar run past the edge.
+  function layScaleBarGeom(item) {
+    var st = layScaleBarStyle(item);
+    if (!st.show || !layImageIsRaster(item)) return null;
+    var px = layImagePx(item);
+    if (!(px.w > 0)) return null;
+    var box = layImageBox(item);
+    var m = Math.min(box.w, box.h);
+    var inset = Math.max(4, 0.05 * m);
+    var thick = Math.max(1.5, 0.014 * m);
+    var fs = Math.max(7, Math.min(12, Math.round(0.065 * m)));
+    var room = Math.max(1, box.w - inset * 2);
+    var crop = layImageCrop(item);
+    var visiblePx = px.w * (crop ? 1 - crop.l - crop.r : 1);
+    var len = st.length / st.perPixel * (box.w / visiblePx);
+    var clipped = len > room;
+    if (clipped) len = room;
+    var right = st.corner === "tr" || st.corner === "br";
+    var bottom = st.corner === "bl" || st.corner === "br";
+    var x = box.x + (right ? box.w - inset - len : inset);
+    var y = box.y + (bottom ? box.h - inset - thick
+                            : inset + (st.label ? 1.15 * fs : 0));
+    return { x: x, y: y, w: len, h: thick, fs: fs, text: layScaleBarText(st),
+             label: st.label, color: st.color, clipped: clipped,
+             tx: x + len / 2, ty: y - 0.3 * fs };
+  }
+  // Shared by the canvas overlay and the export: the frame rect, then the
+  // bar and its label, offset by (ox, oy) - zero on the canvas, the item's
+  // page position in the export.
+  function layImageDecorInto(parent, item, ox, oy, fr, g) {
+    var ns = "http://www.w3.org/2000/svg", doc = parent.ownerDocument;
+    var box = layImageBox(item);
+    if (fr.width) {
+      var mask = layImageCropShape(item), r;
+      if (mask === "ellipse") {
+        r = doc.createElementNS(ns, "ellipse");
+        r.setAttribute("class", "ps-limg-frame");
+        r.setAttribute("cx", layNum2(ox + box.x + box.w / 2));
+        r.setAttribute("cy", layNum2(oy + box.y + box.h / 2));
+        r.setAttribute("rx", layNum2(Math.max(0.5, box.w / 2 - fr.width / 2)));
+        r.setAttribute("ry", layNum2(Math.max(0.5, box.h / 2 - fr.width / 2)));
+      } else {
+        r = doc.createElementNS(ns, "rect");
+        r.setAttribute("class", "ps-limg-frame");
+        r.setAttribute("x", layNum2(ox + box.x + fr.width / 2));
+        r.setAttribute("y", layNum2(oy + box.y + fr.width / 2));
+        r.setAttribute("width", layNum2(Math.max(0.5, box.w - fr.width)));
+        r.setAttribute("height", layNum2(Math.max(0.5, box.h - fr.width)));
+        if (mask === "rounded")
+          r.setAttribute("rx", layNum2(Math.max(0, 0.12 * Math.min(box.w, box.h) - fr.width / 2)));
+      }
+      r.setAttribute("fill", "none");
+      r.setAttribute("stroke", fr.color);
+      r.setAttribute("stroke-width", String(fr.width));
+      parent.appendChild(r);
+    }
+    if (g) {
+      var b = doc.createElementNS(ns, "rect");
+      b.setAttribute("class", "ps-limg-bar");
+      b.setAttribute("x", layNum2(ox + g.x));
+      b.setAttribute("y", layNum2(oy + g.y));
+      b.setAttribute("width", layNum2(g.w));
+      b.setAttribute("height", layNum2(g.h));
+      b.setAttribute("fill", g.color);
+      parent.appendChild(b);
+      if (g.label) {
+        var t = doc.createElementNS(ns, "text");
+        t.setAttribute("class", "ps-limg-bartext");
+        t.setAttribute("x", layNum2(ox + g.tx));
+        t.setAttribute("y", layNum2(oy + g.ty));
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("fill", g.color);
+        t.setAttribute("font-size", String(g.fs));
+        t.setAttribute("font-family", "sans-serif");
+        t.setAttribute("font-weight", "700");
+        t.textContent = g.text;
+        parent.appendChild(t);
+      }
+    }
+  }
+  // The canvas overlay: an svg over the picture in the item's own units,
+  // scaled WITH the element (no aspect lock) so a live resize, which only
+  // writes the element's size, keeps the bar in proportion until the next
+  // render redraws it exactly.
+  function layImageDecorSvg(item) {
+    var fr = layImageFrame(item), g = layScaleBarGeom(item);
+    if (!fr.width && !g) return null;
+    var ns = "http://www.w3.org/2000/svg";
+    var w = Math.max(1, Number(item.w) || 240);
+    var h = Math.max(1, Number(item.h) || 180);
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "ps-limg-decor");
+    svg.setAttribute("viewBox", "0 0 " + layNum2(w) + " " + layNum2(h));
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    layImageDecorInto(svg, item, 0, 0, fr, g);
+    return svg;
+  }
+  function layImageDecorNode(doc, item) {
+    var fr = layImageFrame(item), g = layScaleBarGeom(item);
+    if (!fr.width && !g) return null;
+    var grp = doc.createElementNS("http://www.w3.org/2000/svg", "g");
+    layImageDecorInto(grp, item, Number(item.x) || 0, Number(item.y) || 0, fr, g);
+    return grp;
+  }
+  function layImageTargets() {
+    var ids = laySelectedIds(), out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var it = layItemById(ids[i]);
+      if (it && it.kind === "image") out.push(it);
+    }
+    return out;
+  }
+  function layScaleBarHint(item) {
+    var px = layImagePx(item), st = layScaleBarStyle(item);
+    if (!(px.w > 0))
+      return "The image's pixel size is unknown, so no bar can be measured.";
+    var out = Math.round(px.w) + " \u00d7 " + Math.round(px.h) + " pixels";
+    if (Number(item.origW) && Number(item.origW) !== Number(item.natW))
+      out += " as imported; the size per pixel refers to those";
+    out += ".";
+    if (!st.show) return out;
+    var g = layScaleBarGeom(item);
+    if (g && g.clipped)
+      out += " The bar would be wider than the picture, so it is held to " +
+        "the picture's width: shorten the bar or check the size per pixel.";
+    else if (g)
+      out += " The bar spans " +
+        String(Math.round(st.length / st.perPixel * 100) / 100) +
+        " image pixels.";
+    return out;
+  }
+  function layImageSyncControls(items) {
+    var item = items[0], i;
+    function agree(read) {
+      for (var k = 1; k < items.length; k++)
+        if (read(items[k]) !== read(items[0])) return false;
+      return true;
+    }
+    var fr = layImageFrame(item);
+    var frMixed = !agree(function (t) { return layImageFrame(t).kind; });
+    var segs = document.querySelectorAll("[data-limg-frame]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !frMixed && segs[i].getAttribute("data-limg-frame") === fr.kind
+          ? "true" : "false");
+    layPaintCustomChip("ps-limg-framecolor", fr.color, false);
+    // The scale bar needs pixels to measure by: an SVG pin or a Notebook
+    // snapshot has none, so the block steps aside for those.
+    var raster = true;
+    for (i = 0; i < items.length; i++)
+      if (!layImageIsRaster(items[i])) raster = false;
+    var sbBlock = el("ps-limg-scalebar");
+    if (sbBlock) sbBlock.style.display = raster ? "" : "none";
+    // Crop and mask, for any source.
+    var mask = layImageCropShape(item), maskMixed = !agree(layImageCropShape);
+    segs = document.querySelectorAll("[data-limg-cropshape]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !maskMixed && segs[i].getAttribute("data-limg-cropshape") === mask ? "true" : "false");
+    var crop = layImageCrop(item) || { l: 0, t: 0, r: 0, b: 0 };
+    var cropIn = document.querySelectorAll("[data-limg-crop]");
+    var insetLocked = layLensIsInset(item);
+    for (i = 0; i < cropIn.length; i++) {
+      cropIn[i].disabled = insetLocked;
+      setTip(cropIn[i], insetLocked ? "Set by the magnifier frame on the picture." : "");
+      if (document.activeElement === cropIn[i]) continue;
+      var side = cropIn[i].getAttribute("data-limg-crop");
+      var same = agree(function (t) { var cc = layImageCrop(t) || { l: 0, t: 0, r: 0, b: 0 }; return cc[side]; });
+      if (!same) { cropIn[i].value = ""; cropIn[i].placeholder = "Mixed"; }
+      else { cropIn[i].value = String(Math.round(crop[side] * 100)); cropIn[i].placeholder = ""; }
+    }
+    // Adjustments, for rasters.
+    var adjBlock = el("ps-limg-adjust");
+    if (adjBlock) adjBlock.style.display = raster ? "" : "none";
+    if (!raster) return;
+    var adj = layImageAdjust(item) || { brightness: 0, contrast: 0, saturation: 0, grayscale: false,
+                                        invert: false, tint: null, clear: null, clearAmount: 15 };
+    function setAdjNum(id, v, read) {
+      var rg = el(id), nm = el(id + "-num");
+      var mixed = !agree(function (t) { var aa = layImageAdjust(t); return aa ? read(aa) : read({ brightness: 0, contrast: 0, saturation: 0, clearAmount: 15 }); });
+      if (rg && document.activeElement !== rg) rg.value = String(v);
+      if (nm && document.activeElement !== nm) {
+        if (mixed) { nm.value = ""; nm.placeholder = "Mixed"; }
+        else { nm.value = String(v); nm.placeholder = ""; }
+      }
+    }
+    setAdjNum("ps-limg-bright", adj.brightness, function (a) { return a.brightness; });
+    setAdjNum("ps-limg-contrast", adj.contrast, function (a) { return a.contrast; });
+    setAdjNum("ps-limg-sat", adj.saturation, function (a) { return a.saturation; });
+    var looks = document.querySelectorAll("[data-limg-look]");
+    for (i = 0; i < looks.length; i++) {
+      var lk = looks[i].getAttribute("data-limg-look");
+      looks[i].setAttribute("aria-pressed", adj[lk] ? "true" : "false");
+    }
+    segs = document.querySelectorAll("[data-limg-tint]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        segs[i].getAttribute("data-limg-tint") === (adj.tint ? "on" : "off") ? "true" : "false");
+    layPaintCustomChip("ps-limg-tintcolor", adj.tint || "#e8c15a", false);
+    var tintChip = el("ps-limg-tintcolor");
+    if (tintChip) tintChip.style.display = adj.tint ? "" : "none";
+    segs = document.querySelectorAll("[data-limg-clear]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        segs[i].getAttribute("data-limg-clear") === (adj.clear || "none") ? "true" : "false");
+    var amtRow = el("ps-limg-clearamt-row");
+    if (amtRow) amtRow.style.display = adj.clear ? "" : "none";
+    setAdjNum("ps-limg-clearamt", adj.clearAmount, function (a) { return a.clearAmount; });
+    var st = layScaleBarStyle(item);
+    var showMixed = !agree(function (t) { return layScaleBarStyle(t).show; });
+    segs = document.querySelectorAll("[data-limg-bar]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !showMixed && segs[i].getAttribute("data-limg-bar") ===
+          (st.show ? "on" : "off") ? "true" : "false");
+    var fields = el("ps-limg-barfields");
+    if (fields) fields.style.display = st.show || showMixed ? "" : "none";
+    layPaintCustomChip("ps-limg-barcolor", st.color, false);
+    function setNum(id, v, mixed) {
+      var n = el(id);
+      if (!n || document.activeElement === n) return;
+      if (mixed) { n.value = ""; n.placeholder = "Mixed"; }
+      else { n.value = String(v); n.placeholder = ""; }
+    }
+    setNum("ps-limg-perpx", st.perPixel,
+      !agree(function (t) { return layScaleBarStyle(t).perPixel; }));
+    setNum("ps-limg-len", st.length,
+      !agree(function (t) { return layScaleBarStyle(t).length; }));
+    var unitSel = el("ps-limg-unit");
+    if (unitSel && document.activeElement !== unitSel) unitSel.value = st.unit;
+    var unitTag = el("ps-limg-len-unit");
+    if (unitTag) unitTag.textContent = LAY_SB_UNITS[st.unit];
+    var cornerMixed = !agree(function (t) { return layScaleBarStyle(t).corner; });
+    segs = document.querySelectorAll("[data-limg-corner]");
+    for (i = 0; i < segs.length; i++)
+      segs[i].setAttribute("aria-pressed",
+        !cornerMixed && segs[i].getAttribute("data-limg-corner") === st.corner
+          ? "true" : "false");
+    var lab = el("ps-limg-barlabel");
+    if (lab) {
+      lab.checked = st.label;
+      lab.indeterminate = !agree(function (t) { return layScaleBarStyle(t).label; });
+    }
+    var hint = el("ps-limg-hint");
+    if (hint) hint.textContent = items.length === 1 ? layScaleBarHint(item) : "";
   }
   // ---- image items (Tier 2, Torry's ruling: ORIGINALS ARE HONORED.
   // No silent downscaling; a genuinely large file gets a disclosure
@@ -26832,7 +33080,10 @@
     img.onerror = fail;
     img.src = src;
   }
-  function layPlaceImage(src, natW, natH, note) {
+  // orig: the pixel size of the file as it came in, when the picture
+  // placed is a smaller copy of it. A scale bar's size per pixel refers
+  // to the camera's pixels, so the original count rides on the item.
+  function layPlaceImage(src, natW, natH, note, orig) {
     var page = layPage();
     var maxW = page.w * 0.45, maxH = page.h * 0.6;
     var scale = Math.min(1, maxW / natW, maxH / natH);
@@ -26845,9 +33096,13 @@
     var h = Math.max(1, Math.round(natH * scale));
     var spot = layPlaceRect(layItems(), page, w, h);
     var grew = spot.needH > page.h;
-    layAddItem({ id: layNewItemId(), kind: "image", src: src,
-                 natW: natW, natH: natH,
-                 x: spot.x, y: spot.y, w: w, h: h }, false, spot.needH);
+    var placed = { id: layNewItemId(), kind: "image", src: src,
+                   natW: natW, natH: natH,
+                   x: spot.x, y: spot.y, w: w, h: h };
+    if (orig && orig.w > 0 && orig.h > 0 && orig.w !== natW) {
+      placed.origW = orig.w; placed.origH = orig.h;
+    }
+    layAddItem(placed, false, spot.needH);
     showToast("Image added" + (note ? " \u00b7 " + note : "") +
       (grew ? " \u00b7 the page grew to fit it \u00b7 drag to place"
             : " \u00b7 drag to place, corner to resize"));
@@ -27106,6 +33361,16 @@
       if (ids.indexOf(items[i].id) !== -1) { items.splice(i, 1); removed++; }
     layDropOrphanGroups();
     layArrowsDetachFrom(ids);
+    // A view loses its frame, its picture or its inset: the rest follows
+    // (the lines always; a frame whose picture or inset went becomes a
+    // plain box).
+    for (var li = items.length - 1; li >= 0; li--) {
+      var lfr = layLensOf(items[li]);
+      if (lfr && (ids.indexOf(lfr.source) !== -1 || ids.indexOf(lfr.inset) !== -1)) {
+        items.splice(li, 1); removed++;
+      }
+    }
+    layLensPrune(items);
     laySetSelection([]);
     persist(); renderLayout();
     if (returnFocus) layFocusViewport();
@@ -27307,7 +33572,10 @@
         ? layItemAccessibleLabel(layItemById(layPrimaryId())) : ""));
   }
   function layMoveSelected(dx, dy, renderNow) {
-    var ids = laySelectedIds(), b = laySelectionBounds(ids), p = layPage();
+    var ids = laySelectedIds().filter(function (id) {
+      var it = layItemById(id); return !(it && it.locked);
+    });
+    var b = laySelectionBounds(ids), p = layPage();
     if (!ids.length || !b) return;
     // The pointer drag snapshots itself at pointer-down (it knows whether the
     // gesture actually moved anything); everything else that lands here is a
@@ -27339,7 +33607,7 @@
     var ids = laySelectedIds();
     if (layUnits(ids).length !== 1) return null;
     var sized = laySizedSelection();
-    return sized.length === 1 ? sized[0] : null;
+    return sized.length === 1 && !sized[0].locked ? sized[0] : null;
   }
   function layResizeSelectedFree(dw, dh) {
     var item = layResizeTarget();
@@ -27425,6 +33693,7 @@
   }
   function layItemMenuItems(id) {
     var out = [
+      { label: "Copy as image", command: "copy-selection-image" },
       { label: "Duplicate", command: "duplicate-selection",
         shortcut: "Cmd/Ctrl+D" },
       { label: "Delete", command: "delete-selection" },
@@ -27478,6 +33747,15 @@
           } });
       })(entry);
     }
+    // The magnified view's entries come after a snapshot's source links:
+    // a pin's first entry stays Open source chart, and a chart snapshot
+    // (an SVG) is not a picture to magnify.
+    if (item && (layLensOf(item) || layLensFrameFor(item.id)))
+      head.push({ label: "Remove the magnified view", key: "lay-unmagnify",
+        action: function () { layRemoveMagnifier(id); } });
+    else if (item && item.kind === "image" && layImageIsRaster(item))
+      head.push({ label: "Magnify a region", key: "lay-magnify",
+        action: function () { layMagnify(id); } });
     if (head.length) out.unshift.apply(out, head.concat(["separator"]));
     return out;
   }
@@ -28327,8 +34605,22 @@
       var item = layItemById(layActiveId());
       if (item) layAnnounce(layItemAccessibleLabel(item) + ", selected.");
     });
+    canvas.addEventListener("pointermove", layDrawPointerMove);
     canvas.addEventListener("pointerdown", function (e) {
       if (e.button !== 0) return;
+      // A drawing in progress owns every press on the canvas.
+      if (LAY_DRAW) { layDrawPointerDown(e); e.preventDefault(); return; }
+      // A path's node handle: drag reshapes, Alt-click removes.
+      var nodeHandle = e.target.closest && e.target.closest('[data-role="lay-path-node"]');
+      if (nodeHandle) {
+        var nodeItemEl = nodeHandle.closest(".ps-litem");
+        var nodeItem = nodeItemEl && layItemById(nodeItemEl.getAttribute("data-item-id"));
+        if (nodeItem && nodeItem.kind === "path") {
+          layPathNodeDragStart(e, nodeItem, Number(nodeHandle.getAttribute("data-idx")));
+          e.preventDefault(); e.stopPropagation();
+          return;
+        }
+      }
       // A press on a mini-bar BUTTON belongs to the button. A press on the
       // bar's own padding does not, and since the sized-item bar moved to the
       // top centre that padding sits in the gutter between two rows, which is
@@ -28362,6 +34654,22 @@
         var add = laySelectedIds(); add.push(id); laySetSelection(add); renderLayout();
       } else if (!layIsSelected(id)) {
         laySetSelection([id]); renderLayout();
+      }
+      var planHandle = layTimelineIsPlanned(item) && e.target.closest &&
+        e.target.closest('[data-role="lay-ev"],[data-role="lay-phase-edge"]');
+      var planDrag = planHandle ? layPlanDragStart(item, planHandle) : null;
+      if (planDrag) {
+        // A mark, or the end of a phase, in hand: it moves in time
+        // (layPlanDrag); the timeline itself stays put.
+        LAY_DRAG = { planDrag: planDrag, timeline: item, ids: [id], primary: item,
+                     origins: [], bounds: laySelectionBounds([id]), resizing: false,
+                     collapseTo: null, sx: e.clientX, sy: e.clientY,
+                     altCopy: false, zoom: layZoom(), moved: false,
+                     before: laySnapState(activeChart()) };
+        document.addEventListener("pointermove", layPointerMove);
+        document.addEventListener("pointerup", layPointerUp);
+        e.preventDefault();
+        return;
       }
       var tickHandle = e.target.closest &&
         e.target.closest('[data-role="lay-tick"]');
@@ -28422,7 +34730,8 @@
                    // A press on a phase band that never travels opens that
                    // band's color (click-to-edit, like the chart's parts).
                    bandHit: (function () {
-                     var bd = e.target.closest && e.target.closest('[data-role="lay-band"]');
+                     var bd = e.target.closest &&
+                       e.target.closest('[data-role="lay-band"],[data-role="lay-phase"]');
                      return bd && item.kind === "timeline" ? Number(bd.getAttribute("data-idx")) : null;
                    })(),
                    zoom: layZoom(), moved: false,
@@ -28436,6 +34745,16 @@
       e.preventDefault();
     });
     canvas.addEventListener("dblclick", function (e) {
+      // The pen finishes on a double-click; a double-click on a drawn line
+      // adds a node where it landed.
+      if (LAY_DRAW && LAY_DRAW.kind === "pen") { layFinishDraw(false, false); return; }
+      var pathEl = e.target.closest ? e.target.closest('.ps-litem[data-kind="path"]') : null;
+      if (pathEl) {
+        var pathItem = layItemById(pathEl.getAttribute("data-item-id"));
+        var pcv = el("ps-lcanvas"), pz = layZoom(), pbox = pcv.getBoundingClientRect();
+        if (pathItem) layPathInsertNode(pathItem, (e.clientX - pbox.left) / pz, (e.clientY - pbox.top) / pz);
+        return;
+      }
       var tlEl = e.target.closest
         ? e.target.closest('.ps-litem[data-kind="timeline"]') : null;
       if (tlEl) {
@@ -28487,7 +34806,9 @@
         return;
       }
       if (canvasFocused && e.key === "Enter") {
-        e.preventDefault(); layFocusSelectionInspector(); return;
+        e.preventDefault();
+        if (LAY_DRAW) { layFinishDraw(false, false); return; }
+        layFocusSelectionInspector(); return;
       }
       if (canvasFocused && (e.key === " " || e.code === "Space")) {
         e.preventDefault(); layToggleActiveSelection(); return;
@@ -28556,6 +34877,13 @@
         e.preventDefault(); layDeleteSelected(); return;
       }
       if (e.key === "Escape") {
+        // A drawing in progress: the pen keeps what it has (two points or
+        // more), the pencil drops its trail.
+        if (LAY_DRAW) {
+          e.preventDefault();
+          layFinishDraw(LAY_DRAW.kind === "pencil", false);
+          return;
+        }
         // A live drag outranks the selection: cancel it and keep the
         // selection, which is what every other cancel in the app does.
         if (layCancelPageEdgeDrag()) { e.preventDefault(); return; }
@@ -28715,6 +35043,7 @@
   function layMarqueeHits(r, canvasBox, z) {
     var items = layItems(), out = [];
     for (var i = 0; i < items.length; i++) {
+      if (items[i].hidden || items[i].locked) continue;
       var b = layMarqueeItemRect(items[i], canvasBox, z);
       if (b.x < r.x + r.w && b.x + b.w > r.x &&
           b.y < r.y + r.h && b.y + b.h > r.y) out.push(items[i].id);
@@ -28941,6 +35270,13 @@
       e.preventDefault();
       return;
     }
+    if (d.planDrag) {
+      layPlanDrag(d, e);
+      layHideGuides();
+      laySyncInspector();
+      e.preventDefault();
+      return;
+    }
     if (d.resizing && laySizedKind(d.primary)) {
       // The grabbed panel follows the pointer exactly, the existing math.
       // Every OTHER selected sized item follows by RATIO, so two same-size
@@ -29034,7 +35370,7 @@
     layHideGuides();
     // An end drag rewrote attachments, not positions: put the whole
     // state back from the press-time snapshot.
-    if ((d.arrowEnd || d.tickDrag != null) && d.before) {
+    if ((d.arrowEnd || d.tickDrag != null || d.planDrag) && d.before) {
       layRestoreState(d.before);
       return true;
     }
@@ -29081,16 +35417,26 @@
       if (h && d.before) {
         h.undo.push({ label: d.arrowEnd ? "attach arrow"
                                : d.tickDrag != null ? "move tick"
+                               : d.planDrag ? (d.planDrag.role === "lay-ev"
+                                               ? "move event" : "resize phase")
                                : d.resizing ? "resize" : "move", state: d.before });
         if (h.undo.length > LAYOUT_HIST_LIMIT) h.undo.shift();
         h.redo.length = 0;
         LAY_COALESCE = null;
       }
       persist(); renderLayout();
+    } else if (d && d.planDrag && d.timeline) {
+      layTimelineSoon(function () {
+        if (layItemById(d.timeline.id)) layTimelineFocusPart(d.timeline, d.planDrag);
+      });
     } else if (d && d.tickDrag != null && d.timeline) {
       layFocusTickRow(d.timeline, d.tickDrag);
     } else if (d && d.bandHit != null && d.primary && d.primary.kind === "timeline") {
-      layOpenBandColor(d.primary, d.bandHit);
+      if (layTimelineIsPlanned(d.primary))
+        layTimelineSoon(function () {
+          if (layItemById(d.primary.id)) layOpenBandColor(d.primary, d.bandHit);
+        });
+      else layOpenBandColor(d.primary, d.bandHit);
     } else if (d && d.collapseTo) {
       // The press kept the multi-selection so a drag could move it; a press
       // that never travelled is a CLICK, and a click on one item means that
@@ -29145,6 +35491,12 @@
       // text does not jump when the field opens.
       ta.style.width = "100%"; ta.style.height = "100%";
       ta.style.textAlign = "center"; ta.style.boxSizing = "border-box";
+      // A shape's text keeps its inset while it is typed, so the words
+      // wrap where they will sit.
+      var editShape = layBoxShape(item);
+      if (editShape !== "rect")
+        ta.style.padding = LAY_BOX_PAD_Y + "px " +
+          layNum2(layShapeInset(editShape, Number(item.w) || 150)) + "px";
     }
     itemEl.removeAttribute("aria-hidden");
     itemEl.innerHTML = "";
@@ -29161,7 +35513,7 @@
       if (done) return;
       done = true;
       if (!cancel) {
-        var value = ta.value;
+        var value = laySymbolize(ta.value);
         if (value.trim() && value !== item.text) {
           laySnapshot("edit text");
           item.text = value;
@@ -30846,6 +37198,7 @@
   }
   function syncLayoutContextInspector() {
     var ids = laySelectedIds(), has = ids.length > 0;
+    layLayersSync();
     el("ps-layout-orientation").value = layPageOrientation();
     el("ps-layout-selection-empty").style.display = has ? "none" : "block";
     el("ps-layout-selection-properties").style.display = has ? "block" : "none";
@@ -30866,6 +37219,43 @@
       }
     }
     var srcInfo = one ? layItemSourceInfo(one) : null;
+    var selItems = laySelectedItemsList();
+    var opRg = el("ps-ctx-lop"), opNm = el("ps-ctx-lop-num");
+    if (opRg && opNm && selItems.length) {
+      var op0 = Math.round(layItemOpacity(selItems[0]) * 100), opMixed = false;
+      for (var opi = 1; opi < selItems.length; opi++)
+        if (Math.round(layItemOpacity(selItems[opi]) * 100) !== op0) opMixed = true;
+      if (document.activeElement !== opRg) opRg.value = String(op0);
+      if (document.activeElement !== opNm) {
+        if (opMixed) { opNm.value = ""; opNm.placeholder = "Mixed"; }
+        else { opNm.value = String(op0); opNm.placeholder = ""; }
+      }
+    }
+    var turnRow = el("ps-ctx-lturn-row"), flipRow = el("ps-ctx-lflip-row");
+    if (turnRow && flipRow) {
+      var turnT = layTurnTargets(), allTurn = selItems.length && turnT.length === selItems.length;
+      var allImg = allTurn && selItems.every(function (it) { return it.kind === "image"; });
+      turnRow.style.display = allTurn ? "" : "none";
+      flipRow.style.display = allImg ? "" : "none";
+      if (allTurn) {
+        var t0 = layItemTurn(turnT[0]), tMixed = false, ti;
+        for (ti = 1; ti < turnT.length; ti++) if (layItemTurn(turnT[ti]) !== t0) tMixed = true;
+        var tRg = el("ps-ctx-lturn"), tNm = el("ps-ctx-lturn-num");
+        if (tRg && document.activeElement !== tRg) tRg.value = String(t0);
+        if (tNm && document.activeElement !== tNm) {
+          if (tMixed) { tNm.value = ""; tNm.placeholder = "Mixed"; }
+          else { tNm.value = String(t0); tNm.placeholder = ""; }
+        }
+      }
+      if (allImg) {
+        var flips = document.querySelectorAll("[data-lflip]");
+        for (ti = 0; ti < flips.length; ti++) {
+          var axis = flips[ti].getAttribute("data-lflip") === "x" ? "flipX" : "flipY", on = true;
+          for (var fi = 0; fi < turnT.length; fi++) if (!turnT[fi][axis]) on = false;
+          flips[ti].setAttribute("aria-pressed", on ? "true" : "false");
+        }
+      }
+    }
     var txtSec = el("ps-layout-text-section");
     if (txtSec) {
       var texts = layTextTargets();
@@ -30896,6 +37286,26 @@
           ? "Arrow (" + arrowTargets.length + " items)" : "Arrow";
       if (arrowTargets.length) layArrowSyncControls(arrowTargets);
     }
+    var imgSec = el("ps-layout-image-section");
+    if (imgSec) {
+      var imgTargets = layImageTargets();
+      imgSec.style.display = imgTargets.length ? "" : "none";
+      var imgTitle = imgSec.querySelector(".ps-inspector-section-title");
+      if (imgTitle)
+        imgTitle.textContent = imgTargets.length > 1
+          ? "Image (" + imgTargets.length + " items)" : "Image";
+      if (imgTargets.length) layImageSyncControls(imgTargets);
+    }
+    var pathSec = el("ps-layout-path-section");
+    if (pathSec) {
+      var pathTargets = layPathTargets();
+      pathSec.style.display = pathTargets.length ? "" : "none";
+      var pathTitle = pathSec.querySelector(".ps-inspector-section-title");
+      if (pathTitle)
+        pathTitle.textContent = pathTargets.length > 1
+          ? "Drawing (" + pathTargets.length + " items)" : "Drawing";
+      if (pathTargets.length) layPathSyncControls(pathTargets);
+    }
     var tlSec = el("ps-layout-timeline-section");
     if (tlSec) {
       var tlTargets = layTimelineTargets();
@@ -30911,7 +37321,8 @@
          ? (srcInfo && srcInfo.name ? "Chart panel - live" : "Chart panel")
          : one.kind === "image"
          ? (srcInfo ? "Notebook snapshot" : "Image item")
-         : one.kind === "box" ? "Box"
+         : one.kind === "box"
+         ? (layBoxShape(one) === "rect" ? "Box" : LAY_SHAPE_LABEL[layBoxShape(one)])
          : one.kind === "timeline" ? "Timeline"
          : one.kind === "arrow" ? "Arrow" : "Text item")
       : ids.length + " selected items";
@@ -35994,6 +42405,8 @@
     el("ps-layout-gallery-cancel").addEventListener("click", hideLayoutGallery);
     el("ps-layout-gallery-create").addEventListener("click",
       createLayoutFromTemplate);
+    wireLayoutWizards();
+    wireLayoutReplace();
     var orientationButtons = document.querySelectorAll(
       "[data-layout-orientation]");
     for (var oi = 0; oi < orientationButtons.length; oi++)
@@ -36160,8 +42573,12 @@
       "separator",
       { label: "Find in data\u2026", shortcut: "Cmd/Ctrl+F", command: "find-data" },
       { label: "Replace in data\u2026", command: "replace-data" },
+      { label: "Find and replace in layout\u2026", command: "layout-replace", layoutOnly: true },
+      { label: "Re-letter panels", command: "layout-reletter", layoutOnly: true },
       "separator",
       { label: "Copy as image", command: "copy-image" },
+      { label: "Copy as SVG", command: "copy-svg" },
+      { label: "Copy selection as image", command: "copy-selection-image", layoutOnly: true },
       "separator",
       { label: "Rename document\u2026", shortcut: "F2", command: "rename-document" },
       { label: "Duplicate document", shortcut: "Cmd/Ctrl+D", command: "duplicate-document" },
@@ -36252,7 +42669,14 @@
       { label: "Image\u2026", command: "insert-image", layoutOnly: true },
       { label: "Box", command: "insert-box", layoutOnly: true },
       { label: "Arrow", command: "insert-arrow", layoutOnly: true },
-      { label: "Timeline", command: "insert-timeline", layoutOnly: true }
+      { label: "Shape", command: "insert-shape", layoutOnly: true },
+      { label: "Timeline", command: "insert-timeline", layoutOnly: true },
+      { label: "Diagram wizards\u2026", command: "insert-wizard", layoutOnly: true },
+      { label: "Diagram from text\u2026", command: "insert-diagram", layoutOnly: true },
+      { label: "Legend from the figure", command: "insert-legend", layoutOnly: true },
+      { label: "Magnified view", command: "insert-magnify", layoutOnly: true },
+      { label: "Pen", command: "insert-pen", layoutOnly: true },
+      { label: "Pencil", command: "insert-pencil", layoutOnly: true }
     ],
     // Punch list 3 and 4. Which graph?, Check graph, Glossary and Label parts
     // were reachable only through one unlabelled 29px "?" inside the engine
@@ -36382,6 +42806,9 @@
     if (item && item.command === "copy-image")
       return appWorkspace() === "layout"
         ? "Copy layout as image" : "Copy chart as image";
+    if (item && item.command === "copy-svg")
+      return appWorkspace() === "layout"
+        ? "Copy layout as SVG" : "Copy chart as SVG";
     if (item && item.command === "export") {
       var ws = appWorkspace();
       return ws === "data" ? "Export data as CSV\u2026"
@@ -36998,6 +43425,14 @@
       return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
         !!(navigator.clipboard && navigator.clipboard.write &&
            typeof window.ClipboardItem !== "undefined");
+    if (command === "copy-svg")
+      return appWorkspace() !== "data" && !!workspaceDocument(appWorkspace()) &&
+        !!(navigator.clipboard && (navigator.clipboard.write || navigator.clipboard.writeText));
+    if (command === "copy-selection-image")
+      return appWorkspace() === "layout" && isLayoutTab(activeChart()) &&
+        laySelectedIds().length > 0 &&
+        !!(navigator.clipboard && navigator.clipboard.write &&
+           typeof window.ClipboardItem !== "undefined");
     if (command === "rename-document" || command === "duplicate-document")
       return !!doc;
     if (command === "delete-document")
@@ -37105,6 +43540,15 @@
       return appWorkspace() === "data"
         ? "Open a chart or layout to copy it as an image"
         : copyImageBlockedReason();
+    if (command === "copy-svg")
+      return appWorkspace() === "data"
+        ? "Open a chart or layout to copy it as SVG"
+        : "This browser does not offer clipboard writing - use Export instead.";
+    if (command === "copy-selection-image")
+      return appWorkspace() !== "layout" || !isLayoutTab(activeChart())
+        ? "Open a layout and select something to copy it as an image"
+        : !laySelectedIds().length ? "Select something on the layout first"
+        : copyImageBlockedReason();
     if (command === "rename-document" || command === "duplicate-document")
       return "No document is selected";
     if (command === "delete-document") return "A project must keep at least one document";
@@ -37149,6 +43593,8 @@
     else if (command === "export-data") exportDataCsv();
     else if (command === "export-data-xlsx") exportDataXlsx();
     else if (command === "copy-image") copyActiveAsImage();
+    else if (command === "copy-svg") copyActiveAsSvg();
+    else if (command === "copy-selection-image") layCopySelectionAsImage();
     else if (command === "undo" || command === "redo") {
       var back = command === "undo", scope = undoScope();
       if (scope === "data") { if (back) dataUndo(); else dataRedo(); }
@@ -37182,7 +43628,16 @@
     else if (command === "insert-image") el("ps-laddimage").click();
     else if (command === "insert-box") layAddBox();
     else if (command === "insert-arrow") layAddArrow();
+    else if (command === "insert-shape") layAddShape("ellipse");
+    else if (command === "insert-legend") layLegendFromFigure();
+    else if (command === "insert-magnify") layMagnifySelected();
+    else if (command === "insert-pen") layStartDraw("pen");
+    else if (command === "insert-pencil") layStartDraw("pencil");
+    else if (command === "layout-reletter") layReletterPanels();
+    else if (command === "layout-replace") showLayoutReplace();
     else if (command === "insert-timeline") layAddTimeline();
+    else if (command === "insert-wizard") showLayoutWizards();
+    else if (command === "insert-diagram") showLayoutWizards("diagram");
     else if (command === "command-palette") showCommandPalette();
     else if (command === "layout-add-chart") el("ps-laddchart").click();
     else if (command === "layout-add-text") el("ps-laddtext").click();
@@ -39965,7 +46420,8 @@
         // gesture the Notebook pages have, placing the LIVE panel.
         var sendChartId = (activeChart() || {}).id;
         items = [
-          { label: "Copy as image", command: "copy-image" }
+          { label: "Copy as image", command: "copy-image" },
+          { label: "Copy as SVG", command: "copy-svg" }
         ].concat(pinItems, [
           { label: "Send to layout\u2026", key: "chart-send",
             action: function () {
@@ -40377,6 +46833,15 @@
         return exportBlobFor(format || "svg", source, dpi || 300);
       });
     },
+    exportLayoutsPdf: exportAllLayoutsPdf,
+    copyActiveAsSvg: copyActiveAsSvg,
+    copySelectionAsImage: layCopySelectionAsImage,
+    layStartDraw: layStartDraw,
+    layFinishDraw: layFinishDraw,
+    layMagnify: layMagnify,
+    layRemoveMagnifier: layRemoveMagnifier,
+    // A timeline that keeps its table: the table reopened.
+    editTimelineTable: function (id) { showLayoutWizards("timeline", id); },
     render: render
   };
 
